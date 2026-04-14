@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "Tu Changa",
+    "slug": "tuchanga-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/brand/app-icon-expo-go.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/brand/logo-tu-changa-app-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#EBEBEB"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Tu Changa usa tu ubicación para mostrarte profesionales cuyo radio de cobertura te alcanza."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/brand/app-icon-expo-go.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/brand/app-icon-expo-go.png"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Tu Changa necesita acceso a tus fotos para publicar trabajos realizados."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Tu Changa usa tu ubicación para mostrarte profesionales cuyo radio de cobertura te alcanza."
+        }
+      ]
+    ]
+  }
+}

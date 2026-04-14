@@ -1,0 +1,135 @@
+{
+  "version": "1.0",
+  "idioma": "es",
+  "categorias": [
+    {
+      "slug": "hogar-mantenimiento",
+      "nombre": "Hogar y mantenimiento",
+      "orden_popularidad": 1,
+      "servicios": [
+        { "slug": "aire-acondicionado-climatizacion", "nombre": "Aire acondicionado y climatización", "keywords": ["split", "frío", "calor", "instalación aire", "recarga de gas", "mantenimiento aire", "climatización"] },
+        { "slug": "arreglos-generales-hogar", "nombre": "Arreglos generales del hogar (handyman)", "keywords": ["handyman", "chapuzas", "pequeños arreglos", "bisagras", "estantes", "colgar cuadros", "reparaciones menores"] },
+        { "slug": "cerrajeria", "nombre": "Cerrajería", "keywords": ["llave", "cerradura", "apertura", "copiado de llave", "cambio de combinación", "seguridad hogar"] },
+        { "slug": "control-plagas-fumigacion", "nombre": "Control de plagas y fumigación", "keywords": ["fumigación", "cucarachas", "hormigas", "roedores", "desinfección", "pulgas", "chinches"] },
+        { "slug": "destapaciones", "nombre": "Destapaciones", "keywords": ["cañerías", "cloaca", "inodoro", "desagüe", "destapar", "pérdida de agua"] },
+        { "slug": "jardineria-poda", "nombre": "Jardinería y poda", "keywords": ["pasto", "plantas", "poda", "riego", "diseño de jardín", "césped", "paisajismo"] },
+        { "slug": "limpieza-posobra", "nombre": "Limpieza posobra", "keywords": ["pos obra", "polvo construcción", "pintura recién", "limpieza fina obra"] },
+        { "slug": "limpieza-residencial-profunda", "nombre": "Limpieza residencial y profunda", "keywords": ["limpieza de casas", "departamento", "orden", "sanitización", "limpieza profunda", "doméstica"] },
+        { "slug": "mantenimiento-electrodomesticos", "nombre": "Mantenimiento de electrodomésticos", "keywords": ["heladera", "lavarropas", "lavavajillas", "horno", "reparación electrodomésticos"] },
+        { "slug": "mantenimiento-piscinas", "nombre": "Mantenimiento de piscinas", "keywords": ["pileta", "piscina", "cloro", "PH", "limpieza de fondo", "filtro"] },
+        { "slug": "montaje-muebles", "nombre": "Montaje de muebles", "keywords": ["armado de muebles", "IKEA", "placard", "cama", "rack TV"] },
+        { "slug": "persianas-cortinas", "nombre": "Persianas y cortinas", "keywords": ["persiana", "enrollable", "blackout", "cortina", "motorización"] },
+        { "slug": "pulido-tratamiento-pisos", "nombre": "Pulido y tratamiento de pisos", "keywords": ["pulido", "mármol", "madera", "vitrificado", "hidrolaqueado"] },
+        { "slug": "tanques-agua", "nombre": "Tanques de agua (limpieza y mantenimiento)", "keywords": ["tanque", "cisterna", "tinaco", "limpieza de tanque", "desinfección agua"] }
+      ]
+    },
+    {
+      "slug": "construccion-oficios",
+      "nombre": "Construcción y oficios",
+      "orden_popularidad": 2,
+      "servicios": [
+        { "slug": "albanileria", "nombre": "Albañilería", "keywords": ["muro", "ladrillo", "revoque", "mezcla", "refacción mampostería"] },
+        { "slug": "carpinteria", "nombre": "Carpintería", "keywords": ["madera", "muebles a medida", "deck", "machimbre", "melamina"] },
+        { "slug": "colocacion-ceramica-porcelanato", "nombre": "Colocación de cerámica y porcelanato", "keywords": ["baldosa", "pegado", "nivelación", "zócalo", "porcelanato"] },
+        { "slug": "drywall-pladur-cielorrasos", "nombre": "Drywall, pladur y cielorrasos", "keywords": ["pladur", "yeso", "tabique", "falso techo", "cielorraso"] },
+        { "slug": "electricidad", "nombre": "Electricidad", "keywords": ["luz", "cables", "tomas", "corto circuito", "tablero", "iluminación", "electricista", "termomagneticas"] },
+        { "slug": "gasista", "nombre": "Gasista", "keywords": ["gas", "artefacto", "corte de gas", "instalación gas", "escape", "calefón"] },
+        { "slug": "herreria-soldadura", "nombre": "Herrería y soldadura", "keywords": ["reja", "portón", "soldadura", "hierro", "estructura metálica", "herrero"] },
+        { "slug": "impermeabilizacion", "nombre": "Impermeabilización", "keywords": ["techo", "filtración", "membrana", "gotera", "humedad techo"] },
+        { "slug": "pintura-obras", "nombre": "Pintura (obras)", "keywords": ["pintor", "látex", "exterior", "interior", "enduido", "revestimiento"] },
+        { "slug": "plomeria", "nombre": "Plomería", "keywords": ["plomero", "agua", "caño", "cañerías", "baño", "gotera", "grifería", "inodoro"] },
+        { "slug": "techista-cubiertas", "nombre": "Techista y cubiertas", "keywords": ["techo", "tejas", "chapa", "goteras", "canalón", "cubierta"] },
+        { "slug": "vidrieria", "nombre": "Vidriería", "keywords": ["vidrio", "ventanal", "DVH", "espejo", "cerramiento vidrio"] }
+      ]
+    },
+    {
+      "slug": "tecnologia-informatica",
+      "nombre": "Tecnología e informática",
+      "orden_popularidad": 3,
+      "servicios": [
+        { "slug": "armado-actualizacion-pc", "nombre": "Armado y actualización de PC", "keywords": ["PC", "ensamble", "RAM", "GPU", "gabinete", "upgrade"] },
+        { "slug": "camaras-seguridad-cctv", "nombre": "Cámaras de seguridad y videovigilancia", "keywords": ["CCTV", "cámara IP", "DVR", "NVR", "domo", "videovigilancia"] },
+        { "slug": "domotica-hogar-inteligente", "nombre": "Domótica y hogar inteligente", "keywords": ["domótica", "Alexa", "Google Home", "automatización", "enchufe inteligente", "luces smart"] },
+        { "slug": "instalacion-audio-tv-streaming", "nombre": "Instalación de audio, TV y streaming", "keywords": ["smart TV", "soundbar", "home theater", "Chromecast", "Apple TV"] },
+        { "slug": "recuperacion-datos", "nombre": "Recuperación de datos", "keywords": ["disco rígido", "SSD", "backup", "archivos borrados", "clonado"] },
+        { "slug": "redes-wifi-cableado", "nombre": "Redes, Wi‑Fi y cableado estructurado", "keywords": ["router", "WiFi", "access point", "RJ45", "cableado", "mesh"] },
+        { "slug": "reparacion-celulares-tablets", "nombre": "Reparación de celulares y tablets", "keywords": ["celular", "pantalla", "batería", "pin de carga", "tablet", "módulo"] },
+        { "slug": "reparacion-notebooks-pc", "nombre": "Reparación de notebooks y computadoras", "keywords": ["notebook", "no enciende", "ventilador", "teclado", "pantalla notebook", "arreglo de PC"] },
+        { "slug": "soporte-tecnico-informatico", "nombre": "Soporte técnico informático", "keywords": ["virus", "Windows", "Mac", "Office", "soporte remoto", "formateo"] }
+      ]
+    },
+    {
+      "slug": "belleza-estetica",
+      "nombre": "Belleza y estética",
+      "orden_popularidad": 4,
+      "servicios": [
+        { "slug": "barberia-domicilio", "nombre": "Barbería y barbero a domicilio", "keywords": ["barbero", "corte masculino", "barba", "degradé", "afeitado"] },
+        { "slug": "corte-color-peinado", "nombre": "Corte, color y peinado (peluquería)", "keywords": ["peluquería", "tintura", "mechas", "brushing", "alisado"] },
+        { "slug": "depilacion", "nombre": "Depilación", "keywords": ["cera", "láser a domicilio", "axilas", "piernas", "depilación definitiva"] },
+        { "slug": "maquillaje-profesional", "nombre": "Maquillaje profesional", "keywords": ["maquilladora", "novias", "maquillaje social", "evento"] },
+        { "slug": "manicuria-pedicuria", "nombre": "Manicuría y pedicuría", "keywords": ["uñas", "esmaltado semipermanente", "nail art", "pedicuría"] },
+        { "slug": "masajes-terapias-manuales", "nombre": "Masajes y terapias manuales", "keywords": ["masajista", "relajante", "descontracturante", "deportivo", "reflexología", "masajista"] },
+        { "slug": "micropigmentacion-cejas", "nombre": "Micropigmentación y diseño de cejas", "keywords": ["microblading", "cejas pelo a pelo", "labios", "delineado"] },
+        { "slug": "tratamientos-capilares", "nombre": "Tratamientos capilares", "keywords": ["keratina", "botox capilar", "nutrición capilar", "reparación pelo"] },
+        { "slug": "tratamientos-faciales-corporales", "nombre": "Tratamientos faciales y corporales", "keywords": ["limpieza de cutis", "peeling", "corporal", "spa a domicilio"] }
+      ]
+    },
+    {
+      "slug": "transporte-logistica",
+      "nombre": "Transporte y logística",
+      "orden_popularidad": 5,
+      "servicios": [
+        { "slug": "cadeteria-mensajeria", "nombre": "Cadetería y mensajería", "keywords": ["cadete", "mensajería", "paquete", "documento", "envío express"] },
+        { "slug": "chofer-privado-traslados", "nombre": "Chofer privado y traslados", "keywords": ["chofer", "traslado", "aeropuerto", "remis", "auto privado"] },
+        { "slug": "fletes-mini-fletes", "nombre": "Fletes y mini fletes", "keywords": ["flete", "mini flete", "camioneta", "carga chica", "bultos"] },
+        { "slug": "mudanzas", "nombre": "Mudanzas", "keywords": ["mudanza", "embalaje", "furgón", "ascensor", "traslado hogar"] },
+        { "slug": "traslado-mascotas", "nombre": "Traslado de mascotas", "keywords": ["mascota", "traslado perro", "jaula", "veterinario", "viaje con mascota"] },
+        { "slug": "transporte-carga-liviana", "nombre": "Transporte de carga liviana", "keywords": ["carga liviana", "furgón", "reparto", "mercadería", "logística urbana"] }
+      ]
+    },
+    {
+      "slug": "mascotas",
+      "nombre": "Mascotas",
+      "orden_popularidad": 6,
+      "servicios": [
+        { "slug": "adiestramiento-canino", "nombre": "Adiestramiento canino", "keywords": ["adiestrador", "educación canina", "obediencia", "conducta", "perro"] },
+        { "slug": "cuidado-mascotas-pet-sitting", "nombre": "Cuidado de mascotas (pet sitting)", "keywords": ["pet sitting", "cuidador de mascotas", "guardería hogar", "vacaciones"] },
+        { "slug": "paseo-perros", "nombre": "Paseo de perros", "keywords": ["paseador", "paseo de perro", "salidas", "ejercicio canino", "paseador de perros"] },
+        { "slug": "peluqueria-canina", "nombre": "Peluquería canina (grooming)", "keywords": ["grooming", "baño de perro", "corte de pelo mascota", "uñas mascota"] },
+        { "slug": "veterinario-domicilio", "nombre": "Veterinario a domicilio", "keywords": ["veterinario", "consulta a domicilio", "vacunas", "urgencias leves", "gato"] }
+      ]
+    },
+    {
+      "slug": "educacion-capacitacion",
+      "nombre": "Educación y capacitación",
+      "orden_popularidad": 7,
+      "servicios": [
+        { "slug": "apoyo-escolar-nivelacion", "nombre": "Apoyo escolar y nivelación", "keywords": ["apoyo escolar", "tareas", "primaria", "secundaria", "refuerzo", "profesor particular"] },
+        { "slug": "clases-arte-manualidades", "nombre": "Clases de arte y manualidades", "keywords": ["arte", "dibujo", "pintura", "manualidades", "taller creativo"] },
+        { "slug": "clases-cocina", "nombre": "Clases de cocina", "keywords": ["cocina", "pastelería", "pan", "comidas caseras", "chef a domicilio clase"] },
+        { "slug": "clases-idiomas", "nombre": "Clases de idiomas", "keywords": ["inglés", "portugués", "idiomas", "conversación", "profesor idiomas", "traductor"] },
+        { "slug": "clases-musica", "nombre": "Clases de música", "keywords": ["guitarra", "piano", "canto", "batería", "profesor música"] },
+        { "slug": "educacion-fisica-personal-trainer", "nombre": "Educación física y personal trainer", "keywords": ["personal trainer", "entrenador", "gimnasio a domicilio", "plan de entrenamiento", "fitness"] },
+        { "slug": "informatica-adultos-mayores", "nombre": "Informática para adultos mayores", "keywords": ["celular para abuelos", "WhatsApp", "Zoom", "mail", "internet básico"] },
+        { "slug": "preparacion-examenes-ingresos", "nombre": "Preparación de exámenes e ingresos", "keywords": ["ingreso universitario", "CBC", "examen ingreso", "preparación test"] },
+        { "slug": "tutorias-universitarias", "nombre": "Tutorías universitarias", "keywords": ["álgebra", "física", "análisis", "programación", "universidad"] }
+      ]
+    },
+    {
+      "slug": "eventos-entretenimiento",
+      "nombre": "Eventos y entretenimiento",
+      "orden_popularidad": 8,
+      "servicios": [
+        { "slug": "bartender-cocteleria", "nombre": "Bartender y coctelería", "keywords": ["bartender", "tragos", "barra libre", "coctelería", "evento"] },
+        { "slug": "catering-banqueteria", "nombre": "Catering y banquetería", "keywords": ["catering", "banquetería", "lunch", "coffee break", "comida evento"] },
+        { "slug": "decoracion-eventos", "nombre": "Decoración de eventos", "keywords": ["decoración", "globos", "mesa dulce", "ambientación", "cumpleaños"] },
+        { "slug": "dj-sonido", "nombre": "DJ y sonido", "keywords": ["DJ", "sonido", "parlantes", "micrófono", "fiesta"] },
+        { "slug": "fotografia-eventos", "nombre": "Fotografía de eventos", "keywords": ["fotógrafo", "casamiento", "cumpleaños 15", "corporativo", "fotografía"] },
+        { "slug": "mozos-servicio-sala", "nombre": "Mozos y servicio de sala", "keywords": ["mozos", "servicio", "catering", "montaje mesas", "copas"] },
+        { "slug": "organizacion-integral-eventos", "nombre": "Organización integral de eventos", "keywords": ["wedding planner", "organizador de eventos", "productor", "logística evento"] },
+        { "slug": "shows-infantiles-animacion", "nombre": "Shows infantiles y animación", "keywords": ["animación infantil", "magia", "personajes", "cumpleaños niños"] },
+        { "slug": "video-streaming-eventos", "nombre": "Video y streaming de eventos", "keywords": ["video evento", "streaming", "vivo", "multicámara", "videographer", "editor de video"] }
+      ]
+    }
+  ]
+}
