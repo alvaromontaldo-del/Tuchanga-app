@@ -9,6 +9,10 @@ export type FeedPost = {
   workerFirstName: string;
   workerAvatarUrl: string;
   trade: string;
+  /** Promedio de reseñas (1–5); si no hay dato, no se muestra en la tarjeta */
+  workerRatingAverage?: number;
+  /** Cantidad de reseñas del profesional (opcional; útil para UI consistente) */
+  workerReviewCount?: number;
   /** Hasta 3 fotos por publicación */
   workImageUrls: string[];
   description: string;
@@ -39,6 +43,8 @@ export type WorkerTradeEntry = {
   title: string;
   description: string;
   yearsExperience: number;
+  /** Hasta 5 fotos del oficio (bucket job-photos). */
+  photoUrls?: string[];
 };
 
 export type WorkerPublicProfile = {
@@ -48,6 +54,8 @@ export type WorkerPublicProfile = {
   trade: string;
   avatarUrl: string;
   bio: string;
+  /** YYYY-MM-DD (opcional) */
+  birthDate?: string;
   /** Promedio de calificación entre 1 y 5 */
   ratingAverage: number;
   /** Cantidad de reseñas que promedian la calificación */

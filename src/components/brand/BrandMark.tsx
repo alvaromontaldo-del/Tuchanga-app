@@ -1,7 +1,7 @@
 import { Image, type ImageStyle, type StyleProp, useWindowDimensions } from 'react-native';
 
 /** Logo horizontal oficial (PNG con wordmark). */
-export const brandLogoHorizontal = require('../../../assets/brand/logo-official-horizontal.png');
+export const brandLogoHorizontal = require('../../../assets/brand/logo-yachanga-v22_bold_tracking1.png');
 
 /** Ratio ancho / alto del arte en `logo-official-horizontal.png`. */
 export const BRAND_HORIZONTAL_ASPECT = 1024 / 431;

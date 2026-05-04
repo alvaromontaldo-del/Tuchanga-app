@@ -5,7 +5,6 @@ import { FeedStack } from './FeedStack';
 import { MainTabBar } from './MainTabBar';
 import { MessagesStack } from './MessagesStack';
 import { PublishTabPlaceholder } from './PublishTabPlaceholder';
-import { SearchStack } from './SearchStack';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
@@ -15,6 +14,7 @@ export function MainTabNavigator() {
       tabBar={(props) => <MainTabBar {...props} />}
       screenOptions={{
         headerShown: false,
+        tabBarHideOnKeyboard: true,
       }}
     >
       <Tab.Screen
@@ -22,13 +22,6 @@ export function MainTabNavigator() {
         component={FeedStack}
         options={{
           title: 'Inicio',
-        }}
-      />
-      <Tab.Screen
-        name="Buscar"
-        component={SearchStack}
-        options={{
-          title: 'Buscar',
         }}
       />
       <Tab.Screen

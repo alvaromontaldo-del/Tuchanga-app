@@ -3,33 +3,33 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, spacing } from '../../constants/theme';
 
 type Props = {
-  /** Promedio entre 1 y 5 */
-  value: number;
-  reviewCount: number;
-  emptyLabel?: string;
+  /** Promedio entre 0 y 5 */
+  score?: number | null | undefined;
+  reviewCount?: number | null | undefined;
+  /** Tamaño del icono de estrella */
+  size?: number;
+  /** Tamaño del texto (score y conteo). Si se omite, se calcula según `size`. */
+  textSize?: number;
   /** Al tocar el bloque de calificación / reseñas (solo si hay reseñas) */
   onPressReviews?: () => void;
 };
 
 /**
- * Estrellas 1–5 (medias cuando hay decimal) y cantidad de reseñas.
+ * Rating normalizado: [Estrellas] [Promedio] ([Cantidad]).
+ * Si no hay reseñas, muestra estrellas vacías y "(0)".
  */
 export function StarRating({
-  value,
+  score,
   reviewCount,
-  emptyLabel = 'Sin calificaciones aún',
+  size = 14,
+  textSize,
   onPressReviews,
 }: Props) {
-  const clamped = Math.min(5, Math.max(0, value));
+  const safeScore = typeof score === 'number' && !Number.isNaN(score) ? score : 0;
+  const safeCount = typeof reviewCount === 'number' && Number.isFinite(reviewCount) ? reviewCount : 0;
+  const clamped = Math.min(5, Math.max(0, safeScore));
 
-  if (reviewCount <= 0 || clamped <= 0) {
-    return (
-      <View style={styles.center}>
-        <Text style={styles.emptyText}>{emptyLabel}</Text>
-      </View>
-    );
-  }
-
+  const hasReviews = safeCount > 0;
   const stars: ('full' | 'half' | 'empty')[] = [];
   for (let i = 1; i <= 5; i++) {
     if (clamped >= i) {
@@ -41,59 +41,49 @@ export function StarRating({
     }
   }
 
-  const tappable = Boolean(onPressReviews) && reviewCount > 0;
+  const tappable = Boolean(onPressReviews) && hasReviews;
+  const countText = `(${safeCount})`;
+  const resolvedTextSize = Math.max(11, Math.floor(Number(textSize ?? Math.max(12, size - 1)) || 12));
+
+  const Content = (
+    <View style={styles.row}>
+      {stars.map((kind, index) => (
+        <Ionicons
+          key={index}
+          name={kind === 'full' ? 'star' : kind === 'half' ? 'star-half' : 'star-outline'}
+          size={size}
+          color={kind === 'empty' ? colors.textSecondary : '#FBBF24'}
+          style={styles.star}
+        />
+      ))}
+      <Text style={[styles.score, { fontSize: resolvedTextSize }]}>{clamped.toFixed(1)}</Text>
+      <Text style={[styles.count, { fontSize: resolvedTextSize }]}>{countText}</Text>
+    </View>
+  );
+
+  if (!tappable) {
+    return <View style={styles.wrap}>{Content}</View>;
+  }
 
   return (
-    <View style={styles.wrap}>
-      <View style={styles.row}>
-        {stars.map((kind, index) => (
-          <Ionicons
-            key={index}
-            name={
-              kind === 'full'
-                ? 'star'
-                : kind === 'half'
-                  ? 'star-half'
-                  : 'star-outline'
-            }
-            size={22}
-            color={kind === 'empty' ? '#4B5563' : '#FBBF24'}
-            style={styles.star}
-          />
-        ))}
-        <Text style={styles.score}>{clamped.toFixed(1)}</Text>
-      </View>
-      {tappable ? (
-        <Pressable
-          onPress={onPressReviews}
-          style={({ pressed }) => [pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Ver reseñas de clientes"
-        >
-          <Text style={[styles.reviews, styles.reviewsLink]}>
-            {reviewCount} {reviewCount === 1 ? 'reseña' : 'reseñas'}
-          </Text>
-        </Pressable>
-      ) : (
-        <Text style={styles.reviews}>
-          {reviewCount} {reviewCount === 1 ? 'reseña' : 'reseñas'}
-        </Text>
-      )}
-    </View>
+    <Pressable
+      onPress={onPressReviews}
+      style={({ pressed }) => [styles.wrap, pressed && styles.pressed]}
+      accessibilityRole="button"
+      accessibilityLabel="Ver reseñas de clientes"
+    >
+      {Content}
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: {
     alignItems: 'center',
-    marginTop: spacing.sm,
+    marginTop: spacing.xs,
   },
   pressed: {
     opacity: 0.75,
-  },
-  center: {
-    alignItems: 'center',
-    marginTop: spacing.sm,
   },
   row: {
     flexDirection: 'row',
@@ -105,24 +95,13 @@ const styles = StyleSheet.create({
     marginHorizontal: 2,
   },
   score: {
-    marginLeft: spacing.sm,
-    fontSize: 18,
+    marginLeft: spacing.xs,
     fontWeight: '800',
-    color: '#FAFAFA',
+    color: colors.text,
   },
-  reviews: {
-    marginTop: spacing.xs,
-    fontSize: 14,
+  count: {
+    marginLeft: spacing.xs,
     color: colors.textSecondary,
-  },
-  reviewsLink: {
-    textDecorationLine: 'underline',
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  emptyText: {
-    fontSize: 15,
-    color: '#9CA3AF',
-    textAlign: 'center',
+    fontWeight: '800',
   },
 });

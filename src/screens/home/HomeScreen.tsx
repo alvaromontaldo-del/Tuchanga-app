@@ -1,84 +1,274 @@
-import { useNavigation } from '@react-navigation/native';
+import {
+  useFocusEffect,
+  useIsFocused,
+  useNavigation,
+  useRoute,
+  type RouteProp,
+} from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BrandLogoHorizontal } from '../../components/brand/BrandMark';
 import { PostCard } from '../../components/feed/PostCard';
+import { useAppToast } from '../../components/toast/toast';
 import { colors, spacing } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useFeed } from '../../context/FeedContext';
 import type { FeedStackParamList } from '../../navigation/mainTypes';
 import { openAuthModal } from '../../navigation/openAuthModal';
+import { RubroMultiSelectModal } from '../../components/search/RubroMultiSelectModal';
+import { isMessagingAvailable } from '../../config/api';
+import { isSupabaseConfigured } from '../../config/supabase';
+import { openOrCreateChat } from '../../services/messaging';
+import { deletePostInSupabase, hidePostInSupabase } from '../../services/supabasePosts';
+import { fetchActiveTradeNamesFromSupabase } from '../../services/workerTradesSupabase';
+import { SearchHeaderBar } from '../../components/search/SearchHeaderBar';
 
 type Nav = NativeStackNavigationProp<FeedStackParamList>;
+type HomeRoute = RouteProp<FeedStackParamList, 'Home'>;
 
 /**
  * Feed principal: prioriza el contenido; cuenta y modo trabajador viven en Perfil.
  */
 export function HomeScreen() {
-  const { width: windowWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
-  const homeLogoMaxWidth = Math.min(windowWidth - spacing.lg * 2 - 120, 280);
-  const { posts, toggleLike } = useFeed();
+  const route = useRoute<HomeRoute>();
+  const toast = useAppToast();
+  const { posts, toggleLike, refresh, removePostLocal } = useFeed();
   const { user, flashMessage, setFlashMessage } = useAuth();
+  const [refreshing, setRefreshing] = useState(false);
+  const [query, setQuery] = useState('');
+  const isFocusedScreen = useIsFocused();
+  const navLockRef = useRef(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [allowedTrades, setAllowedTrades] = useState<string[]>([]);
+  const [allowedLoading, setAllowedLoading] = useState(false);
+
+  const [headerHeight, setHeaderHeight] = useState(120);
+  const headerTranslateY = useRef(new Animated.Value(0)).current;
+  const lastScrollYRef = useRef(0);
+  const headerHiddenRef = useRef(false);
+  const scrollRef = useRef<ScrollView | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      // UX pedida: al volver a Home, no persisten filtros/labels del buscador.
+      setQuery('');
+      setSelectedCategories([]);
+      lastScrollYRef.current = 0;
+      headerHiddenRef.current = false;
+      headerTranslateY.setValue(0);
+    }, [headerTranslateY]),
+  );
+
+  const onHeaderLayout = useCallback((h: number) => {
+    const next = Math.max(88, Math.round(h));
+    setHeaderHeight((prev) => (prev === next ? prev : next));
+  }, []);
+
+  const onFeedScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const y = e.nativeEvent.contentOffset.y;
+      const dy = y - lastScrollYRef.current;
+      lastScrollYRef.current = y;
+
+      const H = headerHeight;
+      if (H <= 0) return;
+
+      let hidden = headerHiddenRef.current;
+
+      // Cerca del tope: siempre mostrar header (evita “huecos” raros al overscroll).
+      if (y <= 8) {
+        hidden = false;
+      } else if (dy > 2 && y > 24) {
+        // Scroll hacia abajo: ocultar (umbral bajo para no “pelear” con el rebote).
+        hidden = true;
+      } else if (dy < -2) {
+        // Scroll hacia arriba: mostrar
+        hidden = false;
+      }
+
+      const next = hidden ? -H : 0;
+      if (headerHiddenRef.current !== hidden) {
+        headerHiddenRef.current = hidden;
+        headerTranslateY.setValue(next);
+      }
+    },
+    [headerHeight, headerTranslateY],
+  );
+
+  useEffect(() => {
+    // Si cambia el alto real del header (p.ej. aparece/desaparece el chip), mantenemos el offset coherente.
+    const H = headerHeight;
+    if (H <= 0) return;
+    headerTranslateY.setValue(headerHiddenRef.current ? -H : 0);
+  }, [headerHeight, headerTranslateY]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    let cancelled = false;
+    setAllowedLoading(true);
+    void fetchActiveTradeNamesFromSupabase()
+      .then((names) => {
+        if (!cancelled) setAllowedTrades(names);
+      })
+      .catch(() => {
+        // silencio: si falla, mostramos catálogo completo (mejor que bloquear).
+      })
+      .finally(() => {
+        if (!cancelled) setAllowedLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const onRefreshFeed = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refresh]);
+
+  const scrollToTopAndRefresh = useCallback(() => {
+    lastScrollYRef.current = 0;
+    headerHiddenRef.current = false;
+    headerTranslateY.setValue(0);
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+    void onRefreshFeed();
+  }, [headerTranslateY, onRefreshFeed]);
+
+  useEffect(() => {
+    const token = route.params?.scrollToTopToken;
+    if (token == null) return;
+    scrollToTopAndRefresh();
+    navigation.setParams({ scrollToTopToken: undefined });
+  }, [route.params?.scrollToTopToken, navigation, scrollToTopAndRefresh]);
 
   useEffect(() => {
     if (!flashMessage) return;
     const t = setTimeout(() => {
-      Alert.alert('Tu Changa', flashMessage);
+      toast.info(flashMessage, 'Tu Changa');
       setFlashMessage(null);
     }, 80);
     return () => clearTimeout(t);
-  }, [flashMessage, setFlashMessage]);
+  }, [flashMessage, setFlashMessage, toast]);
 
   return (
     <View style={styles.safe}>
+      <Animated.View
+        pointerEvents="box-none"
+        style={[
+          styles.smartHeaderWrap,
+          { transform: [{ translateY: headerTranslateY }] },
+        ]}
+        onLayout={(e) => onHeaderLayout(e.nativeEvent.layout.height)}
+      >
+        <SearchHeaderBar
+          value={query}
+          onChangeText={setQuery}
+          onPressFilters={() => setFilterOpen(true)}
+          filtersLabel={allowedLoading ? 'Cargando…' : 'Filtros'}
+          mode="launcher"
+          onPressLauncher={() => {
+            if (!isFocusedScreen) return;
+            if (navLockRef.current) return;
+            navLockRef.current = true;
+            navigation.navigate('SearchWorker', {
+              initialQuery: query.trim(),
+              initialCategories: selectedCategories,
+              openFilters: false,
+            });
+            setTimeout(() => {
+              navLockRef.current = false;
+            }, 500);
+          }}
+          onSubmit={() => {
+            navigation.navigate('SearchWorker', {
+              initialQuery: query.trim(),
+              initialCategories: selectedCategories,
+              openFilters: false,
+            });
+          }}
+          showLogo
+          selectedLabel={selectedCategories[0] ?? null}
+          onClearSelected={() => setSelectedCategories([])}
+        />
+      </Animated.View>
+
+      <RubroMultiSelectModal
+        visible={filterOpen}
+        title="Oficios"
+        initialSelected={selectedCategories}
+        allowedNames={allowedTrades.length ? allowedTrades : undefined}
+        singleSelect
+        onClose={() => setFilterOpen(false)}
+        onApply={(next) => {
+          setSelectedCategories(next);
+          setFilterOpen(false);
+          navigation.navigate('SearchWorker', {
+            initialQuery: query.trim(),
+            initialCategories: next,
+            openFilters: false,
+          });
+        }}
+      />
+
       <ScrollView
+        ref={scrollRef}
         style={styles.scroll}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: insets.top, paddingBottom: insets.bottom + spacing.md },
+          {
+            // El header ya incluye safe area; acá solo compensamos su alto.
+            paddingTop: headerHeight + spacing.sm,
+            paddingBottom: insets.bottom + spacing.md,
+          },
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        scrollEventThrottle={16}
+        onScroll={onFeedScroll}
+        alwaysBounceVertical
+        {...(Platform.OS === 'android' ? { overScrollMode: 'always' as const } : {})}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefreshFeed}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+            progressViewOffset={headerHeight + spacing.sm}
+          />
+        }
       >
         <View style={styles.header}>
-          <View style={styles.headerTopRow}>
-            <View
-              style={styles.brandLockup}
-              accessibilityRole="header"
-              accessibilityLabel="Tu Changa"
+          {!user ? (
+            <Pressable
+              onPress={() => openAuthModal('Login')}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Entrá o registrate"
+              style={styles.guestLinkWrap}
             >
-              <BrandLogoHorizontal
-                variant="hero"
-                maxWidth={homeLogoMaxWidth}
-                style={styles.brandHeroLogo}
-              />
-            </View>
-            {!user ? (
-              <Pressable
-                onPress={() => openAuthModal('Login')}
-                hitSlop={10}
-                accessibilityRole="button"
-                accessibilityLabel="Entrá o registrate"
-                style={styles.guestLinkWrap}
-              >
-                <Text style={styles.guestLink}>Entrá o registrate</Text>
-              </Pressable>
-            ) : (
-              <View style={styles.headerTopSpacer} />
-            )}
-          </View>
+              <Text style={styles.guestLink}>Entrá o registrate</Text>
+            </Pressable>
+          ) : null}
           <Text style={styles.tagline}>Trabajos y recomendaciones</Text>
         </View>
 
@@ -87,8 +277,106 @@ export function HomeScreen() {
             key={post.id}
             post={post}
             onToggleLike={() => toggleLike(post.id)}
-            onOpenProfile={() =>
-              navigation.navigate('WorkerProfile', { workerId: post.workerId })
+            onOpenProfile={() => navigation.navigate('WorkerProfile', { workerId: post.workerId })}
+            showMessageButton={Boolean(user && user.id !== post.workerId)}
+            onOpenMessage={async () => {
+              if (!user) {
+                openAuthModal('Login');
+                return;
+              }
+              if (user.id === post.workerId) return;
+              if (!isMessagingAvailable()) {
+                toast.warning(
+                  'Agregá Supabase o el servidor de mensajería (EXPO_PUBLIC_API_URL) para chatear.',
+                  'Configurar chat',
+                  { durationMs: 5200 },
+                );
+                return;
+              }
+              try {
+                const res = await openOrCreateChat(user.id, {
+                  workerUserId: post.workerId,
+                  workerDisplayName: post.workerFirstName,
+                  primaryTrade: post.trade,
+                });
+                const trade = res.primaryTrade || post.trade;
+                navigation.navigate('ChatConversation', {
+                  conversationId: res.conversationId,
+                  otherDisplayName: res.workerDisplayName,
+                  headerSubtitle: trade ? `Profesional · ${trade}` : 'Profesional',
+                  workerId: post.workerId,
+                });
+              } catch (e) {
+                toast.error(
+                  e instanceof Error ? e.message : 'No se pudo abrir el chat',
+                  'Chat',
+                  { durationMs: 4200 },
+                );
+              }
+            }}
+            onRequestDelete={
+              user?.id === post.workerId
+                ? () => {
+                    Alert.alert(
+                      'Eliminar publicación',
+                      '¿Estás seguro de que deseas eliminar esta publicación permanentemente?',
+                      [
+                        { text: 'Cancelar', style: 'cancel' },
+                        {
+                          text: 'Eliminar',
+                          style: 'destructive',
+                          onPress: () => {
+                            void (async () => {
+                              try {
+                                if (isSupabaseConfigured()) {
+                                  await deletePostInSupabase(post.id);
+                                }
+                                removePostLocal(post.id);
+                                toast.success('Publicación eliminada.', 'Listo');
+                              } catch (e) {
+                                toast.error(
+                                  e instanceof Error ? e.message : 'No se pudo eliminar.',
+                                  'Error',
+                                  { durationMs: 4200 },
+                                );
+                              }
+                            })();
+                          },
+                        },
+                      ],
+                    );
+                  }
+                : undefined
+            }
+            onRequestHide={
+              user && user.id !== post.workerId
+                ? () => {
+                    Alert.alert('Ocultar publicación', 'No la vas a ver más en tu inicio.', [
+                      { text: 'Cancelar', style: 'cancel' },
+                      {
+                        text: 'Ocultar',
+                        onPress: () => {
+                          void (async () => {
+                            try {
+                              if (!user?.id) throw new Error('Necesitás iniciar sesión.');
+                              if (isSupabaseConfigured()) {
+                                await hidePostInSupabase(post.id);
+                              }
+                              removePostLocal(post.id);
+                              toast.success('Listo. No la vas a ver más en tu inicio.', 'Ocultada');
+                            } catch (e) {
+                              toast.error(
+                                e instanceof Error ? e.message : 'No se pudo ocultar.',
+                                'Error',
+                                { durationMs: 4200 },
+                              );
+                            }
+                          })();
+                        },
+                      },
+                    ]);
+                  }
+                : undefined
             }
           />
         ))}
@@ -109,29 +397,16 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
   },
+  smartHeaderWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    zIndex: 30,
+  },
   header: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.md,
-  },
-  headerTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-  },
-  brandLockup: {
-    flex: 1,
-    flexShrink: 1,
-    minWidth: 0,
-    paddingVertical: 2,
-    justifyContent: 'center',
-  },
-  brandHeroLogo: {
-    alignSelf: 'flex-start',
-    maxWidth: '100%',
-  },
-  headerTopSpacer: {
-    flex: 1,
   },
   tagline: {
     fontSize: 13,
@@ -141,7 +416,7 @@ const styles = StyleSheet.create({
   },
   guestLinkWrap: {
     paddingVertical: 2,
-    maxWidth: '38%',
+    alignSelf: 'flex-end',
   },
   guestLink: {
     fontSize: 14,

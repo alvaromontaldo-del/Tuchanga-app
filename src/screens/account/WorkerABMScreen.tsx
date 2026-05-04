@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
+  Image,
   InteractionManager,
   Platform,
   Pressable,
@@ -14,10 +14,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppButton } from '../../components/common/AppButton';
-import { LocationMap } from '../../components/location/LocationMap';
+import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
+import { useAppToast } from '../../components/toast/toast';
 import { TradeSearchModal } from '../../components/search/TradeSearchModal';
+import { ImagePickerComponent } from '../../components/common/ImagePickerComponent';
 import { colors, radii, spacing } from '../../constants/theme';
-import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/nominatim';
 import { isSupabaseConfigured } from '../../config/supabase';
 import {
   type WorkerBaseLocation,
@@ -26,19 +27,32 @@ import {
   useWorkerProfile,
 } from '../../context/WorkerProfileContext';
 import { useAuth } from '../../context/AuthContext';
+import { useFeed } from '../../context/FeedContext';
 import { useUserMode } from '../../context/UserModeContext';
 import type { AccountStackScreenProps } from '../../navigation/accountTypes';
-import { persistWorkerGeoToSupabase, persistWorkerJobsToSupabase } from '../../services/supabaseUser';
-import { getHighAccuracyPosition } from '../../utils/deviceGeolocation';
+import {
+  deactivateProfessionalProfileInSupabase,
+  persistWorkerGeoToSupabase,
+  persistWorkerJobsToSupabase,
+  persistProfessionalDescriptionInSupabase,
+} from '../../services/supabaseUser';
 import { fetchSearchWorkerHitsFromSupabase } from '../../services/searchWorkersSupabase';
+import type { AuthUser } from '../../services/auth';
 
 type Props = AccountStackScreenProps<'WorkerABM'>;
 
-const DEFAULT_LOCATION: WorkerBaseLocation = {
-  address: 'Buenos Aires, Argentina',
-  lat: -34.6037,
-  lng: -58.3816,
-};
+/** Ubicación válida del perfil de cuenta (misma que búsqueda / registro). */
+function profileBaseFromUser(user: AuthUser | null): WorkerBaseLocation | null {
+  const b = user?.baseLocation;
+  if (!b) return null;
+  const addr = b.address?.trim() ?? '';
+  if (addr.length < 4) return null;
+  if (b.lat == null || b.lng == null || !Number.isFinite(b.lat) || !Number.isFinite(b.lng)) {
+    return null;
+  }
+  if (Math.abs(b.lat) < 1e-6 && Math.abs(b.lng) < 1e-6) return null;
+  return { address: addr, lat: b.lat, lng: b.lng };
+}
 
 function normalizeDigitsOnly(input: string) {
   return input.replace(/[^0-9]/g, '');
@@ -53,7 +67,7 @@ function newTrade(seed: Partial<WorkerTrade> = {}): WorkerTrade {
     id: `t_${Math.random().toString(16).slice(2)}`,
     name: seed.name ?? '',
     isPrimary: seed.isPrimary ?? false,
-    yearsExperience: seed.yearsExperience ?? 0,
+    yearsExperience: seed.yearsExperience ?? null,
     description: seed.description ?? '',
   };
 }
@@ -63,7 +77,7 @@ type ValidationIssue = { field: string; scroll: string; msg: string };
 function validateDetailed(
   trades: WorkerTrade[],
   professionalDescription: string,
-  geo: WorkerBaseLocation,
+  profileBase: WorkerBaseLocation | null,
   coverageKmStr: string,
 ): { errors: Record<string, string>; scrollToKey: string | null } {
   const issues: ValidationIssue[] = [];
@@ -113,13 +127,12 @@ function validateDetailed(
   }
 
   for (const { t, i } of named) {
-    const raw = Number(t.yearsExperience);
-    const y = Math.floor(Number.isFinite(raw) ? raw : 0);
-    if (y < 0 || y > 60) {
+    const y = t.yearsExperience == null ? null : Math.floor(Number(t.yearsExperience) || 0);
+    if (y != null && (y < 1 || y > 50)) {
       issues.push({
         field: `trade_${i}_years`,
         scroll: `trade_${i}`,
-        msg: 'Entre 0 y 60 años.',
+        msg: 'Entre 1 y 50 años (o dejalo vacío).',
       });
     }
     if (t.description.trim().length < 10) {
@@ -131,18 +144,11 @@ function validateDetailed(
     }
   }
 
-  if (!geo.address.trim() || geo.address.trim().length < 4) {
+  if (!profileBase) {
     issues.push({
       field: 'location',
-      scroll: 'geo',
-      msg: 'Buscá y elegí una dirección o usá “Ubicarme”.',
-    });
-  }
-  if (!Number.isFinite(geo.lat) || !Number.isFinite(geo.lng)) {
-    issues.push({
-      field: 'location',
-      scroll: 'geo',
-      msg: 'Coordenadas no válidas. Mové el pin o elegí otra dirección.',
+      scroll: 'coverage',
+      msg: 'Cargá tu domicilio en Perfil → Editar datos de registro.',
     });
   }
 
@@ -150,7 +156,7 @@ function validateDetailed(
   if (!coverageKmStr.trim() || !Number.isFinite(rawKm) || rawKm < 1 || rawKm > 300) {
     issues.push({
       field: 'coverageKm',
-      scroll: 'geo',
+      scroll: 'coverage',
       msg: 'Ingresá un radio entre 1 y 300 km.',
     });
   }
@@ -185,12 +191,14 @@ function tradeCardHasError(
 
 export function WorkerABMScreen({ navigation }: Props) {
   const { workerProfile, saveWorkerProfile, deleteWorkerProfile } = useWorkerProfile();
-  const { setWorkerMode, setWorkerTrade } = useUserMode();
-  const { user } = useAuth();
+  const { setWorkerTrade } = useUserMode();
+  const { user, replaceOrMergeUser } = useAuth();
+  const { refresh: refreshFeed } = useFeed();
+  const toast = useAppToast();
   const userId = user?.id ?? null;
 
-  const [geo, setGeo] = useState<WorkerBaseLocation>(DEFAULT_LOCATION);
-  const [addressQuery, setAddressQuery] = useState(DEFAULT_LOCATION.address);
+  const profileBase = useMemo(() => profileBaseFromUser(user), [user]);
+
   const [coverageKm, setCoverageKm] = useState('10');
   const [professionalDescription, setProfessionalDescription] = useState(
     workerProfile?.professionalDescription ?? '',
@@ -201,15 +209,6 @@ export function WorkerABMScreen({ navigation }: Props) {
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [deleteBanner, setDeleteBanner] = useState<string>('');
-  const [deleteConfirmArmed, setDeleteConfirmArmed] = useState(false);
-
-  const [searching, setSearching] = useState(false);
-  const [addressResults, setAddressResults] = useState<WorkerBaseLocation[]>([]);
-  const [locating, setLocating] = useState(false);
-  const [locationHint, setLocationHint] = useState<string | null>(null);
-  const [devicePos, setDevicePos] = useState<{ lat: number; lng: number } | null>(null);
-  const requestIdRef = useRef(0);
-  const reverseReqRef = useRef(0);
 
   const [tradeModal, setTradeModal] = useState<{ idx: number } | null>(null);
 
@@ -221,21 +220,15 @@ export function WorkerABMScreen({ navigation }: Props) {
     setSaving(false);
     setFieldErrors({});
     setDeleteBanner('');
-    setDeleteConfirmArmed(false);
-    setAddressResults([]);
     setTradeModal(null);
     setProfessionalDescription('');
     setTrades([newTrade({ isPrimary: true })]);
     setCoverageKm('10');
-    setGeo(DEFAULT_LOCATION);
-    setAddressQuery(DEFAULT_LOCATION.address);
   }, [userId]);
 
   // Hidratar desde storage (perfil trabajador local) cuando esté disponible.
   useEffect(() => {
     if (!workerProfile) return;
-    setGeo(workerProfile.baseLocation);
-    setAddressQuery(workerProfile.baseLocation.address);
     setCoverageKm(String(workerProfile.coverageKm));
     setProfessionalDescription(workerProfile.professionalDescription);
     setTrades(
@@ -243,16 +236,10 @@ export function WorkerABMScreen({ navigation }: Props) {
     );
   }, [workerProfile]);
 
-  // Si todavía no hay perfil trabajador local, usar domicilio del perfil como seed de ubicación/radio.
+  // Si todavía no hay perfil trabajador local, usar oficios/radio del servidor.
   useEffect(() => {
     if (workerProfile) return;
     if (user?.baseLocation?.lat == null || user.baseLocation.lng == null) return;
-    setGeo({
-      address: user.baseLocation.address,
-      lat: user.baseLocation.lat,
-      lng: user.baseLocation.lng,
-    });
-    setAddressQuery(user.baseLocation.address);
     setCoverageKm(String(user.worker?.coverageKm ?? 10));
     if (user.worker?.trades?.length) {
       setTrades(
@@ -260,92 +247,12 @@ export function WorkerABMScreen({ navigation }: Props) {
           id: t.id,
           name: t.name,
           isPrimary: Boolean(t.isPrimary),
-          yearsExperience: 0,
+          yearsExperience: 1,
           description: t.details ?? '',
         })),
       );
     }
-  }, [
-    workerProfile,
-    user?.baseLocation?.address,
-    user?.baseLocation?.lat,
-    user?.baseLocation?.lng,
-    user?.worker?.coverageKm,
-    user?.worker?.trades,
-  ]);
-
-  const coverageMeters = useMemo(
-    () => clampInt(Number(coverageKm) || 0, 1, 300) * 1000,
-    [coverageKm],
-  );
-
-  async function runGeocode(qRaw: string) {
-    const q = qRaw.trim();
-    if (q.length < 4) {
-      setAddressResults([]);
-      return;
-    }
-    const reqId = ++requestIdRef.current;
-    setSearching(true);
-    try {
-      const suggestions = await fetchNominatimSuggestions(q, {
-        countryCode: 'ar',
-        near: devicePos ?? undefined,
-      });
-      if (reqId !== requestIdRef.current) return;
-      setAddressResults(
-        suggestions.map((s) => ({
-          address: s.address,
-          lat: s.lat,
-          lng: s.lng,
-        })),
-      );
-    } finally {
-      if (reqId === requestIdRef.current) setSearching(false);
-    }
-  }
-
-  useEffect(() => {
-    const q = addressQuery.trim();
-    const t = setTimeout(() => {
-      void runGeocode(q);
-    }, 450);
-    return () => clearTimeout(t);
-  }, [addressQuery]);
-
-  async function runReverseGeocode(lat: number, lng: number) {
-    const reqId = ++reverseReqRef.current;
-    try {
-      const addr = await reverseNominatimStreet(lat, lng);
-      if (reqId !== reverseReqRef.current) return;
-      if (!addr) return;
-      setGeo((prev) => ({ ...prev, address: addr, lat, lng }));
-      setAddressQuery(addr);
-    } catch {
-      /* ignore */
-    }
-  }
-
-  async function locateMe() {
-    setLocationHint(null);
-    setLocating(true);
-    try {
-      const res = await getHighAccuracyPosition();
-      if (!res.ok) {
-        if (res.reason === 'denied') {
-          setLocationHint('Activá la ubicación en el navegador o el sistema para usar “Ubicarme”.');
-        }
-        return;
-      }
-      const { lat, lng } = res.position;
-      setDevicePos({ lat, lng });
-      setGeo({ address: 'Ubicación actual', lat, lng });
-      setAddressResults([]);
-      await runReverseGeocode(lat, lng);
-    } finally {
-      setLocating(false);
-    }
-  }
+  }, [workerProfile, user?.baseLocation?.lat, user?.baseLocation?.lng, user?.worker?.coverageKm, user?.worker?.trades]);
 
   function setPrimary(idx: number) {
     setTrades((prev) => prev.map((t, i) => ({ ...t, isPrimary: i === idx })));
@@ -415,24 +322,25 @@ export function WorkerABMScreen({ navigation }: Props) {
   async function onSave() {
     // Si quedó trabado en loading por algún motivo, no bloquear silenciosamente.
     if (saving) {
-      Alert.alert('Guardado', 'Todavía estamos guardando. Esperá un momento y probá de nuevo.');
+      toast.info('Todavía estamos guardando. Esperá un momento y probá de nuevo.', 'Guardado');
       return;
     }
     const { errors, scrollToKey: firstKey } = validateDetailed(
       trades,
       professionalDescription,
-      geo,
+      profileBase,
       coverageKm,
     );
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
       setDeleteBanner('');
       const firstMsg = Object.values(errors)[0];
-      Alert.alert(
-        'Revisá tu perfil',
+      toast.warning(
         firstMsg
           ? `Hay campos incompletos o inválidos.\n\n${firstMsg}`
           : 'Hay campos incompletos o inválidos. Revisá los marcados en rojo.',
+        'Revisá tu perfil',
+        { durationMs: 4200 },
       );
       scrollToKey(firstKey);
       return;
@@ -442,7 +350,7 @@ export function WorkerABMScreen({ navigation }: Props) {
     setSaving(true);
     try {
       if (!user?.id) {
-        Alert.alert('Sesión', 'Iniciá sesión para guardar tu perfil profesional.');
+        toast.warning('Iniciá sesión para guardar tu perfil profesional.', 'Sesión');
         return;
       }
       const trimmedTrades = trades
@@ -450,18 +358,31 @@ export function WorkerABMScreen({ navigation }: Props) {
           ...t,
           name: t.name.trim(),
           description: t.description.trim(),
-          yearsExperience: Math.max(0, Math.min(60, Math.floor(Number(t.yearsExperience) || 0))),
+          yearsExperience:
+            t.yearsExperience == null || String(t.yearsExperience).trim() === ''
+              ? null
+              : Math.max(1, Math.min(50, Math.floor(Number(t.yearsExperience) || 0))),
         }))
         .filter((t) => t.name.length > 0)
         .slice(0, 5);
+
+      const base = profileBaseFromUser(user);
+      if (!base) {
+        toast.warning(
+          'Necesitamos tu domicilio guardado en el perfil. Andá a Perfil → Editar datos de registro y cargá la dirección.',
+          'Ubicación',
+          { durationMs: 4200 },
+        );
+        return;
+      }
 
       const km = clampInt(Number(coverageKm) || 0, 1, 300);
       const profile: WorkerProfile = {
         professionalDescription: professionalDescription.trim(),
         baseLocation: {
-          address: geo.address.trim(),
-          lat: geo.lat,
-          lng: geo.lng,
+          address: base.address.trim(),
+          lat: base.lat,
+          lng: base.lng,
         },
         coverageKm: km,
         trades: trimmedTrades,
@@ -475,12 +396,17 @@ export function WorkerABMScreen({ navigation }: Props) {
       if (isSupabaseConfigured()) {
         try {
           await persistWorkerGeoToSupabase(profile.baseLocation, profile.coverageKm);
+          await persistProfessionalDescriptionInSupabase(profile.professionalDescription);
           if (user?.id) {
             await persistWorkerJobsToSupabase({
               userId: user.id,
               trades: trimmedTrades.map((t) => ({
+                id: t.id,
                 name: t.name,
                 description: t.description,
+                yearsExperience: t.yearsExperience ?? null,
+                proofImageUri: t.proofImageUri,
+                proofImageUris: t.proofImageUris,
                 isPrimary: t.isPrimary,
               })),
             });
@@ -495,32 +421,42 @@ export function WorkerABMScreen({ navigation }: Props) {
           });
           const selfVisible = probe.some((h) => h.worker.id === user.id);
           if (!selfVisible) {
-            Alert.alert(
-              'Sincronización incompleta',
+            toast.warning(
               'Tu perfil se guardó en el teléfono, pero todavía no aparece en la búsqueda del servidor. Revisá que Supabase tenga las migraciones `update_profile_geo_coverage` y `search_workers_for_client`, y que tu perfil tenga radio > 0 y al menos un oficio.',
+              'Sincronización incompleta',
+              { durationMs: 5200 },
             );
           }
         } catch (e) {
-          Alert.alert(
-            'Sincronización',
+          toast.warning(
             `Guardamos en el dispositivo, pero no se pudo sincronizar el perfil profesional en el servidor.\n\n${
               e instanceof Error ? e.message : 'Error desconocido.'
             }\n\nRevisá la conexión o ejecutá las migraciones SQL (ubicación/radio y jobs) en Supabase.`,
+            'Sincronización',
+            { durationMs: 5200 },
           );
         }
       }
 
       const primary = trimmedTrades.find((t) => t.isPrimary) ?? trimmedTrades[0];
       if (primary?.name) setWorkerTrade(primary.name);
-      setWorkerMode(true);
 
+      // Reactividad: si reactivó el perfil, los posts pueden volver a verse por regla de "perfil activo".
+      // Re-consultamos el feed para reflejarlo instantáneamente.
+      try {
+        await refreshFeed();
+      } catch {
+        /* ignore */
+      }
+
+      toast.success('Perfil profesional guardado.', 'Tu Changa');
       if (navigation.canGoBack()) navigation.goBack();
       else navigation.navigate('MyAccount');
-      Alert.alert('Tu Changa', 'Perfil profesional guardado.');
     } catch (e) {
-      Alert.alert(
-        'No se pudo guardar',
+      toast.error(
         e instanceof Error ? e.message : 'Ocurrió un error inesperado al guardar.',
+        'No se pudo guardar',
+        { durationMs: 4200 },
       );
     } finally {
       setSaving(false);
@@ -528,22 +464,51 @@ export function WorkerABMScreen({ navigation }: Props) {
   }
 
   async function onDelete() {
-    if (!deleteConfirmArmed) {
-      setDeleteConfirmArmed(true);
-      setFieldErrors({});
-      setDeleteBanner('Confirmá la baja tocando nuevamente "Dar de baja".');
-      return;
-    }
+    Alert.alert(
+      'Dar de baja perfil profesional',
+      '¿Seguro que querés dar de baja tu perfil profesional?\n\nVas a conservar tu cuenta y vas a poder seguir usando la app como cliente, pero dejarás de aparecer en búsquedas como trabajador.\n\nAdemás, tus publicaciones dejarán de verse en el inicio (podés volver a crear tu perfil profesional más adelante).',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Dar de baja',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              try {
+                if (isSupabaseConfigured()) {
+                  await deactivateProfessionalProfileInSupabase();
+                }
+              } catch (e) {
+                toast.warning(
+                  e instanceof Error ? e.message : 'No se pudo dar de baja en el servidor.',
+                  'Servidor',
+                  { durationMs: 5200 },
+                );
+                return;
+              }
 
-    await deleteWorkerProfile();
-    setWorkerMode(false);
-    setWorkerTrade('Profesional');
-    if (navigation.canGoBack()) navigation.goBack();
-    else navigation.navigate('MyAccount');
+              try {
+                await deleteWorkerProfile();
+                setWorkerTrade('Profesional');
+                // Apagar modo worker local (la fuente de verdad se refresca al volver a cargar perfil desde Supabase).
+                if (user) {
+                  replaceOrMergeUser({ ...(user as any), worker: undefined });
+                }
+                if (navigation.canGoBack()) navigation.goBack();
+                else navigation.navigate('MyAccount');
+              } finally {
+                // no-op
+              }
+            })();
+          },
+        },
+      ],
+    );
   }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      <AppKeyboardAvoidingView style={{ flex: 1 }} extraOffset={44}>
       <View style={styles.topBar}>
         <Pressable
           onPress={() => {
@@ -565,7 +530,8 @@ export function WorkerABMScreen({ navigation }: Props) {
 
       <View style={styles.header}>
         <Text style={styles.subtitle}>
-          Completá tus datos para habilitar el Modo Trabajador.
+          El domicilio para el mapa y la búsqueda lo editás en Perfil → Modificar datos. Acá ajustás
+          radio, oficios y descripción.
         </Text>
       </View>
 
@@ -643,14 +609,22 @@ export function WorkerABMScreen({ navigation }: Props) {
             <View style={styles.tradeMidRow}>
               <Text style={styles.fieldLabel}>Años de experiencia</Text>
               <TextInput
-                value={String(t.yearsExperience ?? 0)}
-                onChangeText={(raw) => updateTrade(idx, { yearsExperience: Number(raw) || 0 })}
+                value={t.yearsExperience == null ? '' : String(t.yearsExperience)}
+                onChangeText={(raw) => {
+                  const digits = normalizeDigitsOnly(raw).slice(0, 2);
+                  if (!digits) {
+                    updateTrade(idx, { yearsExperience: null });
+                    return;
+                  }
+                  const n = Math.floor(Number(digits) || 0);
+                  updateTrade(idx, { yearsExperience: n });
+                }}
                 keyboardType="number-pad"
                 style={[
                   styles.yearsInput,
                   fieldErrors[`trade_${idx}_years`] ? styles.inputError : null,
                 ]}
-                placeholder="0"
+                placeholder="(vacío)"
                 placeholderTextColor={colors.textSecondary}
               />
             </View>
@@ -673,6 +647,31 @@ export function WorkerABMScreen({ navigation }: Props) {
             {fieldErrors[`trade_${idx}_description`] ? (
               <Text style={styles.inlineError}>{fieldErrors[`trade_${idx}_description`]}</Text>
             ) : null}
+
+            <Text style={styles.fieldLabel}>Fotos del oficio (hasta 5)</Text>
+            <ImagePickerComponent
+              mode="multi"
+              label="Fotos del oficio (hasta 5)"
+              hint="Usá cámara o galería. Recorte 1:1 automático antes de subir."
+              value={
+                t.proofImageUris?.length
+                  ? t.proofImageUris
+                  : t.proofImageUri
+                    ? [t.proofImageUri]
+                    : []
+              }
+              onChange={(next) => {
+                const arr = Array.isArray(next) ? next : [String(next ?? '')];
+                const cleaned = arr.map((u) => String(u ?? '').trim()).filter(Boolean).slice(0, 5);
+                updateTrade(idx, {
+                  proofImageUri: cleaned[0] ?? undefined,
+                  proofImageUris: cleaned.length ? cleaned : undefined,
+                });
+              }}
+              maxCount={5}
+              squareCrop
+              jpegQuality={0.9}
+            />
 
             {trades.length > 1 ? (
               <Pressable
@@ -702,110 +701,17 @@ export function WorkerABMScreen({ navigation }: Props) {
         <View
           collapsable={false}
           onLayout={(e) => {
-            layoutYs.current.geo = e.nativeEvent.layout.y;
+            layoutYs.current.coverage = e.nativeEvent.layout.y;
           }}
         >
-          <Text style={[styles.sectionTitle, { marginTop: spacing.lg }]}>Ubicación</Text>
+          <Text style={[styles.sectionTitle, { marginTop: spacing.lg }]}>Radio de cobertura</Text>
           <Text style={styles.fieldHint}>
-            Buscá tu dirección o usá “Ubicarme”. Mové el pin en el mapa si hace falta.
+            Alcance en km desde el domicilio de tu perfil (1–300). El domicilio lo cambiás en Modificar
+            datos.
           </Text>
-          {locationHint ? <Text style={styles.hintWarn}>{locationHint}</Text> : null}
-
-          <View style={styles.searchRow}>
-            <View
-              style={[
-                styles.searchInputWrap,
-                fieldErrors.location ? styles.inputErrorWrap : null,
-              ]}
-            >
-              <TextInput
-                style={styles.searchInput}
-                value={addressQuery}
-                onChangeText={(t) => {
-                  setAddressQuery(t);
-                  setFieldErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.location;
-                    return next;
-                  });
-                }}
-                placeholder="Calle, ciudad…"
-                placeholderTextColor={colors.textSecondary}
-                autoCapitalize="sentences"
-              />
-            </View>
-            <Pressable
-              style={styles.searchBtn}
-              onPress={() => void runGeocode(addressQuery)}
-              accessibilityRole="button"
-            >
-              {searching ? (
-                <ActivityIndicator color={colors.text} />
-              ) : (
-                <Ionicons name="search" size={18} color={colors.text} />
-              )}
-            </Pressable>
-          </View>
           {fieldErrors.location ? (
             <Text style={styles.inlineError}>{fieldErrors.location}</Text>
           ) : null}
-
-          {addressResults.length > 0 ? (
-            <View style={styles.results}>
-              {addressResults.map((r) => (
-                <Pressable
-                  key={`${r.lat}-${r.lng}-${r.address}`}
-                  style={styles.resultRow}
-                  onPress={() => {
-                    setGeo(r);
-                    setAddressQuery(r.address);
-                    setAddressResults([]);
-                    setFieldErrors((prev) => {
-                      const next = { ...prev };
-                      delete next.location;
-                      return next;
-                    });
-                  }}
-                >
-                  <Ionicons name="location-outline" size={18} color={colors.textSecondary} />
-                  <View style={styles.resultText}>
-                    <Text style={styles.resultTitle} numberOfLines={2}>
-                      {r.address}
-                    </Text>
-                    <Text style={styles.resultHint}>
-                      {r.lat.toFixed(5)}, {r.lng.toFixed(5)}
-                    </Text>
-                  </View>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-
-          <View style={styles.geoPill}>
-            <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
-            <Text style={styles.geoText} numberOfLines={2}>
-              {geo.address} · {geo.lat.toFixed(4)}, {geo.lng.toFixed(4)}
-            </Text>
-          </View>
-
-          <LocationMap
-            geo={{ lat: geo.lat, lng: geo.lng }}
-            coverageMeters={coverageMeters}
-            showCoverage
-            locating={locating}
-            onLocateMe={() => void locateMe()}
-            onPinMoved={(lat, lng) => {
-              setGeo((prev) => ({ ...prev, lat, lng }));
-              const id = ++reverseReqRef.current;
-              setTimeout(() => {
-                if (id !== reverseReqRef.current) return;
-                void runReverseGeocode(lat, lng);
-              }, 550);
-            }}
-          />
-
-          <Text style={[styles.fieldLabel, { marginTop: spacing.md }]}>Radio de cobertura</Text>
-          <Text style={styles.fieldHint}>Alcance en km desde tu ubicación base (1–300).</Text>
           <View style={styles.coverRow}>
             <TextInput
               style={[styles.coverInput, fieldErrors.coverageKm ? styles.inputError : null]}
@@ -895,6 +801,7 @@ export function WorkerABMScreen({ navigation }: Props) {
           });
         }}
       />
+      </AppKeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -995,12 +902,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     lineHeight: 18,
   },
-  hintWarn: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#B45309',
-    marginBottom: spacing.sm,
-  },
   yearsInput: {
     width: 80,
     borderWidth: 1,
@@ -1024,14 +925,50 @@ const styles = StyleSheet.create({
     minHeight: 90,
     textAlignVertical: 'top',
   },
+  photoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radii.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    marginTop: spacing.sm,
+  },
+  photoThumb: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  photoThumbImg: { width: '100%', height: '100%' },
+  photoTitle: { fontSize: 15, fontWeight: '800', color: colors.text },
+  photoHint: { marginTop: 2, fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
+  photoStrip: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  photoMiniWrap: { width: 68, height: 68 },
+  photoMini: {
+    width: 68,
+    height: 68,
+    borderRadius: 12,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  photoMiniRemove: { position: 'absolute', top: -6, right: -6 },
   inputError: {
     borderColor: '#DC2626',
     borderWidth: 2,
-  },
-  inputErrorWrap: {
-    borderColor: '#DC2626',
-    borderWidth: 2,
-    borderRadius: radii.input,
   },
   inlineError: {
     marginTop: 6,
@@ -1053,61 +990,6 @@ const styles = StyleSheet.create({
   },
   addTradeDisabled: { opacity: 0.55 },
   addTradeText: { marginLeft: 8, fontSize: 15, fontWeight: '800', color: colors.primary },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  searchInputWrap: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.input,
-    backgroundColor: colors.surface,
-  },
-  searchInput: {
-    paddingVertical: Platform.OS === 'ios' ? 12 : 10,
-    paddingHorizontal: spacing.md,
-    fontSize: 15,
-    color: colors.text,
-  },
-  searchBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: radii.input,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  results: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.card,
-    overflow: 'hidden',
-    marginBottom: spacing.sm,
-  },
-  resultRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    padding: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-    gap: spacing.sm,
-  },
-  resultText: { flex: 1 },
-  resultTitle: { fontSize: 14, fontWeight: '700', color: colors.text },
-  resultHint: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
-  geoPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    padding: spacing.sm,
-    backgroundColor: '#ECFDF5',
-    borderRadius: radii.input,
-    marginBottom: spacing.sm,
-  },
-  geoText: { flex: 1, fontSize: 13, fontWeight: '600', color: colors.text },
   coverRow: {
     flexDirection: 'row',
     alignItems: 'center',

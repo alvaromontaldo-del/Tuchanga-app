@@ -1,8 +1,5 @@
 import { useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,8 +7,10 @@ import {
   View,
 } from 'react-native';
 import { AppButton } from '../../components/common/AppButton';
+import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
 import { AppTextInput } from '../../components/common/AppTextInput';
 import { TextLink } from '../../components/common/TextLink';
+import { useAppToast } from '../../components/toast/toast';
 import { colors, spacing } from '../../constants/theme';
 import type { AuthStackScreenProps } from '../../navigation/types';
 import { requestPasswordReset } from '../../services/auth';
@@ -22,6 +21,7 @@ type Props = AuthStackScreenProps<'ForgotPassword'>;
 export function ForgotPasswordScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const contentWidth = Math.min(width - spacing.lg * 2, 440);
+  const toast = useAppToast();
 
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
@@ -46,10 +46,10 @@ export function ForgotPasswordScreen({ navigation }: Props) {
     try {
       const result = await requestPasswordReset(email);
       if (result.ok) {
-        Alert.alert('Tu Changa', result.message);
+        toast.success(result.message, 'Tu Changa');
         navigation.navigate('Login');
       } else {
-        Alert.alert('Error', result.message);
+        toast.error(result.message, 'Error', { durationMs: 4200 });
       }
     } finally {
       setLoading(false);
@@ -57,10 +57,7 @@ export function ForgotPasswordScreen({ navigation }: Props) {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <AppKeyboardAvoidingView style={styles.flex}>
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
@@ -96,7 +93,7 @@ export function ForgotPasswordScreen({ navigation }: Props) {
           </View>
         </View>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </AppKeyboardAvoidingView>
   );
 }
 

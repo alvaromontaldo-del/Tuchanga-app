@@ -6,8 +6,15 @@ export type ApiConversation = {
   id: string;
   otherUserId: string;
   otherDisplayName: string;
+  otherAvatarUrl?: string | null;
   primaryTrade: string;
   lastMessage: string | null;
+  /** Último mensaje del hilo (para no leídos). */
+  lastMessageAt?: string | null;
+  lastMessageSenderId?: string | null;
+  /** Read_at del otro participante (para ticks "visto" en lista). */
+  peerReadAt?: string | null;
+  unreadCount?: number;
   updatedAt: string;
   /** Rol del usuario actual en este hilo (para copys y cabecera del chat). */
   myRole: ConversationRole;
@@ -21,6 +28,8 @@ export type ApiMessage = {
   status: string;
   created_at: string;
   clientMessageId?: string | null;
+  type?: 'text' | 'budget';
+  metadata?: Record<string, unknown>;
 };
 
 function authHeaders(userId: string) {
@@ -51,6 +60,18 @@ export async function fetchMessages(
   if (!res.ok) throw new Error(`messages ${res.status}`);
   const data = (await res.json()) as { messages: ApiMessage[] };
   return data.messages ?? [];
+}
+
+export async function deleteConversation(userId: string, conversationId: string): Promise<void> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/conversations/${encodeURIComponent(conversationId)}`, {
+    method: 'DELETE',
+    headers: authHeaders(userId),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { error?: string }).error ?? `delete conversation ${res.status}`);
+  }
 }
 
 export async function findOrCreateConversation(

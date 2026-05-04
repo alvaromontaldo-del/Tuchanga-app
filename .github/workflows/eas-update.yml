@@ -1,0 +1,27 @@
+# Publica EAS Update al hacer push a `main` (requiere secret EXPO_TOKEN en el repo).
+# Crear token: https://expo.dev/accounts/[cuenta]/settings/access-tokens
+# En GitHub: Repo → Settings → Secrets → Actions → New: EXPO_TOKEN
+name: EAS Update (OTA)
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Publish OTA update
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: npx eas-cli update --branch main --non-interactive --message "${{ github.event.head_commit.message }}"

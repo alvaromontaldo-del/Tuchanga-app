@@ -3,7 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { colors } from '../../constants/theme';
 import { BRAND_HORIZONTAL_ASPECT } from '../brand/BrandMark';
 
-const LOGO = require('../../../assets/brand/logo-official-horizontal.png');
+const LOGO = require('../../../assets/brand/logo-yachanga-v22_bold_tracking1.png');
 
 const BRAND_BURGUNDY = '#8B1A1A';
 

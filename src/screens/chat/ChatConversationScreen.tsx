@@ -5,12 +5,13 @@ type ChatRoute = RouteProp<{ ChatConversation: ChatScreenParams }, 'ChatConversa
 
 export function ChatConversationScreen() {
   const route = useRoute<ChatRoute>();
-  const { conversationId, otherDisplayName, headerSubtitle } = route.params;
+  const { conversationId, otherDisplayName, headerSubtitle, workerId } = route.params;
   return (
     <ChatScreen
       conversationId={conversationId}
       otherDisplayName={otherDisplayName}
       headerSubtitle={headerSubtitle}
+      workerId={workerId}
     />
   );
 }

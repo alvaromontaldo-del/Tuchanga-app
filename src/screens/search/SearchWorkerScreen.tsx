@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useScrollToTop } from '@react-navigation/native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -17,22 +16,22 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RubroMultiSelectModal } from '../../components/search/RubroMultiSelectModal';
 // Punto de referencia: siempre domicilio del perfil (sin selector).
-import { IntegerRatingStars } from '../../components/profile/IntegerRatingStars';
+import { WorkerResultCard } from '../../components/search/WorkerResultCard';
 import { colors, radii, spacing } from '../../constants/theme';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { useAuth } from '../../context/AuthContext';
 import type { AuthUser } from '../../services/auth';
 import { fetchSearchWorkerHitsFromSupabase } from '../../services/searchWorkersSupabase';
 import { getSupabaseClient } from '../../lib/supabase';
+import { SearchHeaderBar } from '../../components/search/SearchHeaderBar';
+import { fetchActiveTradeNamesFromSupabase } from '../../services/workerTradesSupabase';
 import {
   SEARCH_WORKERS,
   searchWorkerHits,
   type SearchWorkerHit,
 } from '../../data/mockSearchWorkers';
-import type { SearchStackParamList } from '../../navigation/mainTypes';
+import type { FeedStackScreenProps } from '../../navigation/mainTypes';
 // Sin GPS en Buscar: usamos domicilio del perfil.
-
-type Nav = NativeStackNavigationProp<SearchStackParamList>;
 
 function summaryMulti(selected: string[], emptyLabel: string): string {
   if (selected.length === 0) return emptyLabel;
@@ -43,42 +42,6 @@ function summaryMulti(selected: string[], emptyLabel: string): string {
 function formatKm(d: number): string {
   if (d < 1) return `${Math.round(d * 1000)} m`;
   return `${d.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km`;
-}
-
-function ResultRow({
-  hit,
-  onPress,
-}: {
-  hit: SearchWorkerHit;
-  onPress: () => void;
-}) {
-  const { worker, distanceKm } = hit;
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.resultCard, pressed && styles.resultPressed]}
-    >
-      <Image source={{ uri: worker.avatarUrl }} style={styles.resultAvatar} />
-      <View style={styles.resultBody}>
-        <Text style={styles.resultName}>{worker.firstName}</Text>
-        <Text style={styles.resultSummary} numberOfLines={2}>
-          {worker.summary}
-        </Text>
-        <View style={styles.resultMeta}>
-          <IntegerRatingStars rating={Math.round(worker.ratingAverage)} size={16} />
-          <Text style={styles.resultScore}>{worker.ratingAverage.toFixed(1)}</Text>
-          <Text style={styles.resultReviews}>
-            ({worker.reviewCount}{' '}
-            {worker.reviewCount === 1 ? 'reseña' : 'reseñas'})
-          </Text>
-        </View>
-        <Text style={styles.resultDistance} numberOfLines={1}>
-          A {formatKm(distanceKm)} · Radio {worker.coverageKm} km
-        </Text>
-      </View>
-      <Ionicons name="chevron-forward" size={22} color={colors.textSecondary} />
-    </Pressable>
-  );
 }
 
 function hasValidBaseLocation(user: AuthUser | null): boolean {
@@ -94,12 +57,15 @@ function hasValidBaseLocation(user: AuthUser | null): boolean {
 /**
  * Búsqueda por texto y rubro; visibilidad por ubicación: solo trabajadores cuyo radio cubre el domicilio del perfil.
  */
-export function SearchWorkerScreen() {
-  const navigation = useNavigation<Nav>();
+export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'SearchWorker'>) {
   const { user, isRestoring } = useAuth();
-  const [query, setQuery] = useState('');
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [query, setQuery] = useState(route.params?.initialQuery ?? '');
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(
+    route.params?.initialCategories ?? [],
+  );
   const [categoryModal, setCategoryModal] = useState(false);
+  const [allowedTrades, setAllowedTrades] = useState<string[]>([]);
+  const [allowedLoading, setAllowedLoading] = useState(false);
 
   const effectiveClientPos = useMemo(() => {
     if (hasValidBaseLocation(user)) {
@@ -116,6 +82,41 @@ export function SearchWorkerScreen() {
   const [debugLine, setDebugLine] = useState<string>('');
   const [diagRunning, setDiagRunning] = useState(false);
   const [diagResult, setDiagResult] = useState<string>('');
+  const listRef = useRef<FlatList<SearchWorkerHit> | null>(null);
+  useScrollToTop(listRef);
+  // Entradas desde HOME header: hidratamos búsqueda/filtros.
+  useEffect(() => {
+    if (route.params?.initialQuery !== undefined) {
+      setQuery(route.params.initialQuery ?? '');
+    }
+    if (route.params?.initialCategories) {
+      setSelectedCategories(route.params.initialCategories);
+    }
+    if (route.params?.openFilters) {
+      setTimeout(() => setCategoryModal(true), 50);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.params?.initialQuery, route.params?.initialCategories?.join('|'), route.params?.openFilters]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    let cancelled = false;
+    setAllowedLoading(true);
+    void fetchActiveTradeNamesFromSupabase()
+      .then((names) => {
+        if (!cancelled) setAllowedTrades(names);
+      })
+      .catch(() => {
+        /* ignore */
+      })
+      .finally(() => {
+        if (!cancelled) setAllowedLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
 
   const hasSearchPoint = effectiveClientPos != null;
   const clientLat = effectiveClientPos?.lat;
@@ -192,6 +193,10 @@ export function SearchWorkerScreen() {
   ]);
 
   const useSupabaseSearch = isSupabaseConfigured();
+
+  const triggerSearch = useCallback(() => {
+    setSearchRetry((n) => n + 1);
+  }, []);
 
   function openSettings() {
     if (Platform.OS === 'web') return;
@@ -307,48 +312,25 @@ export function SearchWorkerScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.headerBlock}>
-        <Text style={styles.screenTitle}>Buscar trabajador</Text>
-        <Text style={styles.screenSubtitle}>
-          El radio de cada profesional se compara con el domicilio de tu perfil.
-        </Text>
-
-        <View style={styles.searchBar}>
-          <Ionicons name="search" size={22} color={colors.textSecondary} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Nombre, oficio o palabra clave"
-            placeholderTextColor={colors.textSecondary}
-            value={query}
-            onChangeText={setQuery}
-            returnKeyType="search"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          {query.length > 0 ? (
-            <Pressable onPress={() => setQuery('')} hitSlop={10}>
-              <Ionicons name="close-circle" size={22} color={colors.textSecondary} />
-            </Pressable>
-          ) : null}
-        </View>
-      </View>
-
-      <View style={styles.filtersBlock}>
-        <Text style={styles.filterLabel}>Oficio</Text>
-        <Pressable
-          style={styles.dropdown}
-          onPress={() => setCategoryModal(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Abrir filtro de oficios"
-        >
-          <Text style={styles.dropdownText} numberOfLines={1}>
-            {summaryMulti(selectedCategories, 'Todos los oficios')}
-          </Text>
-          <Ionicons name="chevron-down" size={22} color={colors.textSecondary} />
-        </Pressable>
-      </View>
+      <SearchHeaderBar
+        value={query}
+        onChangeText={(t) => {
+          setQuery(t);
+        }}
+        onPressFilters={() => setCategoryModal(true)}
+        filtersLabel={allowedLoading ? 'Cargando…' : 'Filtros'}
+        autoFocus
+        onSubmit={triggerSearch}
+        showLogo
+        selectedLabel={selectedCategories[0] ?? null}
+        onClearSelected={() => {
+          setSelectedCategories([]);
+          triggerSearch();
+        }}
+      />
 
       <FlatList
+        ref={listRef}
         data={showEmpty ? [] : hits}
         keyExtractor={(item) => item.worker.id}
         contentContainerStyle={styles.listContent}
@@ -400,8 +382,17 @@ export function SearchWorkerScreen() {
           </View>
         }
         renderItem={({ item }) => (
-          <ResultRow
-            hit={item}
+          <WorkerResultCard
+            worker={{
+              id: item.worker.id,
+              firstName: item.worker.firstName,
+              summary: item.worker.summary,
+              avatarUrl: item.worker.avatarUrl,
+              ratingAverage: item.worker.ratingAverage,
+              reviewCount: item.worker.reviewCount,
+              distanceLabel: `A ${formatKm(item.distanceKm)}`,
+            }}
+            highlightQuery={query}
             onPress={() =>
               navigation.navigate('WorkerProfile', { workerId: item.worker.id })
             }
@@ -413,8 +404,16 @@ export function SearchWorkerScreen() {
         visible={categoryModal}
         title="Oficios"
         initialSelected={selectedCategories}
-        onClose={() => setCategoryModal(false)}
-        onApply={setSelectedCategories}
+        allowedNames={allowedTrades.length ? allowedTrades : undefined}
+        singleSelect
+        onClose={() => {
+          setCategoryModal(false);
+          triggerSearch();
+        }}
+        onApply={(next) => {
+          setSelectedCategories(next);
+          triggerSearch();
+        }}
       />
     </SafeAreaView>
   );
@@ -424,27 +423,6 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: colors.background,
-  },
-  headerBlock: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-  },
-  brandRow: {
-    marginBottom: spacing.sm,
-  },
-  screenTitle: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: colors.text,
-    letterSpacing: -0.5,
-  },
-  screenSubtitle: {
-    fontSize: 15,
-    color: colors.textSecondary,
-    marginTop: spacing.xs,
-    marginBottom: spacing.md,
-    lineHeight: 22,
   },
   originCard: {
     backgroundColor: colors.surface,
@@ -497,118 +475,10 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   originSecondaryText: { color: colors.primary, fontWeight: '700', fontSize: 14 },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: radii.input,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 17,
-    color: colors.text,
-    paddingVertical: 0,
-    marginLeft: spacing.sm,
-    marginRight: spacing.sm,
-  },
-  filtersBlock: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.md,
-  },
-  filterLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginBottom: spacing.sm,
-  },
-  dropdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.surface,
-    borderRadius: radii.input,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  dropdownText: {
-    flex: 1,
-    fontSize: 16,
-    color: colors.text,
-    fontWeight: '600',
-    marginRight: spacing.sm,
-  },
   listContent: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xl * 2,
     flexGrow: 1,
-  },
-  resultCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: radii.card,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  resultPressed: {
-    opacity: 0.92,
-  },
-  resultAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#E5E5E5',
-    borderWidth: 2,
-    borderColor: colors.primary,
-  },
-  resultBody: {
-    flex: 1,
-    marginLeft: spacing.md,
-    marginRight: spacing.sm,
-  },
-  resultName: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: colors.text,
-  },
-  resultSummary: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginTop: 4,
-    lineHeight: 20,
-  },
-  resultMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: spacing.sm,
-    flexWrap: 'wrap',
-  },
-  resultScore: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: colors.text,
-    marginLeft: 8,
-  },
-  resultReviews: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    marginLeft: 6,
-  },
-  resultDistance: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginTop: 6,
-    fontWeight: '600',
   },
   empty: {
     alignItems: 'center',

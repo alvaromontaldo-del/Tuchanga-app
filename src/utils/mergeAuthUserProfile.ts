@@ -49,5 +49,9 @@ export function mergeAuthUserProfile(
     profileCreatedAt: fresh.profileCreatedAt ?? ctx.profileCreatedAt,
     baseLocation: mergeBaseLocation(ctx.baseLocation, fresh.baseLocation),
     worker: fresh.worker ?? ctx.worker,
+    ratingAverage:
+      typeof fresh.ratingAverage === 'number' ? fresh.ratingAverage : ctx.ratingAverage,
+    reviewCount:
+      typeof fresh.reviewCount === 'number' ? fresh.reviewCount : ctx.reviewCount,
   };
 }

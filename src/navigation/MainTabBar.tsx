@@ -1,31 +1,56 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import type { ComponentProps } from 'react';
-import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Keyboard, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { CommonActions, StackActions } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEffect, useState } from 'react';
 import { colors, spacing } from '../constants/theme';
 import { useAuth } from '../context/AuthContext';
+import { useUnreadMessages } from '../context/UnreadMessagesContext';
 import { useUserMode } from '../context/UserModeContext';
 import { openAuthModal } from './openAuthModal';
 
 const TAB_ICON: Record<string, ComponentProps<typeof Ionicons>['name']> = {
   Inicio: 'home-outline',
-  Buscar: 'search-outline',
   Mensajes: 'chatbubbles-outline',
   Perfil: 'person-circle-outline',
 };
 
+const TAB_ROOT_SCREEN: Record<string, string> = {
+  Inicio: 'Home',
+  Mensajes: 'ConversationsList',
+  Perfil: 'MyAccount',
+};
+
 export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  const { isAuthed } = useAuth();
-  const { isWorkerMode } = useUserMode();
+  const { isAuthed, user } = useAuth();
+  const { isWorker } = useUserMode();
+  const { unreadCount } = useUnreadMessages();
   const bottomPad = Math.max(insets.bottom, spacing.sm);
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    const showSub = Keyboard.addListener('keyboardDidShow', () => setVisible(false));
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => setVisible(true));
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  if (!visible) return null;
 
   return (
     <View style={[styles.shell, { paddingBottom: bottomPad }]}>
       <View style={styles.row}>
         {state.routes.map((route) => {
           if (route.name === 'Publicar') {
+            if (!isAuthed || !isWorker) return null;
             return (
               <View key={route.key} style={styles.publishSlot}>
                 <Pressable
@@ -34,14 +59,6 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
                   onPress={() => {
                     if (!isAuthed) {
                       openAuthModal('Login');
-                      return;
-                    }
-                    if (!isWorkerMode) {
-                      Alert.alert(
-                        'Modo trabajador',
-                        'Activá «Modo trabajador» en la pestaña Perfil para publicar trabajos.',
-                      );
-                      navigation.navigate('Inicio', { screen: 'Home' });
                       return;
                     }
                     navigation.navigate('Inicio', { screen: 'PublishPost' });
@@ -75,6 +92,11 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
               : colors.textSecondary;
 
           const iconName = TAB_ICON[route.name] ?? 'ellipse-outline';
+          const profileAvatarUri = route.name === 'Perfil' && isAuthed ? user?.avatarUri : undefined;
+          const showProfilePhoto = !!profileAvatarUri;
+
+          const showMsgBadge = route.name === 'Mensajes' && isAuthed && unreadCount > 0;
+          const badgeText = unreadCount > 99 ? '99+' : String(unreadCount);
 
           return (
             <Pressable
@@ -87,16 +109,84 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
                   openAuthModal('Login');
                   return;
                 }
-                navigation.navigate(route.name);
+                const event = navigation.emit({
+                  type: 'tabPress',
+                  target: route.key,
+                  canPreventDefault: true,
+                });
+                if (!event.defaultPrevented) {
+                  // Si ya estamos en la pestaña, popToTop del stack interno (evita “carrusel”).
+                  if (isFocused) {
+                    const nestedKey = (route as any)?.state?.key;
+                    if (nestedKey) {
+                      (navigation as any).dispatch({
+                        ...StackActions.popToTop(),
+                        target: nestedKey,
+                      });
+                    } else {
+                      navigation.navigate(route.name);
+                    }
+                    if (route.name === 'Inicio') {
+                      (navigation as any).navigate('Inicio', {
+                        screen: 'Home',
+                        params: { scrollToTopToken: Date.now() },
+                      });
+                    }
+                    return;
+                  }
+                  // UX: tocar el tab siempre te lleva al inicio de esa pestaña (y resetea stack interno).
+                  const root = TAB_ROOT_SCREEN[route.name];
+                  if (route.name === 'Perfil' && !isAuthed) {
+                    // Invitado: el stack Perfil es distinto (AccountGuest).
+                    (navigation as any).dispatch(
+                      CommonActions.navigate({
+                        name: 'Perfil',
+                        params: { screen: 'AccountGuest' },
+                        merge: false,
+                      }),
+                    );
+                    return;
+                  }
+                  if (root) {
+                    // `merge: false` evita que el tab recuerde pantallas internas (p.ej. WorkerProfile).
+                    (navigation as any).dispatch(
+                      CommonActions.navigate({
+                        name: route.name,
+                        params: { screen: root },
+                        merge: false,
+                      }),
+                    );
+                    return;
+                  }
+                  navigation.navigate(route.name);
+                }
               }}
               style={styles.tabSlot}
             >
-              <Ionicons
-                name={iconName}
-                size={24}
-                color={color}
-                style={locked ? styles.iconLocked : undefined}
-              />
+              <View style={styles.iconWrap}>
+                {showProfilePhoto ? (
+                  <Image
+                    source={{ uri: profileAvatarUri }}
+                    style={[
+                      styles.profileAvatar,
+                      { borderColor: isFocused ? colors.primary : 'rgba(17,24,39,0.12)' },
+                    ]}
+                    accessibilityIgnoresInvertColors
+                  />
+                ) : (
+                  <Ionicons
+                    name={iconName}
+                    size={24}
+                    color={color}
+                    style={locked ? styles.iconLocked : undefined}
+                  />
+                )}
+                {showMsgBadge ? (
+                  <View style={styles.unreadBadge}>
+                    <Text style={styles.unreadBadgeText}>{badgeText}</Text>
+                  </View>
+                ) : null}
+              </View>
               <Text style={[styles.tabLabel, { color }, locked && styles.labelLocked]} numberOfLines={1}>
                 {label}
               </Text>
@@ -137,6 +227,33 @@ const styles = StyleSheet.create({
     paddingBottom: 2,
     minHeight: 48,
   },
+  iconWrap: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileAvatar: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#E5E5E5',
+    borderWidth: 2,
+  },
+  unreadBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -12,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 5,
+    backgroundColor: '#DC2626',
+    borderWidth: 1.8,
+    borderColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unreadBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800', lineHeight: 14 },
   tabLabel: {
     fontSize: 11,
     fontWeight: '600',

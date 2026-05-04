@@ -6,6 +6,7 @@ import type { User } from '@supabase/supabase-js';
 import { isSupabaseConfigured } from '../config/supabase';
 import { getSupabaseClient } from '../lib/supabase';
 import { newRandomUserId, stableUserIdFromEmail } from '../utils/stableUserId';
+import { calcAgeFromBirthDate, parseBirthDateParts } from '../utils/birthDate';
 import {
   clearPendingProfileSignup,
   savePendingProfileSignup,
@@ -68,6 +69,7 @@ export type WorkerTradeDraft = {
   name: string;
   details: string;
   proofImageUri?: string;
+  proofImageUris?: string[];
   rubroSlug?: string;
 };
 
@@ -97,6 +99,7 @@ export type AuthUser = {
       name: string;
       details: string;
       proofImageUri?: string;
+      proofImageUris?: string[];
       rubroSlug?: string;
       isPrimary: boolean;
     }>;
@@ -108,6 +111,14 @@ export type AuthUser = {
   profileCreatedAt?: string;
   /** Texto corto para mostrar en perfil (oficio principal u opcional en el futuro). */
   bio?: string;
+
+  /** Rating acumulado (para mostrar estrellas en Mi Perfil). */
+  ratingAverage?: number;
+  /** Cantidad de reseñas acumuladas. */
+  reviewCount?: number;
+
+  /** Fecha de nacimiento ISO (YYYY-MM-DD) */
+  birthDate?: string;
 };
 
 export type AuthResult = { ok: true; user: AuthUser } | { ok: false; message: string };
@@ -121,12 +132,14 @@ export type SignUpPayload = {
   password: string;
   phone: string;
   baseLocation: { address: string; lat: number; lng: number };
+  /** YYYY-MM-DD */
+  birthDate: string;
 
   offerServices: boolean;
   coverageKm?: number;
   trades?: WorkerTradeDraft[];
   primaryTradeId?: string;
-  /** Presentación corta (opcional), máx. 500 caracteres. */
+  /** Descripción profesional (obligatorio si ofrecés servicios), máx. 500 caracteres. Se persiste como bio en perfil. */
   bio?: string;
 };
 
@@ -138,10 +151,20 @@ function validateSignUpPayload(payload: SignUpPayload): string | null {
   const email = payload.email.trim().toLowerCase();
   const phone = payload.phone.trim();
   const address = payload.baseLocation?.address?.trim();
+  const birth = (payload.birthDate ?? '').trim();
 
   if (!first || !last || !email || !dni || !avatarUri) {
     return 'Completá todos los campos obligatorios.';
   }
+  if (!birth) {
+    return 'Completá tu fecha de nacimiento.';
+  }
+  if (!parseBirthDateParts(birth)) {
+    return 'Ingresá tu fecha de nacimiento con formato AAAA-MM-DD.';
+  }
+  const age = calcAgeFromBirthDate(birth);
+  if (age == null) return 'Ingresá una fecha de nacimiento válida.';
+  if (age < 18) return 'Debés ser mayor de 18 años.';
   if (dni.length < 7 || dni.length > 9) {
     return 'Ingresá un DNI válido.';
   }
@@ -157,10 +180,13 @@ function validateSignUpPayload(payload: SignUpPayload): string | null {
 
   const bio = (payload.bio ?? '').trim();
   if (bio.length > 500) {
-    return 'La presentación (bio) no puede superar los 500 caracteres.';
+    return 'La descripción profesional no puede superar los 500 caracteres.';
   }
 
   if (payload.offerServices) {
+    if (bio.length < 20) {
+      return 'La descripción profesional es obligatoria (mínimo 20 caracteres).';
+    }
     const km = Math.floor(Number(payload.coverageKm) || 0);
     if (km < 1) return 'Ingresá un radio de cobertura válido.';
     const trades = payload.trades ?? [];

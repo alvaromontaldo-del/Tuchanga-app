@@ -11,34 +11,55 @@ import {
 } from 'react-native';
 import { colors, spacing } from '../../constants/theme';
 
-type Props = {
-  urls: string[];
-  imageHeight: number;
-  onPressImage?: (url: string, index: number) => void;
-};
+export type PostImageCarouselProps =
+  | {
+      urls: string[];
+      variant: 'feed';
+      /** Relación ancho/alto (p. ej. 4/5 vertical estilo Instagram). Por defecto 4/5. */
+      aspectRatio?: number;
+      onPressImage?: (url: string, index: number) => void;
+    }
+  | {
+      urls: string[];
+      variant: 'fixedHeight';
+      imageHeight: number;
+      onPressImage?: (url: string, index: number) => void;
+    };
 
 /**
- * Carrusel horizontal con desliz (hasta 3 fotos). Los puntos siguen la foto visible.
+ * Carrusel horizontal con paging. Variante `feed`: ancho pantalla, puntos flotantes.
  */
-export function PostImageCarousel({ urls, imageHeight, onPressImage }: Props) {
+export function PostImageCarousel(props: PostImageCarouselProps) {
+  const { urls, onPressImage } = props;
   const { width: screenWidth } = useWindowDimensions();
-  const fallbackWidth = screenWidth - spacing.lg * 2;
-  /** Ancho real del carrusel (onLayout); debe coincidir con cada ítem para que paging e índice cuadren */
-  const [trackWidth, setTrackWidth] = useState(fallbackWidth);
   const [activeIndex, setActiveIndex] = useState(0);
+
+  const isFeed = props.variant === 'feed';
+  const aspectRatio = isFeed ? props.aspectRatio ?? 4 / 5 : undefined;
+  const pageHeight = isFeed
+    ? screenWidth / (aspectRatio ?? 4 / 5)
+    : props.variant === 'fixedHeight'
+      ? props.imageHeight
+      : 0;
+
+  const fallbackWidth = screenWidth - spacing.lg * 2;
+  const [trackWidth, setTrackWidth] = useState(isFeed ? screenWidth : fallbackWidth);
 
   useEffect(() => {
     setActiveIndex(0);
   }, [urls.join('|')]);
 
+  useEffect(() => {
+    if (isFeed) {
+      setTrackWidth(screenWidth);
+    }
+  }, [isFeed, screenWidth]);
+
   const syncIndexFromOffset = useCallback(
     (offsetX: number) => {
       const w = trackWidth;
       if (w <= 0 || urls.length === 0) return;
-      const next = Math.min(
-        urls.length - 1,
-        Math.max(0, Math.round(offsetX / w)),
-      );
+      const next = Math.min(urls.length - 1, Math.max(0, Math.round(offsetX / w)));
       setActiveIndex((prev) => (prev !== next ? next : prev));
     },
     [trackWidth, urls.length],
@@ -62,15 +83,22 @@ export function PostImageCarousel({ urls, imageHeight, onPressImage }: Props) {
     return null;
   }
 
+  const itemW = isFeed ? screenWidth : trackWidth;
+  const itemH = pageHeight;
+
   return (
     <View
-      style={styles.wrap}
-      onLayout={(e) => {
-        const w = e.nativeEvent.layout.width;
-        if (w > 0) {
-          setTrackWidth((prev) => (Math.abs(prev - w) > 0.5 ? w : prev));
-        }
-      }}
+      style={[styles.wrap, isFeed && styles.wrapFeed]}
+      onLayout={
+        isFeed
+          ? undefined
+          : (e) => {
+              const w = e.nativeEvent.layout.width;
+              if (w > 0) {
+                setTrackWidth((prev) => (Math.abs(prev - w) > 0.5 ? w : prev));
+              }
+            }
+      }
     >
       <FlatList
         data={urls}
@@ -84,30 +112,24 @@ export function PostImageCarousel({ urls, imageHeight, onPressImage }: Props) {
         onMomentumScrollEnd={onScrollEnd}
         onScrollEndDrag={onScrollEnd}
         renderItem={({ item, index }) => (
-          <Pressable
-            onPress={() => onPressImage?.(item, index)}
-            disabled={!onPressImage}
-          >
+          <Pressable onPress={() => onPressImage?.(item, index)} disabled={!onPressImage}>
             <Image
               source={{ uri: item }}
-              style={{ width: trackWidth, height: imageHeight }}
+              style={{ width: itemW, height: itemH }}
               resizeMode="cover"
             />
           </Pressable>
         )}
         getItemLayout={(_, index) => ({
-          length: trackWidth,
-          offset: trackWidth * index,
+          length: itemW,
+          offset: itemW * index,
           index,
         })}
       />
       {urls.length > 1 ? (
-        <View style={styles.dots}>
+        <View style={[styles.dots, isFeed && styles.dotsFloating]} pointerEvents="none">
           {urls.map((_, i) => (
-            <View
-              key={i}
-              style={[styles.dot, i === activeIndex && styles.dotActive]}
-            />
+            <View key={i} style={[styles.dot, i === activeIndex && styles.dotActive]} />
           ))}
         </View>
       ) : null}
@@ -120,17 +142,27 @@ const styles = StyleSheet.create({
     position: 'relative',
     width: '100%',
   },
+  wrapFeed: {
+    alignSelf: 'stretch',
+  },
   dots: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: spacing.sm,
   },
+  dotsFloating: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: spacing.sm,
+    paddingVertical: 0,
+  },
   dot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#4B5563',
+    backgroundColor: 'rgba(255,255,255,0.45)',
     marginHorizontal: 3,
   },
   dotActive: {

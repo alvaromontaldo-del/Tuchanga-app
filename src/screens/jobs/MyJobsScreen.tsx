@@ -1,37 +1,39 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useMemo } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { PostCard } from '../../components/feed/PostCard';
-import { colors, radii, spacing } from '../../constants/theme';
+import { ChangaPostListRow } from '../../components/feed/ChangaPostListRow';
+import { colors, radii, spacing, typography } from '../../constants/theme';
+import { useAppToast } from '../../components/toast/toast';
 import { useFeed } from '../../context/FeedContext';
+import { useAuth } from '../../context/AuthContext';
+import { isSupabaseConfigured } from '../../config/supabase';
 import type { MyJobsScreenNavigation } from '../../navigation/mainTypes';
-import { CURRENT_USER_WORKER_ID } from '../../types/feed';
+import { deletePostInSupabase } from '../../services/supabasePosts';
 import { accountUi } from '../account/accountUi';
 
 /**
  * Publicaciones del usuario actual (mismo origen que el feed: FeedContext).
- * Header nativo del stack Perfil: título y volver atrás.
+ * Vista lista alineada con búsqueda (ChangaCard).
  */
 export function MyJobsScreen() {
   const navigation = useNavigation<MyJobsScreenNavigation>();
-  const { posts, toggleLike } = useFeed();
+  const { posts, removePostLocal } = useFeed();
+  const { user } = useAuth();
+  const toast = useAppToast();
 
   const myPosts = useMemo(
-    () => posts.filter((p) => p.workerId === CURRENT_USER_WORKER_ID),
-    [posts],
+    () => (user?.id ? posts.filter((p) => p.workerId === user.id) : []),
+    [posts, user?.id],
   );
 
   function goPublish() {
     navigation.navigate('Inicio', { screen: 'PublishPost' });
   }
 
-  function openProfile(workerId: string) {
-    navigation.navigate('Inicio', {
-      screen: 'WorkerProfile',
-      params: { workerId },
-    });
+  function openPostDetail(postId: string) {
+    navigation.navigate('Inicio', { screen: 'PostDetail', params: { postId } });
   }
 
   return (
@@ -46,29 +48,60 @@ export function MyJobsScreen() {
         </Text>
 
         {myPosts.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Ionicons name="images-outline" size={46} color={colors.border} />
-            <Text style={styles.emptyTitle}>Todavía no tenés publicaciones</Text>
-            <Text style={styles.emptyText}>
-              Usá el botón Publicar en la barra inferior (con modo trabajador activo en Perfil).
-            </Text>
-            <Pressable
-              onPress={goPublish}
-              style={({ pressed }) => [styles.cta, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="Ir a publicar un trabajo"
-            >
-              <Text style={styles.ctaText}>Publicar trabajo</Text>
-            </Pressable>
+          <View style={styles.emptyWrap}>
+            <View style={styles.emptyCard}>
+              <Ionicons name="images-outline" size={46} color={colors.border} />
+              <Text style={styles.emptyTitle}>Todavía no tenés publicaciones</Text>
+              <Text style={styles.emptyText}>
+                Usá el botón Publicar en la barra inferior.
+              </Text>
+              <Pressable
+                onPress={goPublish}
+                style={({ pressed }) => [styles.cta, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Ir a publicar un trabajo"
+              >
+                <Text style={styles.ctaText}>Publicar trabajo</Text>
+              </Pressable>
+            </View>
           </View>
         ) : (
           <>
             {myPosts.map((post) => (
-              <PostCard
+              <ChangaPostListRow
                 key={post.id}
                 post={post}
-                onToggleLike={() => toggleLike(post.id)}
-                onOpenProfile={() => openProfile(post.workerId)}
+                onPress={() => openPostDetail(post.id)}
+                onPressMenu={() => {
+                  Alert.alert(
+                    'Eliminar publicación',
+                    '¿Estás seguro de que deseas eliminar esta publicación permanentemente?',
+                    [
+                      { text: 'Cancelar', style: 'cancel' },
+                      {
+                        text: 'Eliminar',
+                        style: 'destructive',
+                        onPress: () => {
+                          void (async () => {
+                            try {
+                              if (isSupabaseConfigured()) {
+                                await deletePostInSupabase(post.id);
+                              }
+                              removePostLocal(post.id);
+                              toast.success('Publicación eliminada.', 'Listo');
+                            } catch (e) {
+                              toast.error(
+                                e instanceof Error ? e.message : 'No se pudo eliminar.',
+                                'Error',
+                                { durationMs: 4200 },
+                              );
+                            }
+                          })();
+                        },
+                      },
+                    ],
+                  );
+                }}
               />
             ))}
             <View style={styles.bottomSpacer} />
@@ -82,21 +115,25 @@ export function MyJobsScreen() {
 const styles = StyleSheet.create({
   scrollInner: {
     paddingTop: spacing.md,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: 0,
   },
   lead: {
-    fontSize: 14,
-    lineHeight: 20,
+    ...typography.body,
     color: colors.textSecondary,
     marginBottom: spacing.lg,
+    paddingHorizontal: spacing.lg,
+  },
+  emptyWrap: {
+    paddingHorizontal: 0,
   },
   emptyCard: {
     backgroundColor: colors.surface,
     borderRadius: radii.card,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
     padding: spacing.lg,
     alignItems: 'center',
+    marginHorizontal: spacing.lg,
   },
   emptyTitle: { marginTop: spacing.md, fontSize: 17, fontWeight: '800', color: colors.text },
   emptyText: {

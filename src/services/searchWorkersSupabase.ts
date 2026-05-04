@@ -13,6 +13,8 @@ type RpcRow = {
   primary_trade: string | null;
   all_trades: string[] | null;
   summary_jobs: string | null;
+  rating_average?: number | null;
+  review_count?: number | null;
 };
 
 const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?u=worker';
@@ -55,8 +57,14 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
       id: r.profile_id,
       firstName,
       summary,
-      ratingAverage: 0,
-      reviewCount: 0,
+      ratingAverage:
+        typeof r.rating_average === 'number' && !Number.isNaN(r.rating_average)
+          ? Math.max(0, Math.min(5, Number(r.rating_average) || 0))
+          : 0,
+      reviewCount:
+        typeof r.review_count === 'number' && Number.isFinite(r.review_count)
+          ? Math.max(0, Math.floor(Number(r.review_count) || 0))
+          : 0,
       avatarUrl: r.avatar_url?.trim() || `${DEFAULT_AVATAR}&id=${encodeURIComponent(r.profile_id)}`,
       categories,
       lat: r.lat,

@@ -3,9 +3,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
+  Modal,
   Image,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -16,14 +15,17 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppButton } from '../../components/common/AppButton';
+import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
 import { AppTextInput } from '../../components/common/AppTextInput';
 import { LocationMap } from '../../components/location/LocationMap';
 import { SingleSelectModal } from '../../components/common/SingleSelectModal';
 import { TradeSearchModal } from '../../components/search/TradeSearchModal';
 import { TextLink } from '../../components/common/TextLink';
 import { TermsAndConditionsModal } from '../../components/legal/TermsAndConditionsModal';
+import { useAppToast } from '../../components/toast/toast';
 import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/nominatim';
 import {
   DEFAULT_PHONE_COUNTRY_ID,
@@ -43,6 +45,13 @@ import {
   sanitizeNationalPhoneDigits,
   validateNationalPhone,
 } from '../../utils/validation';
+import {
+  birthDateIsoFromDate,
+  calcAgeFromBirthDate,
+  dateFromBirthDateIso,
+  formatBirthDateDisplay,
+  parseBirthDateParts,
+} from '../../utils/birthDate';
 import { colors, radii, spacing } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { closeAuthModalAndGoToInicio } from '../../navigation/openAuthModal';
@@ -52,23 +61,25 @@ type Props = AuthStackScreenProps<'Register'>;
 
 type GeoPoint = { lat: number; lng: number; address: string };
 
-const MAX_BIO_LEN = 500;
-
 type DraftErrors = Partial<Record<
   | 'firstName'
   | 'lastName'
   | 'dni'
   | 'avatar'
+  | 'birthDate'
   | 'email'
   | 'phone'
-  | 'bio'
   | 'password'
   | 'confirm'
   | 'location'
+  | 'professionalDescription'
   | 'coverageKm'
   | 'trades',
   string
 >>;
+
+const MAX_PROFESSIONAL_DESCRIPTION_LEN = 500;
+const MIN_PROFESSIONAL_DESCRIPTION_LEN = 20;
 
 function normalizeDigitsOnly(input: string) {
   return input.replace(/[^0-9]/g, '');
@@ -82,6 +93,7 @@ export function RegisterScreen({ navigation }: Props) {
   const { signIn, setFlashMessage } = useAuth();
   const { width } = useWindowDimensions();
   const contentWidth = Math.min(width - spacing.lg * 2, 520);
+  const toast = useAppToast();
 
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<DraftErrors>({});
@@ -95,13 +107,17 @@ export function RegisterScreen({ navigation }: Props) {
   const [lastName, setLastName] = useState('');
   const [dni, setDni] = useState('');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [birthDate, setBirthDate] = useState('');
+  const [birthPickerOpen, setBirthPickerOpen] = useState(false);
+  const [birthPickerDraft, setBirthPickerDraft] = useState<Date>(new Date(2000, 0, 1, 12, 0, 0, 0));
   const [email, setEmail] = useState('');
   const [phoneNationalDigits, setPhoneNationalDigits] = useState('');
   const [phoneCountryId, setPhoneCountryId] = useState(DEFAULT_PHONE_COUNTRY_ID);
   const [phoneCountryPickerOpen, setPhoneCountryPickerOpen] = useState(false);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [bio, setBio] = useState('');
+  /** Obligatorio solo si ofrece servicios; se guarda como bio en el perfil. */
+  const [professionalDescription, setProfessionalDescription] = useState('');
 
   // Ubicación base
   const [addressQuery, setAddressQuery] = useState('');
@@ -165,6 +181,28 @@ export function RegisterScreen({ navigation }: Props) {
     }
   }
 
+  function blurBirthDate() {
+    const t = birthDate.trim();
+    if (!t) {
+      setErrors((p) => ({ ...p, birthDate: 'La fecha de nacimiento es obligatoria.' }));
+      return;
+    }
+    if (!parseBirthDateParts(t)) {
+      setErrors((p) => ({ ...(p as any), birthDate: 'Formato esperado: AAAA-MM-DD.' }));
+      return;
+    }
+    const age = calcAgeFromBirthDate(t);
+    if (age == null) {
+      setErrors((p) => ({ ...(p as any), birthDate: 'Ingresá una fecha válida.' }));
+      return;
+    }
+    if (age < 18) {
+      setErrors((p) => ({ ...(p as any), birthDate: 'Debés ser mayor de 18 años.' }));
+      return;
+    }
+    setErrors((p) => ({ ...(p as any), birthDate: undefined }));
+  }
+
   function blurEmail() {
     const t = email.trim();
     if (!t) {
@@ -217,7 +255,7 @@ export function RegisterScreen({ navigation }: Props) {
   async function pickAvatar() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permisos', 'Necesitamos acceso a tu galería para subir tu foto de perfil.');
+      toast.warning('Necesitamos acceso a tu galería para subir tu foto de perfil.', 'Permisos');
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -234,19 +272,32 @@ export function RegisterScreen({ navigation }: Props) {
   async function pickTradePhoto(tradeId: string) {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permisos', 'Necesitamos acceso a tu galería para subir una foto de respaldo.');
+      toast.warning('Necesitamos acceso a tu galería para subir fotos del oficio.', 'Permisos');
       return;
     }
+    const current =
+      trades.find((t) => t.id === tradeId)?.proofImageUris?.length
+        ? (trades.find((t) => t.id === tradeId)!.proofImageUris as string[])
+        : trades.find((t) => t.id === tradeId)?.proofImageUri
+          ? [trades.find((t) => t.id === tradeId)!.proofImageUri as string]
+          : [];
+    const left = Math.max(0, 5 - current.length);
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
+      allowsMultipleSelection: true,
+      selectionLimit: Math.max(1, Math.min(5, left || 5)),
+      allowsEditing: false,
       quality: 0.9,
     });
-    if (!result.canceled && result.assets[0]?.uri) {
-      setTrades((prev) =>
-        prev.map((t) => (t.id === tradeId ? { ...t, proofImageUri: result.assets[0].uri } : t)),
-      );
-    }
+    if (result.canceled) return;
+    const picked = (result.assets ?? []).map((a) => a.uri).filter(Boolean).slice(0, 5);
+    if (picked.length === 0) return;
+    const next = [...current, ...picked].filter(Boolean).slice(0, 5);
+    setTrades((prev) =>
+      prev.map((t) =>
+        t.id === tradeId ? { ...t, proofImageUri: next[0], proofImageUris: next } : t,
+      ),
+    );
   }
 
   function addTradeBlock() {
@@ -372,6 +423,15 @@ export function RegisterScreen({ navigation }: Props) {
     if (!dniDigits) next.dni = 'El DNI es obligatorio.';
     else if (dniDigits.length < 7 || dniDigits.length > 9) next.dni = 'Ingresá un DNI válido.';
 
+    const bd = birthDate.trim();
+    if (!bd) (next as any).birthDate = 'La fecha de nacimiento es obligatoria.';
+    else if (!parseBirthDateParts(bd)) (next as any).birthDate = 'Formato esperado: AAAA-MM-DD.';
+    else {
+      const age = calcAgeFromBirthDate(bd);
+      if (age == null) (next as any).birthDate = 'Ingresá una fecha válida.';
+      else if (age < 18) (next as any).birthDate = 'Debés ser mayor de 18 años.';
+    }
+
     if (!avatarUri) next.avatar = 'La foto de perfil es obligatoria.';
 
     if (!email.trim()) next.email = 'El email es obligatorio.';
@@ -380,10 +440,6 @@ export function RegisterScreen({ navigation }: Props) {
     const phoneErr = validateNationalPhone(phoneCountryId, phoneNationalDigits);
     if (phoneErr) next.phone = phoneErr;
 
-    if (bio.trim().length > MAX_BIO_LEN) {
-      next.bio = `Máximo ${MAX_BIO_LEN} caracteres.`;
-    }
-
     const pwdErr = getPasswordRegistrationError(password);
     if (pwdErr) next.password = pwdErr;
     if (!passwordsMatch(password, confirm)) next.confirm = 'Las contraseñas no coinciden.';
@@ -391,6 +447,13 @@ export function RegisterScreen({ navigation }: Props) {
     if (!geo) next.location = 'Seleccioná una dirección para obtener latitud/longitud.';
 
     if (offerServices) {
+      const desc = professionalDescription.trim();
+      if (desc.length < MIN_PROFESSIONAL_DESCRIPTION_LEN) {
+        next.professionalDescription = `La descripción profesional es obligatoria (mínimo ${MIN_PROFESSIONAL_DESCRIPTION_LEN} caracteres).`;
+      } else if (desc.length > MAX_PROFESSIONAL_DESCRIPTION_LEN) {
+        next.professionalDescription = `Máximo ${MAX_PROFESSIONAL_DESCRIPTION_LEN} caracteres.`;
+      }
+
       const km = clampInt(Number(coverageKm) || 0, 1, 300);
       if (!Number.isFinite(Number(coverageKm)) || km < 1) {
         next.coverageKm = 'Ingresá un radio válido (mínimo 1 km).';
@@ -429,6 +492,7 @@ export function RegisterScreen({ navigation }: Props) {
         lastName: lastName.trim(),
         dni: normalizeDigitsOnly(dni),
         avatarUri,
+        birthDate: birthDate.trim(),
         email: email.trim(),
         phone: buildInternationalPhoneDisplay(
           selectedPhoneCountry.dial,
@@ -436,7 +500,7 @@ export function RegisterScreen({ navigation }: Props) {
           phoneNationalDigits,
         ),
         password,
-        bio: bio.trim() || undefined,
+        bio: offerServices ? professionalDescription.trim() : undefined,
         baseLocation: geo,
         offerServices,
         coverageKm: offerServices ? clampInt(Number(coverageKm) || 0, 1, 300) : undefined,
@@ -445,7 +509,7 @@ export function RegisterScreen({ navigation }: Props) {
       });
 
       if (!result.ok) {
-        Alert.alert('Error', result.message);
+        toast.error(result.message, 'Error', { durationMs: 4200 });
         return;
       }
       setFlashMessage('¡Cuenta creada! Bienvenido/a a Tu Changa.');
@@ -458,10 +522,7 @@ export function RegisterScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <AppKeyboardAvoidingView style={styles.flex}>
         <ScrollView
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
@@ -534,6 +595,35 @@ export function RegisterScreen({ navigation }: Props) {
               placeholder="Ej.: 12345678"
               error={errors.dni}
             />
+            <View style={styles.birthWrap}>
+              <Text style={styles.birthLabel}>Fecha de nacimiento *</Text>
+              <Pressable
+                onPress={() => {
+                  setBirthPickerDraft(
+                    dateFromBirthDateIso(birthDate) ?? new Date(2000, 0, 1, 12, 0, 0, 0),
+                  );
+                  setBirthPickerOpen(true);
+                }}
+                style={({ pressed }) => [
+                  styles.birthInputRow,
+                  errors.birthDate ? styles.birthInputRowError : null,
+                  pressed && styles.pressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Elegir fecha de nacimiento"
+              >
+                <TextInput
+                  value={formatBirthDateDisplay(birthDate) ?? ''}
+                  editable={false}
+                  pointerEvents="none"
+                  placeholder="DD/MM/AAAA (18+)"
+                  placeholderTextColor={colors.textSecondary}
+                  style={styles.birthInput}
+                />
+                <Ionicons name="calendar-outline" size={20} color={colors.textSecondary} />
+              </Pressable>
+              {errors.birthDate ? <Text style={styles.birthError}>{errors.birthDate}</Text> : null}
+            </View>
 
             <Text style={styles.section}>Contacto</Text>
             <AppTextInput
@@ -594,27 +684,6 @@ export function RegisterScreen({ navigation }: Props) {
               {errors.phone ? <Text style={styles.phoneError}>{errors.phone}</Text> : null}
             </View>
 
-            <Text style={styles.section}>Presentación (opcional)</Text>
-            <Text style={styles.hint}>
-              Contá algo sobre vos. Se muestra en tu perfil (máximo {MAX_BIO_LEN} caracteres).
-            </Text>
-            <Text style={styles.fieldLabel}>Bio</Text>
-            <TextInput
-              style={[styles.textArea, errors.bio ? styles.textAreaError : null]}
-              value={bio}
-              onChangeText={(t) => {
-                setBio(t.slice(0, MAX_BIO_LEN));
-                setErrors((p) => ({ ...p, bio: undefined }));
-              }}
-              multiline
-              placeholder="Ej.: Electricista matriculado, trabajo en zona norte…"
-              placeholderTextColor={colors.textSecondary}
-            />
-            {errors.bio ? <Text style={styles.error}>{errors.bio}</Text> : null}
-            <Text style={styles.bioCounter}>
-              {bio.length}/{MAX_BIO_LEN}
-            </Text>
-
             <Text style={styles.section}>Seguridad</Text>
             <AppTextInput
               label="Contraseña *"
@@ -627,7 +696,7 @@ export function RegisterScreen({ navigation }: Props) {
                 }
               }}
               onBlur={blurPassword}
-              secureTextEntry
+              passwordToggle
               placeholder="8+ caracteres, letra y número"
               error={errors.password}
             />
@@ -639,7 +708,7 @@ export function RegisterScreen({ navigation }: Props) {
                 setErrors((p) => ({ ...p, confirm: undefined }));
               }}
               onBlur={blurConfirm}
-              secureTextEntry
+              passwordToggle
               placeholder="Repetí la contraseña"
               error={errors.confirm}
             />
@@ -746,7 +815,13 @@ export function RegisterScreen({ navigation }: Props) {
                     setTrades([]);
                     setPrimaryTradeId(null);
                     setCoverageKm('10');
-                    setErrors((prev) => ({ ...prev, coverageKm: undefined, trades: undefined }));
+                    setProfessionalDescription('');
+                    setErrors((prev) => ({
+                      ...prev,
+                      coverageKm: undefined,
+                      trades: undefined,
+                      professionalDescription: undefined,
+                    }));
                   } else if (trades.length === 0) {
                     addTradeBlock();
                   }
@@ -758,6 +833,32 @@ export function RegisterScreen({ navigation }: Props) {
 
             {offerServices ? (
               <View style={styles.workerWrap}>
+                <Text style={styles.section}>Descripción profesional *</Text>
+                <Text style={styles.hint}>
+                  Contá quién sos como profesional, experiencia y qué ofrecés (mínimo{' '}
+                  {MIN_PROFESSIONAL_DESCRIPTION_LEN} caracteres). Se muestra en tu perfil público.
+                </Text>
+                <TextInput
+                  style={[
+                    styles.textArea,
+                    errors.professionalDescription ? styles.textAreaError : null,
+                  ]}
+                  value={professionalDescription}
+                  onChangeText={(t) => {
+                    setProfessionalDescription(t.slice(0, MAX_PROFESSIONAL_DESCRIPTION_LEN));
+                    setErrors((p) => ({ ...p, professionalDescription: undefined }));
+                  }}
+                  multiline
+                  placeholder="Ej.: Electricista matriculado con 10 años de experiencia en instalaciones y reparaciones…"
+                  placeholderTextColor={colors.textSecondary}
+                />
+                {errors.professionalDescription ? (
+                  <Text style={styles.error}>{errors.professionalDescription}</Text>
+                ) : null}
+                <Text style={styles.summaryCounter}>
+                  {professionalDescription.length}/{MAX_PROFESSIONAL_DESCRIPTION_LEN}
+                </Text>
+
                 <Text style={styles.section}>Radio de cobertura</Text>
                 <Text style={styles.hint}>
                   Definí tu alcance en km desde tu ubicación base.
@@ -842,7 +943,7 @@ export function RegisterScreen({ navigation }: Props) {
                       maxLength={600}
                     />
 
-                    <Text style={styles.fieldLabel}>Foto de respaldo</Text>
+                    <Text style={styles.fieldLabel}>Fotos del oficio (hasta 5)</Text>
                     <Pressable
                       style={styles.photoRow}
                       onPress={() => void pickTradePhoto(t.id)}
@@ -852,17 +953,66 @@ export function RegisterScreen({ navigation }: Props) {
                         {t.proofImageUri ? (
                           <Image source={{ uri: t.proofImageUri }} style={styles.photoThumbImg} />
                         ) : (
-                          <Ionicons name="image-outline" size={22} color={colors.textSecondary} />
+                          <Ionicons name="images-outline" size={22} color={colors.textSecondary} />
                         )}
                       </View>
                       <View style={styles.photoText}>
                         <Text style={styles.photoTitle}>
-                          {t.proofImageUri ? 'Cambiar foto' : 'Subir foto'}
+                          {t.proofImageUri ? 'Agregar / cambiar' : 'Agregar fotos'}
                         </Text>
-                        <Text style={styles.photoHint}>Opcional (por oficio)</Text>
+                        <Text style={styles.photoHint}>Opcional (mejora confianza)</Text>
                       </View>
-                      <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+                      {t.proofImageUri ? (
+                        <Pressable
+                          onPress={() =>
+                            setTrades((prev) =>
+                              prev.map((x) =>
+                                x.id === t.id ? { ...x, proofImageUri: undefined, proofImageUris: undefined } : x,
+                              ),
+                            )
+                          }
+                          hitSlop={10}
+                          accessibilityRole="button"
+                          accessibilityLabel="Quitar fotos del oficio"
+                        >
+                          <Ionicons name="trash-outline" size={20} color={colors.textSecondary} />
+                        </Pressable>
+                      ) : (
+                        <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+                      )}
                     </Pressable>
+
+                    {(t.proofImageUris?.length ?? 0) > 1 ? (
+                      <View style={styles.photoStrip}>
+                        {t.proofImageUris!.map((u, i) => (
+                          <View key={`${u}-${i}`} style={styles.photoMiniWrap}>
+                            <Image source={{ uri: u }} style={styles.photoMini} />
+                            <Pressable
+                              onPress={() => {
+                                const next = t.proofImageUris!.filter((_, j) => j !== i);
+                                setTrades((prev) =>
+                                  prev.map((x) =>
+                                    x.id === t.id
+                                      ? {
+                                          ...x,
+                                          proofImageUri: next[0],
+                                          proofImageUris: next.length ? next : undefined,
+                                        }
+                                      : x,
+                                  ),
+                                );
+                              }}
+                              hitSlop={8}
+                              style={styles.photoMiniRemove}
+                              accessibilityRole="button"
+                              accessibilityLabel="Quitar foto"
+                            >
+                              <Ionicons name="close-circle" size={18} color={colors.primary} />
+                            </Pressable>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
                   </View>
                 ))}
 
@@ -898,6 +1048,80 @@ export function RegisterScreen({ navigation }: Props) {
             </View>
           </View>
         </ScrollView>
+
+        {birthPickerOpen && Platform.OS === 'android' ? (
+          <DateTimePicker
+            value={birthPickerDraft}
+            mode="date"
+            display="default"
+            maximumDate={new Date()}
+            onChange={(e, selected) => {
+              if (e.type === 'dismissed') {
+                setBirthPickerOpen(false);
+                return;
+              }
+              if (e.type === 'set' && selected) {
+                const iso = birthDateIsoFromDate(selected);
+                setBirthDate(iso);
+                setErrors((p) => ({ ...p, birthDate: undefined }));
+                setBirthPickerOpen(false);
+              }
+            }}
+          />
+        ) : null}
+
+        {birthPickerOpen && Platform.OS === 'ios' ? (
+          <Modal
+            visible={birthPickerOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setBirthPickerOpen(false)}
+          >
+            <View style={styles.pickerBackdrop}>
+              <Pressable style={styles.pickerBackdrop} onPress={() => setBirthPickerOpen(false)} />
+              <View style={[styles.pickerCard, styles.pickerCardIos]}>
+                <View style={styles.pickerHeader}>
+                  <Pressable
+                    onPress={() => setBirthPickerOpen(false)}
+                    style={({ pressed }) => [styles.pickerHeaderBtn, pressed && styles.pressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cancelar"
+                  >
+                    <Text style={styles.pickerHeaderBtnText}>CANCELAR</Text>
+                  </Pressable>
+                  <Text style={styles.pickerTitle}>Fecha de nacimiento</Text>
+                  <Pressable
+                    onPress={() => {
+                      const iso = birthDateIsoFromDate(birthPickerDraft);
+                      setBirthDate(iso);
+                      setErrors((p) => ({ ...p, birthDate: undefined }));
+                      setBirthPickerOpen(false);
+                    }}
+                    style={({ pressed }) => [styles.pickerHeaderBtn, pressed && styles.pressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Aceptar"
+                  >
+                    <Text style={styles.pickerHeaderBtnText}>ACEPTAR</Text>
+                  </Pressable>
+                </View>
+                <View style={styles.pickerBodyIos}>
+                  <DateTimePicker
+                    value={birthPickerDraft}
+                    mode="date"
+                    display="spinner"
+                    textColor="#000"
+                    locale="es"
+                    maximumDate={new Date()}
+                    onChange={(_e, selected) => {
+                      if (!selected) return;
+                      setBirthPickerDraft(selected);
+                    }}
+                  />
+                </View>
+              </View>
+            </View>
+          </Modal>
+        ) : null}
 
         <TradeSearchModal
           visible={Boolean(tradePickerOpenForId)}
@@ -941,7 +1165,7 @@ export function RegisterScreen({ navigation }: Props) {
             setTermsOpen(false);
           }}
         />
-      </KeyboardAvoidingView>
+      </AppKeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -1260,11 +1484,13 @@ const styles = StyleSheet.create({
   textAreaError: {
     borderColor: colors.error,
   },
-  bioCounter: {
-    marginTop: spacing.xs,
+  summaryCounter: {
+    alignSelf: 'flex-end',
     fontSize: 12,
     color: colors.textSecondary,
     fontWeight: '600',
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
   },
   photoRow: {
     marginTop: spacing.sm,
@@ -1291,12 +1517,94 @@ const styles = StyleSheet.create({
   photoText: { flex: 1, marginLeft: spacing.md },
   photoTitle: { fontSize: 14, fontWeight: '900', color: colors.text },
   photoHint: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  photoStrip: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: spacing.sm,
+  },
+  photoMiniWrap: { width: 56, height: 56, borderRadius: 14, overflow: 'hidden' },
+  photoMini: { width: '100%', height: '100%' },
+  photoMiniRemove: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: colors.surface,
+    borderRadius: 999,
+  },
   addTradeButton: {
     marginTop: spacing.md,
   },
   submitButton: {
     marginTop: spacing.lg,
   },
+  birthWrap: { marginBottom: spacing.sm },
+  birthLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
+    marginLeft: 4,
+  },
+  birthInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.input,
+    minHeight: 52,
+    paddingRight: spacing.md,
+  },
+  birthInputRowError: { borderColor: colors.error },
+  birthInput: {
+    flex: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: colors.text,
+    minHeight: 52,
+  },
+  birthError: {
+    color: colors.error,
+    fontSize: 12,
+    marginTop: spacing.xs,
+    marginLeft: 4,
+  },
+  pickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  pickerCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.card,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  pickerCardIos: {
+    backgroundColor: '#fff',
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  pickerHeaderBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: radii.button,
+  },
+  pickerHeaderBtnText: { fontSize: 13, fontWeight: '900', color: colors.primary },
+  pickerTitle: { fontSize: 14, fontWeight: '900', color: colors.text },
+  pickerBodyIos: {
+    height: 250,
+    justifyContent: 'center',
+  },
+  pressed: { opacity: 0.9 },
   termsRow: {
     marginTop: spacing.md,
     flexDirection: 'row',

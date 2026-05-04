@@ -1,15 +1,19 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useRef, useState } from 'react';
+import { useScrollToTop } from '@react-navigation/native';
 import {
+  Alert,
   Image,
   Pressable,
   ScrollView,
   Share,
   StyleSheet,
-  Switch,
   Text,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ClickableAvatar } from '../../components/common/ClickableAvatar';
+import { StarRating } from '../../components/profile/StarRating';
 import { colors, radii, spacing } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useUserMode } from '../../context/UserModeContext';
@@ -27,13 +31,18 @@ function Row({
   onPress,
   subtitle,
   isLast,
+  destructive,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   title: string;
   subtitle?: string;
   onPress: () => void;
   isLast?: boolean;
+  /** Estilo de acción destructiva (p. ej. cerrar sesión) */
+  destructive?: boolean;
 }) {
+  const accent = destructive ? colors.error : colors.text;
+  const chevron = destructive ? colors.error : colors.textSecondary;
   return (
     <Pressable
       onPress={onPress}
@@ -46,28 +55,33 @@ function Row({
       accessibilityLabel={title}
     >
       <View style={styles.rowLeft}>
-        <Ionicons name={icon} size={22} color={colors.text} />
+        <Ionicons name={icon} size={22} color={accent} />
         <View style={styles.rowText}>
-          <Text style={styles.rowTitle}>{title}</Text>
+          <Text style={[styles.rowTitle, destructive && styles.rowTitleDestructive]}>{title}</Text>
           {subtitle ? <Text style={styles.rowSubtitle}>{subtitle}</Text> : null}
         </View>
       </View>
-      <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+      <Ionicons name="chevron-forward" size={20} color={chevron} />
     </Pressable>
   );
 }
 
 export function MyAccountScreen({ navigation }: Props) {
   const { signOut, user } = useAuth();
-  const { isWorkerMode, setWorkerMode } = useUserMode();
+  const { isWorker } = useUserMode();
   const { isWorkerRegistered } = useWorkerProfile();
+  const isWorkerRegisteredAnywhere = isWorkerRegistered || Boolean(isWorker);
 
   const displayName = displayNameFromUser(user);
   const initials = initialsFromAuthUser(user);
-
+  const ratingAverage = user?.ratingAverage ?? 0;
+  const reviewCount = user?.reviewCount ?? 0;
+  const scrollRef = useRef<ScrollView | null>(null);
+  useScrollToTop(scrollRef);
   return (
     <SafeAreaView style={accountUi.screenBg} edges={['top']}>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={accountUi.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
@@ -87,19 +101,18 @@ export function MyAccountScreen({ navigation }: Props) {
         >
           <View style={styles.heroAvatar}>
             {user?.avatarUri ? (
-              <Image
-                key={user.avatarUri}
-                source={{ uri: user.avatarUri }}
-                style={styles.heroAvatarImg}
-              />
+              <ClickableAvatar uri={user.avatarUri} style={styles.heroAvatarImg} fill />
             ) : (
               <Text style={styles.heroInitials}>{initials}</Text>
             )}
           </View>
           <View style={styles.heroBody}>
-            <Text style={styles.heroName} numberOfLines={1}>
-              {displayName}
-            </Text>
+            <View style={styles.heroNameRow}>
+              <Text style={styles.heroName} numberOfLines={1}>
+                {displayName}
+              </Text>
+              <StarRating score={ratingAverage} reviewCount={reviewCount} size={12} textSize={12} />
+            </View>
             <Text style={styles.heroEmail} numberOfLines={1}>
               {user?.email ?? ''}
             </Text>
@@ -110,23 +123,7 @@ export function MyAccountScreen({ navigation }: Props) {
 
         <Text style={accountUi.sectionLabel}>PROFESIONAL</Text>
         <View style={accountUi.card}>
-          <View style={[styles.modeRow, styles.rowBorder]}>
-            <View style={styles.modeRowText}>
-              <Text style={styles.modeTitle}>Modo trabajador</Text>
-              <Text style={styles.modeSub}>
-                Publicá en el feed y usá herramientas de oferta de servicios
-              </Text>
-            </View>
-            <Switch
-              value={isWorkerMode}
-              onValueChange={setWorkerMode}
-              trackColor={{ false: '#D1D5DB', true: '#FCA5A5' }}
-              thumbColor={isWorkerMode ? colors.primary : '#F3F4F6'}
-              accessibilityLabel="Modo trabajador"
-            />
-          </View>
-
-          {!isWorkerRegistered ? (
+          {!isWorkerRegisteredAnywhere ? (
             <Row
               icon="briefcase-outline"
               title="Ofrecer mis servicios"
@@ -143,6 +140,12 @@ export function MyAccountScreen({ navigation }: Props) {
                 onPress={() => navigation.navigate('MyJobs')}
               />
               <Row
+                icon="clipboard-outline"
+                title="Mis trabajos"
+                subtitle="Contratos y changas en curso o terminadas"
+                onPress={() => navigation.navigate('MyWorkOrders')}
+              />
+              <Row
                 icon="create-outline"
                 title="Editar perfil profesional"
                 subtitle="Oficios, cobertura y ubicación"
@@ -155,14 +158,18 @@ export function MyAccountScreen({ navigation }: Props) {
 
         <Text style={accountUi.sectionLabel}>CUENTA</Text>
         <View style={accountUi.card}>
-          {!isWorkerMode ? (
-            <Row
-              icon="heart-outline"
-              title="Favoritos"
-              subtitle="Próximamente"
-              onPress={() => {}}
-            />
-          ) : null}
+          <Row
+            icon="briefcase-outline"
+            title="Trabajos contratados"
+            subtitle="Servicios que contrataste como cliente"
+            onPress={() => navigation.navigate('ContractedWorkOrders')}
+          />
+          <Row
+            icon="heart-outline"
+            title="Mis favoritos"
+            subtitle="Profesionales guardados"
+            onPress={() => navigation.navigate('Favorites')}
+          />
 
           <Row
             icon="share-social-outline"
@@ -178,11 +185,29 @@ export function MyAccountScreen({ navigation }: Props) {
           <Row
             icon="log-out-outline"
             title="Cerrar sesión"
+            destructive
             onPress={() => {
-              void (async () => {
-                navigateToInicioTab();
-                await signOut();
-              })();
+              Alert.alert('Cerrar sesión', '¿Seguro que querés cerrar sesión?', [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                  text: 'Cerrar sesión',
+                  style: 'destructive',
+                  onPress: () => {
+                    void (async () => {
+                      await signOut();
+                      const parent = navigation.getParent();
+                      if (parent && 'reset' in parent) {
+                        (parent as any).reset({
+                          index: 0,
+                          routes: [{ name: 'Inicio', params: { screen: 'Home' } }],
+                        });
+                      } else {
+                        navigateToInicioTab();
+                      }
+                    })();
+                  },
+                },
+              ]);
             }}
             isLast
           />
@@ -226,6 +251,7 @@ const styles = StyleSheet.create({
   heroAvatarImg: { width: '100%', height: '100%' },
   heroInitials: { fontSize: 20, fontWeight: '800', color: '#fff' },
   heroBody: { flex: 1, minWidth: 0 },
+  heroNameRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
   heroName: { fontSize: 18, fontWeight: '800', color: colors.text },
   heroEmail: { marginTop: 2, fontSize: 14, color: colors.textSecondary },
   heroCta: { marginTop: 6, fontSize: 13, fontWeight: '700', color: colors.primary },
@@ -255,5 +281,6 @@ const styles = StyleSheet.create({
   rowLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   rowText: { marginLeft: spacing.sm, flex: 1 },
   rowTitle: { fontSize: 16, fontWeight: '700', color: colors.text },
+  rowTitleDestructive: { color: colors.error },
   rowSubtitle: { marginTop: 2, fontSize: 13, color: colors.textSecondary },
 });

@@ -14,22 +14,35 @@
     },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.cuervolinkedout.tuchanga",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Tu Changa usa tu ubicación para mostrarte profesionales cuyo radio de cobertura te alcanza."
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationWhenInUseUsageDescription": "Tu Changa usa tu ubicación para mostrarte profesionales cuyo radio de cobertura te alcanza.",
+        "NSCameraUsageDescription": "Tu Changa necesita acceso a la cámara para sacar fotos de perfil, oficios y publicaciones.",
+        "NSPhotoLibraryUsageDescription": "Tu Changa necesita acceso a tus fotos para elegir imágenes de perfil, oficios y publicaciones.",
+        "NSPhotoLibraryAddUsageDescription": "Tu Changa necesita permiso para guardar fotos recortadas si elegís esa opción."
       }
     },
     "android": {
+      "package": "com.cuervolinkedout.tuchanga",
       "adaptiveIcon": {
         "foregroundImage": "./assets/brand/app-icon-expo-go.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
       "favicon": "./assets/brand/app-icon-expo-go.png"
     },
     "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Tu Changa necesita acceso a la cámara para sacar fotos de perfil, oficios y publicaciones."
+        }
+      ],
       [
         "expo-image-picker",
         {

@@ -2,7 +2,10 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { colors, stackChrome } from '../constants/theme';
 import { HomeScreen } from '../screens/home/HomeScreen';
 import { PublishPostScreen } from '../screens/home/PublishPostScreen';
+import { PostDetailScreen } from '../screens/home/PostDetailScreen';
+import { SearchWorkerScreen } from '../screens/search/SearchWorkerScreen';
 import { WorkerProfileScreen } from '../screens/home/WorkerProfileScreen';
+import { WorkerPostsScreen } from '../screens/home/WorkerPostsScreen';
 import { WorkerReviewsScreen } from '../screens/home/WorkerReviewsScreen';
 import { ChatConversationScreen } from '../screens/chat/ChatConversationScreen';
 import type { FeedStackParamList } from './mainTypes';
@@ -26,9 +29,19 @@ export function FeedStack() {
         options={{ headerShown: false }}
       />
       <Stack.Screen
+        name="SearchWorker"
+        component={SearchWorkerScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
         name="WorkerProfile"
         component={WorkerProfileScreen}
         options={{ title: 'Perfil' }}
+      />
+      <Stack.Screen
+        name="WorkerPosts"
+        component={WorkerPostsScreen}
+        options={{ title: 'Publicaciones' }}
       />
       <Stack.Screen
         name="WorkerReviews"
@@ -42,6 +55,11 @@ export function FeedStack() {
           title: 'Nueva publicación',
           presentation: 'modal',
         }}
+      />
+      <Stack.Screen
+        name="PostDetail"
+        component={PostDetailScreen}
+        options={{ title: 'Publicación' }}
       />
       <Stack.Screen
         name="ChatConversation"

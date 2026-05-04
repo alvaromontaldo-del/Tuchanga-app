@@ -6,17 +6,26 @@ import type { ChatScreenParams } from '../screens/chat/ChatScreen';
 
 /** Stack del feed (inicio) */
 export type FeedStackParamList = {
-  Home: undefined;
-  WorkerProfile: { workerId: string };
+  /** Al re-tocar el tab Inicio: scroll arriba + refresh */
+  Home: { scrollToTopToken?: number } | undefined;
+  SearchWorker: {
+    initialQuery?: string;
+    initialCategories?: string[];
+    openFilters?: boolean;
+  };
+  WorkerProfile: { workerId: string; conversationId?: string };
+  WorkerPosts: { workerId: string };
   WorkerReviews: { workerId: string };
   PublishPost: undefined;
+  PostDetail: { postId: string };
   ChatConversation: ChatScreenParams;
 };
 
 /** Stack de búsqueda de profesionales */
 export type SearchStackParamList = {
   SearchWorker: undefined;
-  WorkerProfile: { workerId: string };
+  WorkerProfile: { workerId: string; conversationId?: string };
+  WorkerPosts: { workerId: string };
   WorkerReviews: { workerId: string };
   ChatConversation: ChatScreenParams;
 };
@@ -35,11 +44,13 @@ export type AccountStackParamList = {
   EditRegistration: undefined;
   WorkerABM: undefined;
   MyJobs: undefined;
+  MyWorkOrders: undefined;
+  ContractedWorkOrders: undefined;
+  Favorites: undefined;
 };
 
 export type MainTabParamList = {
   Inicio: NavigatorScreenParams<FeedStackParamList>;
-  Buscar: NavigatorScreenParams<SearchStackParamList>;
   Publicar: undefined;
   Mensajes: NavigatorScreenParams<MessagesStackParamList>;
   Perfil: NavigatorScreenParams<AccountStackParamList>;

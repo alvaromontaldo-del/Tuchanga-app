@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -17,6 +17,8 @@ import type { AccountStackScreenProps } from '../../navigation/accountTypes';
 import { openAuthModal } from '../../navigation/openAuthModal';
 import { displayNameFromUser, initialsFromAuthUser } from '../../utils/profileDisplay';
 import { accountUi } from './accountUi';
+import { StarRating } from '../../components/profile/StarRating';
+import { formatBirthDateDisplay } from '../../utils/birthDate';
 
 type Props = AccountStackScreenProps<'UserProfile'>;
 
@@ -48,6 +50,18 @@ export function UserProfileScreen({ navigation }: Props) {
   const { displayUser, loading, error, refresh, isAuthed, isRestoring } =
     useCurrentUserProfile();
 
+  const kickedToLoginRef = useRef(false);
+  useEffect(() => {
+    if (isRestoring) return;
+    if (isAuthed) {
+      kickedToLoginRef.current = false;
+      return;
+    }
+    if (kickedToLoginRef.current) return;
+    kickedToLoginRef.current = true;
+    openAuthModal('Login');
+  }, [isAuthed, isRestoring]);
+
   useFocusEffect(
     useCallback(() => {
       if (isRestoring) return;
@@ -57,7 +71,31 @@ export function UserProfileScreen({ navigation }: Props) {
   );
 
   if (!isAuthed) {
-    return null;
+    return (
+      <SafeAreaView style={styles.centered} edges={['bottom']}>
+        <Ionicons name="lock-closed-outline" size={28} color={colors.textSecondary} />
+        <Text style={styles.errorTitle}>Iniciá sesión para ver tu perfil</Text>
+        <Text style={styles.errorText}>
+          Por seguridad, los perfiles no están disponibles para invitados.
+        </Text>
+        <Pressable
+          style={styles.retryBtn}
+          onPress={() => openAuthModal('Login')}
+          accessibilityRole="button"
+          accessibilityLabel="Iniciar sesión"
+        >
+          <Text style={styles.retryBtnText}>Iniciar sesión</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.retryBtn, styles.secondaryBtn]}
+          onPress={() => navigation.navigate('MyAccount')}
+          accessibilityRole="button"
+          accessibilityLabel="Volver a mi cuenta"
+        >
+          <Text style={styles.secondaryBtnLabel}>Mi cuenta</Text>
+        </Pressable>
+      </SafeAreaView>
+    );
   }
 
   if (isRestoring || loading) {
@@ -105,12 +143,19 @@ export function UserProfileScreen({ navigation }: Props) {
   }
 
   const name = displayNameFromUser(displayUser);
+  const ratingAverage = displayUser.ratingAverage ?? 0;
+  const reviewCount = displayUser.reviewCount ?? 0;
+  const birthDateLabel = formatBirthDateDisplay(displayUser.birthDate);
+
+  const isWorkerNow = Boolean(
+    displayUser.worker?.trades?.length && (displayUser.worker.coverageKm ?? 0) > 0,
+  );
 
   const bioText =
     displayUser.bio?.trim() ||
-    (displayUser.worker
-      ? 'Profesional en Tu Changa. Podés ampliar tu presentación editando tu perfil profesional.'
-      : 'Cliente en Tu Changa. Cuando ofrezcas servicios, sumá tu bio al registrarte como profesional.');
+    (isWorkerNow
+      ? 'Profesional en Tu Changa. Podés ampliar tu descripción en Editar perfil profesional.'
+      : '');
 
   const uri = displayUser.avatarUri?.trim();
 
@@ -146,7 +191,15 @@ export function UserProfileScreen({ navigation }: Props) {
               </View>
             )}
           </View>
-          <Text style={styles.name}>{name}</Text>
+          <View style={styles.nameRow}>
+            <Text style={styles.name}>{name}</Text>
+            <StarRating
+              score={ratingAverage}
+              reviewCount={reviewCount}
+              size={14}
+              textSize={13}
+            />
+          </View>
           <Text style={styles.email}>{displayUser.email}</Text>
         </View>
 
@@ -170,14 +223,17 @@ export function UserProfileScreen({ navigation }: Props) {
           />
           <Field label="Teléfono" value={displayUser.phone ?? ''} />
           <Field label="DNI" value={displayUser.dni ?? ''} />
+          <Field label="Fecha de nacimiento" value={birthDateLabel ?? 'Edad no disponible'} />
           <Field
             label="Ubicación"
             value={displayUser.baseLocation?.address ?? displayUser.location ?? ''}
           />
-          <View style={[styles.field, styles.fieldLast]}>
-            <Text style={styles.fieldLabel}>Bio</Text>
-            <Text style={styles.bioValue}>{bioText}</Text>
-          </View>
+          {isWorkerNow ? (
+            <View style={[styles.field, styles.fieldLast]}>
+              <Text style={styles.fieldLabel}>Presentación</Text>
+              <Text style={styles.bioValue}>{bioText}</Text>
+            </View>
+          ) : null}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -255,6 +311,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.text,
     textAlign: 'center',
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingHorizontal: spacing.lg,
+    flexWrap: 'wrap',
   },
   email: {
     fontSize: 14,

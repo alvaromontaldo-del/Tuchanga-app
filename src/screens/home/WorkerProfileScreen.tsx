@@ -1,8 +1,9 @@
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useEffect, useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
+  FlatList,
   Image,
   Pressable,
   ScrollView,
@@ -10,17 +11,22 @@ import {
   Text,
   View,
 } from 'react-native';
-import { StarRating } from '../../components/profile/StarRating';
-import { colors, radii, spacing } from '../../constants/theme';
+import { ImageLightboxModal } from '../../components/common/ImageLightboxModal';
+import { ExpandableText } from '../../components/common/ExpandableText';
+import { ClickableAvatar } from '../../components/common/ClickableAvatar';
+import { useAppToast } from '../../components/toast/toast';
+import { colors, radii, shadows, spacing, typography } from '../../constants/theme';
 import { isMessagingAvailable } from '../../config/api';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { useAuth } from '../../context/AuthContext';
+import { useFavorites } from '../../context/FavoritesContext';
 import { useUserMode } from '../../context/UserModeContext';
 import { getWorkerBackendUserId, isWorkerUserIdUuid } from '../../data/workerChatIds';
 import { getWorkerById } from '../../data/mockFeed';
 import { openAuthModal } from '../../navigation/openAuthModal';
 import { openOrCreateChat } from '../../services/messaging';
 import { fetchWorkerPublicProfileFromSupabase } from '../../services/workerProfileSupabase';
+import { StarRating } from '../../components/profile/StarRating';
 import type {
   FeedStackScreenProps,
   SearchStackScreenProps,
@@ -34,16 +40,40 @@ type Props =
 /** Evita conflicto de tipos entre stack de feed y de búsqueda (mismas rutas). */
 type WorkerProfileFlowNav = NativeStackNavigationProp<
   {
-    WorkerProfile: { workerId: string };
+    WorkerProfile: { workerId: string; conversationId?: string };
+    WorkerPosts: { workerId: string };
     WorkerReviews: { workerId: string };
     ChatConversation: {
       conversationId: string;
       otherDisplayName: string;
       headerSubtitle: string;
+      workerId?: string;
     };
   },
   'WorkerProfile'
 >;
+
+function calcAgeLabel(birthDate: string | undefined): string | null {
+  const t = (birthDate ?? '').trim();
+  if (!t) return null;
+  const m = t.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return null;
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+
+  const today = new Date();
+  const ty = today.getFullYear();
+  const tm = today.getMonth() + 1;
+  const td = today.getDate();
+
+  let age = ty - y;
+  if (tm < mo || (tm === mo && td < d)) age -= 1;
+  if (!Number.isFinite(age) || age < 0 || age > 130) return null;
+  return `${age} años`;
+}
 
 function mergeTradesForCurrentUser(
   trades: WorkerTradeEntry[],
@@ -67,12 +97,21 @@ function mergeTradesForCurrentUser(
  * Perfil público: calificación, reseñas navegables, oficios con años de experiencia por rubro.
  */
 export function WorkerProfileScreen({ route, navigation }: Props) {
-  const { workerId } = route.params;
-  const { workerTrade, isWorkerMode } = useUserMode();
-  const { user } = useAuth();
+  const { workerId, conversationId: originConversationId } = route.params;
+  const { workerTrade, isWorker } = useUserMode();
+  const { user, isRestoring } = useAuth();
+  const { isFavorite, toggleFavoriteById } = useFavorites();
+  const toast = useAppToast();
   const mockWorker = getWorkerById(workerId);
   const [remoteWorker, setRemoteWorker] = useState<WorkerPublicProfile | null>(null);
   const [remoteStatus, setRemoteStatus] = useState<'idle' | 'loading' | 'done'>('idle');
+  const [lightboxPhotos, setLightboxPhotos] = useState<string[]>([]);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [contactBusy, setContactBusy] = useState(false);
+  const closeLightbox = useCallback(() => {
+    setLightboxPhotos([]);
+    setLightboxIndex(0);
+  }, []);
 
   useEffect(() => {
     setRemoteWorker(null);
@@ -85,6 +124,14 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
       setRemoteStatus('done');
       return;
     }
+
+    // IMPORTANT: si intentamos fetchear como invitado, puede devolver null y luego
+    // no reintenta al loguear (mismo workerId). Esperamos a que haya sesión.
+    if (isRestoring || !user) {
+      setRemoteStatus('idle');
+      return;
+    }
+
     setRemoteStatus('loading');
     let cancelled = false;
     void fetchWorkerPublicProfileFromSupabase(workerId).then((w) => {
@@ -96,7 +143,49 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [workerId]);
+  }, [workerId, isRestoring, user]);
+
+  const authGateOpenedRef = useRef(false);
+  useEffect(() => {
+    if (isRestoring) return;
+    if (user) {
+      authGateOpenedRef.current = false;
+      return;
+    }
+    if (authGateOpenedRef.current) return;
+    authGateOpenedRef.current = true;
+
+    const backendId = getWorkerBackendUserId(workerId);
+    const redirectId =
+      backendId ?? (isWorkerUserIdUuid(workerId) ? workerId : null);
+    openAuthModal('Login', { redirectTo: redirectId ? `worker:${redirectId}` : undefined });
+  }, [isRestoring, user, workerId]);
+
+  if (!user && !isRestoring) {
+    return (
+      <View style={styles.centered}>
+        <Ionicons name="lock-closed-outline" size={30} color={colors.textSecondary} />
+        <Text style={[styles.muted, styles.loadingHint]}>
+          Iniciá sesión para ver perfiles.
+        </Text>
+        <Pressable
+          onPress={() => {
+            const backendId = getWorkerBackendUserId(workerId);
+            const redirectId =
+              backendId ?? (isWorkerUserIdUuid(workerId) ? workerId : null);
+            openAuthModal('Login', {
+              redirectTo: redirectId ? `worker:${redirectId}` : undefined,
+            });
+          }}
+          style={({ pressed }) => [styles.authGateBtn, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Iniciar sesión"
+        >
+          <Text style={styles.authGateBtnText}>Iniciar sesión</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   const worker = mockWorker ?? remoteWorker;
 
@@ -125,33 +214,79 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
       ? mergeTradesForCurrentUser(worker.trades, workerTrade)
       : worker.trades;
 
-  const openReviews =
-    worker.reviewCount > 0
-      ? () =>
-          (navigation as unknown as WorkerProfileFlowNav).navigate(
-            'WorkerReviews',
-            { workerId },
-          )
-      : undefined;
-
   const workerBackendId = getWorkerBackendUserId(workerId);
+  /** Para pantallas que consultan Supabase (reseñas), siempre preferimos el UUID real. */
+  const reviewsNavWorkerId = workerBackendId ?? workerId;
+
   const primaryTradeLabel = trades[0]?.title ?? worker.trade;
+  const ageLabel = calcAgeLabel(worker.birthDate);
   const isOtherProfile = workerId !== 'me' && Boolean(workerBackendId);
+  const viewingOwnProfile =
+    workerId === 'me' ||
+    (user != null &&
+      (user.id === workerId || (workerBackendId != null && user.id === workerBackendId)));
+  const showVisitorActions = isOtherProfile && !viewingOwnProfile;
   const chatReady = isMessagingAvailable();
 
   const workerFirst = worker.firstName;
+  const favId = workerBackendId ?? '';
+  const favOn = favId ? isFavorite(favId) : false;
+
+  const avgRating = Math.min(5, Math.max(0, Number(worker.ratingAverage) || 0));
+
+  async function onToggleFavorite() {
+    if (!favId) return;
+    const w = worker;
+    if (!w) return;
+    if (!user) {
+      openAuthModal('Login');
+      return;
+    }
+    try {
+      await toggleFavoriteById({
+        professionalId: favId,
+        optimisticData: {
+          id: favId,
+          firstName: w.firstName,
+          summary: w.bio || `${primaryTradeLabel}`,
+          avatarUrl: w.avatarUrl,
+          ratingAverage: w.ratingAverage,
+          reviewCount: w.reviewCount,
+          categories: trades.map((t) => t.title).filter(Boolean),
+        },
+      });
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : 'No se pudo actualizar el favorito',
+        'Favoritos',
+        { durationMs: 4200 },
+      );
+    }
+  }
 
   async function onContact() {
     if (!user?.id || !workerBackendId) return;
-    if (isWorkerMode) return;
+    if (contactBusy) return;
     if (!isMessagingAvailable()) {
-      Alert.alert(
-        'Configurar chat',
+      toast.warning(
         'Agregá Supabase (EXPO_PUBLIC_SUPABASE_URL y EXPO_PUBLIC_SUPABASE_ANON_KEY) o el servidor Node (EXPO_PUBLIC_API_URL) y reiniciá Expo.',
+        'Configurar chat',
+        { durationMs: 5200 },
       );
       return;
     }
     try {
+      setContactBusy(true);
+      // Si llegamos desde un chat, evitamos re-crear/re-abrir y solo volvemos a esa conversación.
+      if (originConversationId) {
+        (navigation as unknown as WorkerProfileFlowNav).navigate('ChatConversation', {
+          conversationId: originConversationId,
+          otherDisplayName: workerFirst,
+          headerSubtitle: primaryTradeLabel ? `Profesional · ${primaryTradeLabel}` : 'Profesional',
+          workerId: workerBackendId,
+        });
+        return;
+      }
       const res = await openOrCreateChat(user.id, {
         workerUserId: workerBackendId,
         workerDisplayName: workerFirst,
@@ -162,9 +297,16 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
         conversationId: res.conversationId,
         otherDisplayName: res.workerDisplayName,
         headerSubtitle: trade ? `Profesional · ${trade}` : 'Profesional',
+        workerId: workerBackendId,
       });
     } catch (e) {
-      Alert.alert('Chat', e instanceof Error ? e.message : 'No se pudo abrir el chat');
+      toast.error(
+        e instanceof Error ? e.message : 'No se pudo abrir el chat',
+        'Chat',
+        { durationMs: 4200 },
+      );
+    } finally {
+      setContactBusy(false);
     }
   }
 
@@ -174,10 +316,34 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
       contentContainerStyle={styles.scrollContent}
       showsVerticalScrollIndicator={false}
     >
+      <ImageLightboxModal photos={lightboxPhotos} initialIndex={lightboxIndex} onClose={closeLightbox} />
+
       <View style={styles.card}>
         <View style={styles.accent} />
-        <Image source={{ uri: worker.avatarUrl }} style={styles.avatar} />
+
+        {showVisitorActions ? (
+          <Pressable
+            onPress={() => void onToggleFavorite()}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={favOn ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+            style={({ pressed }) => [
+              styles.heartBtn,
+              favOn && styles.heartBtnOn,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Ionicons
+              name={favOn ? 'heart' : 'heart-outline'}
+              size={22}
+              color={favOn ? '#DC2626' : colors.textSecondary}
+            />
+          </Pressable>
+        ) : null}
+
+        <ClickableAvatar uri={worker.avatarUrl} style={styles.avatar} />
         <Text style={styles.name}>{worker.firstName}</Text>
+        {ageLabel ? <Text style={styles.age}>{ageLabel}</Text> : null}
 
         <View style={styles.tradesSummary}>
           {trades.map((t, index) => (
@@ -187,13 +353,42 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
           ))}
         </View>
 
-        <StarRating
-          value={worker.ratingAverage}
-          reviewCount={worker.reviewCount}
-          onPressReviews={openReviews}
-        />
+        <Pressable
+          style={({ pressed }) => [styles.proRatingRow, pressed && styles.pressed]}
+          accessibilityRole={worker.reviewCount > 0 ? 'button' : 'text'}
+          accessibilityLabel={
+            worker.reviewCount > 0
+              ? `Profesional, calificación ${avgRating.toFixed(1)} de 5. Ver reseñas`
+              : `Profesional, sin reseñas aún`
+          }
+          disabled={worker.reviewCount <= 0}
+          onPress={() => {
+            if (worker.reviewCount <= 0) return;
+            (navigation as unknown as WorkerProfileFlowNav).navigate('WorkerReviews', {
+              workerId: reviewsNavWorkerId,
+            });
+          }}
+        >
+          <Text style={styles.proLabel}>Profesional</Text>
+          <StarRating score={avgRating} reviewCount={worker.reviewCount} size={14} textSize={13} />
+        </Pressable>
 
-        {isOtherProfile ? (
+        <Pressable
+          style={({ pressed }) => [styles.postsCta, pressed && styles.pressed]}
+          onPress={() =>
+            (navigation as unknown as WorkerProfileFlowNav).navigate('WorkerPosts', {
+              workerId,
+            })
+          }
+          accessibilityRole="button"
+          accessibilityLabel="Ver publicaciones del trabajador"
+        >
+          <Ionicons name="images-outline" size={22} color={colors.primary} />
+          <Text style={styles.postsCtaText}>Ver publicaciones</Text>
+          <Ionicons name="chevron-forward" size={22} color={colors.textSecondary} />
+        </Pressable>
+
+        {showVisitorActions ? (
           <View style={styles.contactWrap}>
             {!user ? (
               <>
@@ -212,24 +407,23 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
                   Creá o ingresá a tu cuenta para chatear con {worker.firstName}.
                 </Text>
               </>
-            ) : isWorkerMode ? (
-              <Text style={styles.contactHint}>
-                Como profesional, los mensajes de clientes aparecen en el tab Mensajes. No podés
-                iniciar un chat desde el perfil de otro profesional.
-              </Text>
             ) : (
               <>
                 <Pressable
                   style={({ pressed }) => [
                     styles.contactBtn,
                     !chatReady && styles.contactBtnMuted,
+                    contactBusy && styles.contactBtnMuted,
                     pressed && styles.contactBtnPressed,
                   ]}
                   onPress={() => void onContact()}
                   accessibilityRole="button"
                   accessibilityLabel="Contactar por chat"
+                  disabled={!chatReady || contactBusy}
                 >
-                  <Text style={styles.contactBtnText}>Contactar</Text>
+                  <Text style={styles.contactBtnText}>
+                    {contactBusy ? 'Abriendo chat…' : 'Contactar'}
+                  </Text>
                 </Pressable>
                 {!chatReady ? (
                   <Text style={styles.contactHint}>
@@ -247,17 +441,43 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
 
         <Text style={styles.sectionTitle}>Oficios</Text>
 
-        {trades.map((item, index) => (
-          <View key={`${item.title}-${index}`} style={styles.tradeCard}>
+        {trades.map((trade, index) => {
+          const key = `${trade.title}-${index}`;
+          return (
+          <View key={key} style={styles.tradeCard}>
             <View style={styles.tradeAccent} />
-            <Text style={styles.tradeTitle}>{item.title}</Text>
+            <Text style={styles.tradeTitle}>{trade.title}</Text>
             <Text style={styles.expPerTrade}>
-              {item.yearsExperience}{' '}
-              {item.yearsExperience === 1 ? 'año' : 'años'} de experiencia en este oficio
+              {Math.max(1, Math.floor(Number(trade.yearsExperience) || 0))}{' '}
+              {Math.max(1, Math.floor(Number(trade.yearsExperience) || 0)) === 1 ? 'año' : 'años'} de
+              experiencia en este oficio
             </Text>
-            <Text style={styles.tradeDescription}>{item.description}</Text>
+            {trade.photoUrls?.length ? (
+              <FlatList
+                data={trade.photoUrls}
+                keyExtractor={(u, i) => `${u}-${i}`}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.tradePhotos}
+                renderItem={({ item: url, index: photoIndex }) => (
+                  <Pressable
+                    onPress={() => {
+                      setLightboxPhotos(trade.photoUrls ?? []);
+                      setLightboxIndex(photoIndex);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Ver foto ampliada"
+                    hitSlop={6}
+                  >
+                    <Image source={{ uri: url }} style={styles.tradePhoto} />
+                  </Pressable>
+                )}
+              />
+            ) : null}
+            <ExpandableText text={trade.description} numberOfLinesCollapsed={5} textStyle={styles.tradeDescription} />
           </View>
-        ))}
+        );
+        })}
       </View>
     </ScrollView>
   );
@@ -273,13 +493,14 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl * 2,
   },
   card: {
-    backgroundColor: '#121212',
+    backgroundColor: colors.surface,
     borderRadius: radii.card,
     padding: spacing.lg,
     paddingTop: spacing.md + 4,
-    borderWidth: 1,
-    borderColor: '#2C2C2C',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     overflow: 'hidden',
+    ...shadows.card,
   },
   accent: {
     position: 'absolute',
@@ -297,14 +518,21 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
     alignSelf: 'center',
     marginTop: spacing.md,
-    backgroundColor: '#2C2C2C',
+    backgroundColor: colors.imagePlaceholder,
   },
   name: {
+    ...typography.title,
     fontSize: 26,
     fontWeight: '800',
-    color: '#FAFAFA',
     textAlign: 'center',
     marginTop: spacing.md,
+  },
+  age: {
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.textSecondary,
+    textAlign: 'center',
   },
   tradesSummary: {
     flexDirection: 'row',
@@ -319,36 +547,65 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 14,
     borderRadius: 22,
-    backgroundColor: '#1A1A1A',
+    backgroundColor: 'rgba(198, 40, 40, 0.06)',
     marginHorizontal: 4,
     marginBottom: 8,
   },
   tradeChipText: {
-    color: '#F5F5F5',
+    color: colors.text,
     fontWeight: '700',
     fontSize: 14,
     textAlign: 'center',
   },
+  proRatingRow: {
+    marginTop: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  proLabel: { fontSize: 13, fontWeight: '900', color: colors.textSecondary },
+  // rating normalizado via StarRating
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#FAFAFA',
+    ...typography.title,
     marginTop: spacing.lg,
     marginBottom: spacing.xs,
   },
   bio: {
-    fontSize: 16,
+    ...typography.subtitle,
     lineHeight: 24,
-    color: '#D1D5DB',
+    color: colors.textSecondary,
+    fontWeight: '400',
   },
   tradeCard: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: colors.surface,
     borderRadius: radii.card,
     padding: spacing.md,
     marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: '#2C2C2C',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     overflow: 'hidden',
+    ...shadows.card,
+  },
+  pressed: { opacity: 0.9 },
+  heartBtn: {
+    position: 'absolute',
+    right: spacing.md,
+    top: spacing.md + 4,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.04)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    zIndex: 5,
+  },
+  heartBtnOn: {
+    backgroundColor: 'rgba(220,38,38,0.10)',
+    borderColor: 'rgba(220,38,38,0.35)',
   },
   tradeAccent: {
     position: 'absolute',
@@ -368,18 +625,30 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   expPerTrade: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#E5E7EB',
+    ...typography.body,
+    fontWeight: '600',
+    color: colors.textSecondary,
     marginLeft: spacing.sm,
     marginBottom: spacing.sm,
   },
   tradeDescription: {
-    fontSize: 15,
+    ...typography.body,
     lineHeight: 22,
-    color: '#E5E7EB',
     marginLeft: spacing.sm,
-    opacity: 0.92,
+  },
+  tradePhotos: {
+    marginLeft: spacing.sm,
+    marginBottom: spacing.sm,
+    gap: spacing.sm,
+    paddingVertical: 2,
+  },
+  tradePhoto: {
+    width: 150,
+    height: 96,
+    borderRadius: radii.thumb,
+    backgroundColor: colors.imagePlaceholder,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   centered: {
     flex: 1,
@@ -401,6 +670,38 @@ const styles = StyleSheet.create({
   loadingHint: {
     marginTop: spacing.md,
   },
+  authGateBtn: {
+    marginTop: spacing.md,
+    alignSelf: 'center',
+    backgroundColor: colors.primary,
+    paddingVertical: 12,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.button,
+  },
+  authGateBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0.2,
+  },
+  postsCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.lg,
+    paddingVertical: 14,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.button,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: 'rgba(198, 40, 40, 0.08)',
+    gap: spacing.sm,
+  },
+  postsCtaText: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '800',
+  },
   contactWrap: { marginTop: spacing.lg },
   contactBtn: {
     backgroundColor: colors.primary,
@@ -419,7 +720,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     fontSize: 12,
     fontWeight: '600',
-    color: '#9CA3AF',
+    color: colors.textSecondary,
     textAlign: 'center',
     lineHeight: 17,
   },

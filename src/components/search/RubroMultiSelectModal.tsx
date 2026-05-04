@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
 import {
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -24,6 +25,10 @@ type Props = {
   initialSelected: string[];
   onClose: () => void;
   onApply: (selected: string[]) => void;
+  /** Si se provee, solo se muestran rubros presentes en esta lista (p.ej. con trabajadores activos). */
+  allowedNames?: string[];
+  /** Si true, permite seleccionar solo 1 oficio. */
+  singleSelect?: boolean;
 };
 
 export function RubroMultiSelectModal({
@@ -32,6 +37,8 @@ export function RubroMultiSelectModal({
   initialSelected,
   onClose,
   onApply,
+  allowedNames,
+  singleSelect,
 }: Props) {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
@@ -46,13 +53,25 @@ export function RubroMultiSelectModal({
 
   const sections = useMemo(() => {
     const cats = getCategoriasSortedByPopularidad();
-    return filterCategoriasForQuery(cats, query);
-  }, [query]);
+    const filtered = filterCategoriasForQuery(cats, query);
+    if (!allowedNames || allowedNames.length === 0) return filtered;
+    const allow = new Set(allowedNames.map((x) => x.trim()).filter(Boolean));
+    return filtered
+      .map((sec) => ({
+        ...sec,
+        data: sec.data.filter((it) => allow.has(it.nombre)),
+      }))
+      .filter((sec) => sec.data.length > 0);
+  }, [allowedNames, query]);
 
   function toggle(nombre: string) {
-    setDraft((prev) =>
-      prev.includes(nombre) ? prev.filter((x) => x !== nombre) : [...prev, nombre],
-    );
+    setDraft((prev) => {
+      const on = prev.includes(nombre);
+      if (singleSelect) {
+        return on ? [] : [nombre];
+      }
+      return on ? prev.filter((x) => x !== nombre) : [...prev, nombre];
+    });
   }
 
   function clearAll() {
@@ -71,7 +90,11 @@ export function RubroMultiSelectModal({
       presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
       onRequestClose={onClose}
     >
-      <View style={[styles.sheet, { paddingTop: insets.top + spacing.sm }]}>
+      <KeyboardAvoidingView
+        style={styles.sheet}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <View style={[styles.sheetInner, { paddingTop: insets.top + spacing.sm }]}>
         <View style={styles.sheetHeader}>
           <Pressable onPress={onClose} hitSlop={12}>
             <Text style={styles.cancelText}>Cancelar</Text>
@@ -92,6 +115,9 @@ export function RubroMultiSelectModal({
             placeholderTextColor={colors.textSecondary}
             autoCapitalize="none"
             autoCorrect={false}
+            returnKeyType="done"
+            blurOnSubmit
+            onSubmitEditing={apply}
           />
           {query.length > 0 ? (
             <Pressable onPress={() => setQuery('')} hitSlop={10}>
@@ -122,7 +148,15 @@ export function RubroMultiSelectModal({
                 style={({ pressed }) => [styles.optionRow, pressed && styles.optionPressed]}
               >
                 <Ionicons
-                  name={on ? 'checkbox' : 'square-outline'}
+                  name={
+                    singleSelect
+                      ? on
+                        ? 'radio-button-on'
+                        : 'radio-button-off'
+                      : on
+                        ? 'checkbox'
+                        : 'square-outline'
+                  }
                   size={24}
                   color={on ? colors.primary : colors.textSecondary}
                 />
@@ -134,7 +168,9 @@ export function RubroMultiSelectModal({
           }}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text style={styles.emptyText}>No hay rubros que coincidan.</Text>
+              <Text style={styles.emptyText}>
+                No hay resultados. Probá con otros oficios.
+              </Text>
             </View>
           }
         />
@@ -144,13 +180,15 @@ export function RubroMultiSelectModal({
             <Text style={styles.applyBtnText}>Listo</Text>
           </Pressable>
         </View>
-      </View>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   sheet: { flex: 1, backgroundColor: colors.surface },
+  sheetInner: { flex: 1, backgroundColor: colors.surface },
   sheetHeader: {
     flexDirection: 'row',
     alignItems: 'center',

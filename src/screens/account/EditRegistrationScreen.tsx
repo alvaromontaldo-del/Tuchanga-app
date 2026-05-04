@@ -1,11 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
-  Image,
-  KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -15,12 +12,17 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { AppButton } from '../../components/common/AppButton';
+import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
 import { AppTextInput } from '../../components/common/AppTextInput';
 import { SingleSelectModal } from '../../components/common/SingleSelectModal';
 import { LocationMap } from '../../components/location/LocationMap';
+import { useAppToast } from '../../components/toast/toast';
+import { ClickableAvatar } from '../../components/common/ClickableAvatar';
+import { ImagePickerComponent } from '../../components/common/ImagePickerComponent';
 import { colors, radii, spacing } from '../../constants/theme';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { useAuth } from '../../context/AuthContext';
@@ -46,15 +48,20 @@ import {
   sanitizeNationalPhoneDigits,
   validateNationalPhone,
 } from '../../utils/validation';
+import {
+  birthDateIsoFromDate,
+  calcAgeFromBirthDate,
+  dateFromBirthDateIso,
+  formatBirthDateDisplay,
+  parseBirthDateParts,
+} from '../../utils/birthDate';
 
 type Props = AccountStackScreenProps<'EditRegistration'>;
 
 type GeoPoint = { lat: number; lng: number; address: string };
 
-const MAX_BIO_LEN = 500;
-
 type DraftErrors = Partial<
-  Record<'firstName' | 'lastName' | 'dni' | 'avatar' | 'phone' | 'bio' | 'location', string>
+  Record<'firstName' | 'lastName' | 'dni' | 'birthDate' | 'avatar' | 'phone' | 'location', string>
 >;
 
 function normalizeDigitsOnly(input: string) {
@@ -69,6 +76,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const contentWidth = Math.min(width - spacing.lg * 2, 520);
   const { user, replaceOrMergeUser } = useAuth();
+  const toast = useAppToast();
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -96,12 +104,14 @@ export function EditRegistrationScreen({ navigation }: Props) {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [dni, setDni] = useState('');
+  const [birthDate, setBirthDate] = useState('');
+  const [birthPickerOpen, setBirthPickerOpen] = useState(false);
+  const [birthPickerDraft, setBirthPickerDraft] = useState<Date>(new Date(2000, 0, 1, 12, 0, 0, 0));
   const [avatarUri, setAvatarUri] = useState('');
   const [emailDisplay, setEmailDisplay] = useState('');
   const [phoneNationalDigits, setPhoneNationalDigits] = useState('');
   const [phoneCountryId, setPhoneCountryId] = useState(DEFAULT_PHONE_COUNTRY_ID);
   const [phoneCountryPickerOpen, setPhoneCountryPickerOpen] = useState(false);
-  const [bio, setBio] = useState('');
 
   const [addressQuery, setAddressQuery] = useState('');
   const [geo, setGeo] = useState<GeoPoint | null>(null);
@@ -133,12 +143,12 @@ export function EditRegistrationScreen({ navigation }: Props) {
     setFirstName(u.firstName?.trim() ?? '');
     setLastName(u.lastName?.trim() ?? '');
     setDni((u.dni ?? '').trim());
+    setBirthDate((u.birthDate ?? '').trim());
     setAvatarUri((u.avatarUri ?? '').trim());
     setEmailDisplay(u.email.trim());
     const parsed = parseStoredPhoneForEdit(u.phone ?? '');
     setPhoneCountryId(parsed.countryId);
     setPhoneNationalDigits(parsed.nationalDigits);
-    setBio((u.bio ?? '').trim());
     const addr = u.baseLocation?.address?.trim() ?? u.location?.trim() ?? '';
     const lat = u.baseLocation?.lat ?? 0;
     const lng = u.baseLocation?.lng ?? 0;
@@ -161,7 +171,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
           const u = await fetchCurrentUserProfileFromSupabase();
           if (loadGenRef.current !== g) return;
           if (!u) {
-            Alert.alert('Sesión', 'No pudimos cargar tu perfil.');
+            toast.error('No pudimos cargar tu perfil.', 'Sesión', { durationMs: 4200 });
             navigation.goBack();
             return;
           }
@@ -248,24 +258,6 @@ export function EditRegistrationScreen({ navigation }: Props) {
     }
   }
 
-  async function pickAvatar() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permisos', 'Necesitamos acceso a tu galería para cambiar la foto.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.9,
-    });
-    if (!result.canceled && result.assets[0]?.uri) {
-      setAvatarUri(result.assets[0].uri);
-      setErrors((p) => ({ ...p, avatar: undefined }));
-    }
-  }
-
   function validate(): boolean {
     const next: DraftErrors = {};
     if (!firstName.trim()) next.firstName = 'El nombre es obligatorio.';
@@ -273,12 +265,18 @@ export function EditRegistrationScreen({ navigation }: Props) {
     const dniDigits = normalizeDigitsOnly(dni);
     if (!dniDigits) next.dni = 'El DNI es obligatorio.';
     else if (dniDigits.length < 7 || dniDigits.length > 9) next.dni = 'Ingresá un DNI válido.';
+    const bd = birthDate.trim();
+    if (bd) {
+      if (!parseBirthDateParts(bd)) next.birthDate = 'Formato esperado: AAAA-MM-DD.';
+      else {
+        const age = calcAgeFromBirthDate(bd);
+        if (age == null) next.birthDate = 'Ingresá una fecha válida.';
+        else if (age < 18) next.birthDate = 'Debés ser mayor de 18 años.';
+      }
+    }
     if (!avatarUri.trim()) next.avatar = 'Necesitamos una foto de perfil.';
     const phoneErr = validateNationalPhone(phoneCountryId, phoneNationalDigits);
     if (phoneErr) next.phone = phoneErr;
-    if (bio.trim().length > MAX_BIO_LEN) {
-      next.bio = `Máximo ${MAX_BIO_LEN} caracteres.`;
-    }
     if (!geo) next.location = 'Seleccioná una dirección en el mapa o la lista.';
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -298,10 +296,10 @@ export function EditRegistrationScreen({ navigation }: Props) {
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           dni: normalizeDigitsOnly(dni),
+          birthDate: birthDate.trim(),
           phone: phoneIntl,
           baseLocation: { address: geo.address.trim(), lat: geo.lat, lng: geo.lng },
           avatarUri,
-          bio: bio.trim(),
         });
         const fresh = await fetchCurrentUserProfileFromSupabase();
         if (fresh) {
@@ -331,14 +329,15 @@ export function EditRegistrationScreen({ navigation }: Props) {
             baseLocation: { address: geo.address.trim(), lat: geo.lat, lng: geo.lng },
             location: geo.address.trim(),
             avatarUri: avatarUri.trim(),
-            bio: bio.trim() || undefined,
           }) ?? user,
         );
       }
       navigation.navigate('MyAccount');
-      Alert.alert('Listo', 'Tus datos se actualizaron.');
+      toast.success('Tus datos se actualizaron.', 'Listo');
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'No se pudo guardar.');
+      toast.error(e instanceof Error ? e.message : 'No se pudo guardar.', 'Error', {
+        durationMs: 4200,
+      });
     } finally {
       setSaving(false);
     }
@@ -355,10 +354,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.safe} edges={['left', 'right', 'bottom']}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <AppKeyboardAvoidingView style={styles.flex}>
         <ScrollView
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
@@ -371,20 +367,36 @@ export function EditRegistrationScreen({ navigation }: Props) {
             </Text>
 
             <Text style={styles.section}>Identidad</Text>
-            <Pressable style={styles.avatarRow} onPress={() => void pickAvatar()} hitSlop={8}>
+            <View style={styles.avatarRow}>
               <View style={styles.avatar}>
                 {avatarUri ? (
-                  <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
+                  <ClickableAvatar uri={avatarUri} style={styles.avatarImg} fill />
                 ) : (
                   <Ionicons name="person" size={28} color={colors.textSecondary} />
                 )}
               </View>
               <View style={styles.avatarText}>
                 <Text style={styles.avatarTitle}>Foto de perfil</Text>
-                <Text style={styles.avatarHint}>Tocá para cambiar</Text>
+                <Text style={styles.avatarHint}>Se recorta a 1:1 antes de subir</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-            </Pressable>
+            </View>
+            <ImagePickerComponent
+              mode="single"
+              label="Cambiar foto"
+              hint="Usá cámara o galería. Recorte cuadrado automático."
+              value={avatarUri}
+              onChange={(next) => {
+                const uri = String(next ?? '').trim();
+                setAvatarUri(uri);
+                setErrors((p) => ({ ...p, avatar: undefined }));
+              }}
+              maxCount={1}
+              squareCrop
+              jpegQuality={0.9}
+              showPreview={false}
+              defaultCameraFacing="front"
+              allowCameraFlip
+            />
             {errors.avatar ? <Text style={styles.error}>{errors.avatar}</Text> : null}
 
             <View style={styles.row2}>
@@ -426,6 +438,34 @@ export function EditRegistrationScreen({ navigation }: Props) {
               placeholder="Ej.: 12345678"
               error={errors.dni}
             />
+
+            <View style={styles.birthWrap}>
+              <Text style={styles.birthLabel}>Fecha de nacimiento</Text>
+              <Pressable
+              onPress={() => {
+                setBirthPickerDraft(dateFromBirthDateIso(birthDate) ?? new Date(2000, 0, 1, 12, 0, 0, 0));
+                setBirthPickerOpen(true);
+              }}
+                style={({ pressed }) => [
+                  styles.birthInputRow,
+                  errors.birthDate ? styles.birthInputRowError : null,
+                  pressed && styles.pressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Elegir fecha de nacimiento"
+              >
+                <TextInput
+                  value={formatBirthDateDisplay(birthDate) ?? ''}
+                  editable={false}
+                  pointerEvents="none"
+                  placeholder="DD/MM/AAAA"
+                  placeholderTextColor={colors.textSecondary}
+                  style={styles.birthInput}
+                />
+                <Ionicons name="calendar-outline" size={20} color={colors.textSecondary} />
+              </Pressable>
+              {errors.birthDate ? <Text style={styles.birthError}>{errors.birthDate}</Text> : null}
+            </View>
 
             <Text style={styles.section}>Contacto</Text>
             <View style={styles.emailBox}>
@@ -473,24 +513,6 @@ export function EditRegistrationScreen({ navigation }: Props) {
               </View>
               {errors.phone ? <Text style={styles.phoneError}>{errors.phone}</Text> : null}
             </View>
-
-            <Text style={styles.section}>Presentación (opcional)</Text>
-            <Text style={styles.hint}>Se muestra en tu perfil (máximo {MAX_BIO_LEN} caracteres).</Text>
-            <TextInput
-              style={[styles.textArea, errors.bio ? styles.textAreaError : null]}
-              value={bio}
-              onChangeText={(t) => {
-                setBio(t.slice(0, MAX_BIO_LEN));
-                setErrors((p) => ({ ...p, bio: undefined }));
-              }}
-              multiline
-              placeholder="Contá algo sobre vos…"
-              placeholderTextColor={colors.textSecondary}
-            />
-            {errors.bio ? <Text style={styles.error}>{errors.bio}</Text> : null}
-            <Text style={styles.bioCounter}>
-              {bio.length}/{MAX_BIO_LEN}
-            </Text>
 
             <Text style={styles.section}>Ubicación base *</Text>
             <Text style={styles.hint}>
@@ -588,6 +610,76 @@ export function EditRegistrationScreen({ navigation }: Props) {
           </View>
         </ScrollView>
 
+        {birthPickerOpen && Platform.OS === 'android' ? (
+          <DateTimePicker
+            value={birthPickerDraft}
+            mode="date"
+            display="default"
+            maximumDate={new Date()}
+            onChange={(e, selected) => {
+              if (e.type === 'dismissed') {
+                setBirthPickerOpen(false);
+                return;
+              }
+              if (e.type === 'set' && selected) {
+                const iso = birthDateIsoFromDate(selected);
+                setBirthDate(iso);
+                setErrors((p) => ({ ...p, birthDate: undefined }));
+                setBirthPickerOpen(false);
+              }
+            }}
+          />
+        ) : null}
+
+        {birthPickerOpen && Platform.OS === 'ios' ? (
+          <Modal
+            visible={birthPickerOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setBirthPickerOpen(false)}
+          >
+            <View style={styles.pickerBackdrop}>
+              <Pressable style={styles.pickerBackdrop} onPress={() => setBirthPickerOpen(false)} />
+              <View style={[styles.pickerCard, styles.pickerCardIos]}>
+                <Text style={styles.pickerTitle}>Fecha de nacimiento</Text>
+                <View style={styles.pickerBodyIos}>
+                  <DateTimePicker
+                    value={birthPickerDraft}
+                    mode="date"
+                    display="spinner"
+                    textColor="#000"
+                    locale="es"
+                    maximumDate={new Date()}
+                    onChange={(_e, selected) => {
+                      if (!selected) return;
+                      setBirthPickerDraft(selected);
+                    }}
+                  />
+                </View>
+                <View style={styles.pickerActions}>
+                  <Pressable
+                    onPress={() => setBirthPickerOpen(false)}
+                    style={({ pressed }) => [styles.pickerBtnGhost, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.pickerBtnGhostText}>Cancelar</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      const iso = birthDateIsoFromDate(birthPickerDraft);
+                      setBirthDate(iso);
+                      setErrors((p) => ({ ...p, birthDate: undefined }));
+                      setBirthPickerOpen(false);
+                    }}
+                    style={({ pressed }) => [styles.pickerBtn, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.pickerBtnText}>Aceptar</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          </Modal>
+        ) : null}
+
         <SingleSelectModal
           visible={phoneCountryPickerOpen}
           title="Código de país"
@@ -603,7 +695,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
             setPhoneCountryPickerOpen(false);
           }}
         />
-      </KeyboardAvoidingView>
+      </AppKeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -779,7 +871,6 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   textAreaError: { borderColor: colors.error },
-  bioCounter: { alignSelf: 'flex-end', fontSize: 12, color: colors.textSecondary, marginTop: 4 },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   searchInputWrap: {
     flex: 1,
@@ -834,4 +925,81 @@ const styles = StyleSheet.create({
   },
   geoText: { flex: 1, fontSize: 14, color: colors.text, fontWeight: '600' },
   submitButton: { marginTop: spacing.xl },
+  birthWrap: {
+    marginBottom: spacing.md,
+    width: '100%',
+  },
+  birthLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: spacing.xs,
+    marginLeft: 4,
+  },
+  birthInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.input,
+    minHeight: 52,
+    paddingRight: spacing.md,
+  },
+  birthInputRowError: {
+    borderColor: colors.error,
+  },
+  birthInput: {
+    flex: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: colors.text,
+    minHeight: 52,
+  },
+  birthError: {
+    color: colors.error,
+    fontSize: 12,
+    marginTop: spacing.xs,
+    marginLeft: 4,
+  },
+  pickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  pickerCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.card,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  pickerCardIos: {
+    backgroundColor: '#fff',
+  },
+  pickerTitle: { fontSize: 14, fontWeight: '900', color: colors.text, marginBottom: spacing.sm },
+  pickerActions: { marginTop: spacing.md, flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm },
+  pickerBodyIos: {
+    height: 250,
+    justifyContent: 'center',
+  },
+  pickerBtnGhost: {
+    backgroundColor: 'transparent',
+    paddingVertical: 12,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.button,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  pickerBtnGhostText: { color: colors.text, fontWeight: '900', fontSize: 15 },
+  pickerBtn: {
+    backgroundColor: colors.primary,
+    paddingVertical: 12,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.button,
+  },
+  pickerBtnText: { color: '#fff', fontWeight: '900', fontSize: 15 },
+  pressed: { opacity: 0.9 },
 });

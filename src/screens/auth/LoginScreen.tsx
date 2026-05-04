@@ -1,8 +1,5 @@
 import { useState } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,28 +7,27 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import { BrandLogoHorizontal } from '../../components/brand/BrandMark';
 import { AppButton } from '../../components/common/AppButton';
+import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
 import { AppTextInput } from '../../components/common/AppTextInput';
 import { TextLink } from '../../components/common/TextLink';
 import { colors, spacing } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
-import { closeAuthModalAndGoToInicio } from '../../navigation/openAuthModal';
+import { closeAuthModalAndGoToInicio, closeAuthModalAndRedirect } from '../../navigation/openAuthModal';
 import type { AuthStackScreenProps } from '../../navigation/types';
 import { signIn } from '../../services/auth';
 import { isValidEmail } from '../../utils/validation';
 
 type Props = AuthStackScreenProps<'Login'>;
 
-export function LoginScreen({ navigation }: Props) {
+export function LoginScreen({ navigation, route }: Props) {
   const { signIn: setSession } = useAuth();
   const { width } = useWindowDimensions();
   const contentWidth = Math.min(width - spacing.lg * 2, 440);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [keepSignedIn, setKeepSignedIn] = useState(true);
   const [loading, setLoading] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [emailError, setEmailError] = useState('');
@@ -65,8 +61,10 @@ export function LoginScreen({ navigation }: Props) {
     try {
       const result = await signIn(email, password);
       if (result.ok) {
-        await setSession(result.user, keepSignedIn);
-        closeAuthModalAndGoToInicio();
+        await setSession(result.user, true);
+        const redirectTo = route.params?.redirectTo;
+        if (redirectTo) closeAuthModalAndRedirect(redirectTo);
+        else closeAuthModalAndGoToInicio();
       } else {
         setSubmitError(result.message);
       }
@@ -81,10 +79,7 @@ export function LoginScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.flex} edges={['top', 'left', 'right']}>
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <AppKeyboardAvoidingView style={styles.flex}>
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
@@ -117,25 +112,10 @@ export function LoginScreen({ navigation }: Props) {
               setPassword(t);
               setSubmitError('');
             }}
-            secureTextEntry
+            passwordToggle
             placeholder="••••••••"
             error={passwordError}
           />
-
-          <Pressable
-            onPress={() => setKeepSignedIn((v) => !v)}
-            style={styles.keepRow}
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked: keepSignedIn }}
-            accessibilityLabel="Mantener mi sesión iniciada"
-          >
-            <Ionicons
-              name={keepSignedIn ? 'checkbox' : 'square-outline'}
-              size={22}
-              color={keepSignedIn ? colors.primary : colors.textSecondary}
-            />
-            <Text style={styles.keepText}>Mantener mi sesión iniciada</Text>
-          </Pressable>
 
           <TextLink
             align="left"
@@ -160,7 +140,7 @@ export function LoginScreen({ navigation }: Props) {
           </View>
         </View>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </AppKeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -189,18 +169,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.textSecondary,
     marginBottom: spacing.lg,
-  },
-  keepRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  keepText: {
-    marginLeft: spacing.sm,
-    fontSize: 15,
-    color: colors.textSecondary,
-    fontWeight: '600',
   },
   footerRow: {
     flexDirection: 'row',

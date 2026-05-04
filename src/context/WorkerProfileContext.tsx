@@ -9,8 +9,12 @@ export type WorkerTrade = {
   /** Slug del catálogo `rubros.json` (opcional si es texto heredado). */
   rubroSlug?: string;
   isPrimary: boolean;
-  yearsExperience: number;
+  yearsExperience: number | null;
   description: string;
+  /** Foto de referencia del oficio (bucket jobs/job-photos). */
+  proofImageUri?: string;
+  /** Hasta 5 fotos del oficio. */
+  proofImageUris?: string[];
 };
 
 export type WorkerBaseLocation = {
@@ -67,13 +71,23 @@ function parseTrades(raw: unknown): WorkerTrade[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter(Boolean).map((t) => {
     const o = t as Record<string, unknown>;
+    const name = String(o.name ?? '');
+    const rawYearsNum = Number(o.yearsExperience);
+    const rawYears = Number.isFinite(rawYearsNum) ? Math.floor(rawYearsNum) : 0;
+    const yearsExperience = rawYears > 0 ? rawYears : null;
+    const proofImageUri = typeof o.proofImageUri === 'string' ? o.proofImageUri.trim() : '';
+    const proofImageUris = Array.isArray(o.proofImageUris)
+      ? (o.proofImageUris as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 5)
+      : [];
     return {
       id: String(o.id ?? `t_${Math.random().toString(16).slice(2)}`),
-      name: String(o.name ?? ''),
+      name,
       rubroSlug: typeof o.rubroSlug === 'string' ? o.rubroSlug : undefined,
       isPrimary: Boolean(o.isPrimary),
-      yearsExperience: Math.floor(Number(o.yearsExperience) || 0),
+      yearsExperience,
       description: String(o.description ?? ''),
+      proofImageUri: proofImageUri || undefined,
+      proofImageUris: proofImageUris.length ? proofImageUris : undefined,
     };
   });
 }

@@ -15,6 +15,7 @@ import { fetchAuthUserFromSupabase } from '../services/supabaseUser';
 import { clearSession, loadStoredSession, persistSession } from '../services/authSession';
 import { mergeAuthUserProfile } from '../utils/mergeAuthUserProfile';
 import { stableUserIdFromEmail } from '../utils/stableUserId';
+import { persistExpoPushTokenToSupabase, registerAndGetExpoPushToken } from '../services/pushNotifications';
 
 type AuthContextValue = {
   isAuthed: boolean;
@@ -34,6 +35,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isRestoring, setRestoring] = useState(true);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [flashMessage, setFlashMessage] = useState<string | null>(null);
+
+  // Push token: se registra y persiste cuando hay sesión.
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    if (isRestoring) return;
+    if (!user?.id) return;
+    let cancelled = false;
+    void (async () => {
+      const res = await registerAndGetExpoPushToken();
+      if (cancelled) return;
+      if (res.ok) {
+        await persistExpoPushTokenToSupabase(res.token);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isRestoring, user?.id]);
 
   useEffect(() => {
     let mounted = true;

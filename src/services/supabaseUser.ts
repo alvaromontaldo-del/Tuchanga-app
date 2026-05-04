@@ -17,7 +17,7 @@ import type { AuthUser, SignUpPayload } from './auth';
  */
 
 const PROFILE_CORE =
-  'id,nombre,apellido,dni,telefono,direccion_texto,avatar_url,coverage_km,created_at' as const;
+  'id,nombre,apellido,dni,telefono,direccion_texto,avatar_url,coverage_km,created_at,rating_average,review_count,birth_date,professional_description' as const;
 const PROFILE_WITH_LOC = `${PROFILE_CORE},location` as const;
 const PROFILE_FULL = `${PROFILE_WITH_LOC},bio` as const;
 
@@ -33,6 +33,10 @@ type ProfileRow = {
   coverage_km?: number | null;
   created_at?: string | null;
   bio?: string | null;
+  rating_average?: number | null;
+  review_count?: number | null;
+  birth_date?: string | null;
+  professional_description?: string | null;
 };
 
 async function fetchProfileRowForUser(userId: string): Promise<ProfileRow | null> {
@@ -222,7 +226,10 @@ export type ProfileRegistrationUpdatePayload = {
   phone: string;
   baseLocation: { address: string; lat: number; lng: number };
   avatarUri: string;
-  bio: string;
+  /** Si se omite, no se envía cambio de bio (usá cadena vacía solo si querés borrarla). */
+  bio?: string;
+  /** YYYY-MM-DD; si se omite, no modifica birth_date. Usá '' para limpiar. */
+  birthDate?: string;
 };
 
 async function updateProfileRegistrationRpc(
@@ -240,7 +247,7 @@ async function updateProfileRegistrationRpc(
   if (error) throw error;
 }
 
-/** Persiste cambios de la ficha de registro (nombre, DNI, teléfono, ubicación, avatar, bio). Devuelve la URL pública del avatar. */
+/** Persiste cambios de la ficha de registro (nombre, DNI, teléfono, ubicación, avatar). Si `bio` viene definido, actualiza la bio; si no, no la modifica. */
 export async function updateProfileRegistrationInSupabase(
   payload: ProfileRegistrationUpdatePayload,
 ): Promise<string> {
@@ -272,7 +279,24 @@ export async function updateProfileRegistrationInSupabase(
     p_avatar_url: avatarUrl,
   };
 
-  await updateProfileRegistrationRpc(supabase, base, (payload.bio ?? '').trim());
+  const bioToStore =
+    payload.bio !== undefined ? payload.bio.trim() : undefined;
+  if (bioToStore !== undefined) {
+    await updateProfileRegistrationRpc(supabase, base, bioToStore);
+  } else {
+    const { error } = await supabase.rpc('update_profile_registration_no_bio', base);
+    if (error) throw error;
+  }
+
+  // Campos no cubiertos por RPC legacy: birth_date.
+  if (payload.birthDate !== undefined) {
+    const birth = payload.birthDate?.trim() || null;
+    const { error: be } = await supabase
+      .from('profiles')
+      .update({ birth_date: birth })
+      .eq('id', user.id);
+    if (be) throw be;
+  }
   return avatarUrl;
 }
 
@@ -287,22 +311,65 @@ export async function fetchAuthUserFromSupabase(user: User): Promise<AuthUser> {
 
   const { lat, lng } = parseGeographyPoint(profile.location);
 
-  const { data: jobRows, error: jobsError } = await supabase
+  // Compat: si el schema todavía no tiene `photo_urls`, reintentamos sin esa columna.
+  type JobRow = {
+    id: string;
+    nombre_oficio: string;
+    descripcion: string | null;
+    foto_url: string | null;
+    es_principal: boolean | null;
+    years_experience?: number | null;
+    photo_urls?: unknown;
+  };
+  let jobRows: JobRow[] = [];
+
+  const modern = await supabase
     .from('jobs')
-    .select('id,nombre_oficio,descripcion,foto_url,es_principal')
+    .select('id,nombre_oficio,descripcion,foto_url,es_principal,years_experience,photo_urls')
     .eq('user_id', user.id);
 
-  if (jobsError) {
-    console.warn('[fetchAuthUserFromSupabase] jobs:', jobsError.message);
+  if (!modern.error) {
+    jobRows = ((modern.data as unknown) as JobRow[] | null) ?? [];
+  } else {
+    const msg = (modern.error.message ?? '').toLowerCase();
+    if (msg.includes('photo_urls') && msg.includes('column')) {
+      const legacy = await supabase
+        .from('jobs')
+        .select('id,nombre_oficio,descripcion,foto_url,es_principal,years_experience')
+        .eq('user_id', user.id);
+      if (!legacy.error) jobRows = ((legacy.data as unknown) as JobRow[] | null) ?? [];
+      else console.warn('[fetchAuthUserFromSupabase] jobs legacy:', legacy.error.message);
+    } else {
+      console.warn('[fetchAuthUserFromSupabase] jobs:', modern.error.message);
+    }
   }
 
-  const trades = (jobRows ?? []).map((j) => ({
-    id: j.id,
-    name: j.nombre_oficio,
-    details: j.descripcion ?? '',
-    proofImageUri: j.foto_url ?? undefined,
-    isPrimary: Boolean(j.es_principal),
-  }));
+  const trades = (jobRows ?? []).map((j) => {
+    const photoUrls = Array.isArray((j as { photo_urls?: unknown }).photo_urls)
+      ? ((j as { photo_urls: string[] }).photo_urls).filter(Boolean).slice(0, 5)
+      : [];
+    const proof = (j.foto_url ?? '').trim();
+    const mergedPhotos = [
+      ...(proof ? [proof] : []),
+      ...photoUrls,
+    ]
+      .filter(Boolean)
+      .slice(0, 5);
+
+    return {
+      id: j.id,
+      name: j.nombre_oficio,
+      details: j.descripcion ?? '',
+      proofImageUri: mergedPhotos[0] ?? undefined,
+      yearsExperience: Math.max(
+        1,
+        Math.min(60, Math.floor(Number((j as { years_experience?: unknown }).years_experience) || 1)),
+      ),
+      isPrimary: Boolean(j.es_principal),
+      // Campo opcional que viaja solo en memoria (WorkerABM).
+      proofImageUris: mergedPhotos.length ? mergedPhotos : undefined,
+    };
+  });
   const primary = trades.find((t) => t.isPrimary);
 
   const worker =
@@ -347,6 +414,18 @@ export async function fetchAuthUserFromSupabase(user: User): Promise<AuthUser> {
       typeof profile.created_at === 'string' ? profile.created_at : undefined,
     bio: resolvedBio,
     worker,
+    ratingAverage:
+      typeof profile.rating_average === 'number'
+        ? Math.max(0, Math.min(5, Number(profile.rating_average) || 0))
+        : undefined,
+    reviewCount:
+      typeof profile.review_count === 'number'
+        ? Math.max(0, Math.floor(Number(profile.review_count) || 0))
+        : undefined,
+    birthDate:
+      typeof profile.birth_date === 'string' && profile.birth_date.trim()
+        ? profile.birth_date.trim()
+        : undefined,
   };
 }
 
@@ -393,42 +472,107 @@ export async function persistSignUpToSupabase(
 
   await insertProfileWithLocationRpc(supabase, rpcBase, (payload.bio ?? '').trim());
 
+  // Profesional: persistimos descripción profesional separada.
+  if ((payload.bio ?? '').trim()) {
+    await supabase
+      .from('profiles')
+      .update({ professional_description: (payload.bio ?? '').trim() })
+      .eq('id', userId);
+  }
+
+  // Fecha de nacimiento.
+  if (payload.birthDate?.trim()) {
+    await supabase.from('profiles').update({ birth_date: payload.birthDate.trim() }).eq('id', userId);
+  }
+
   if (payload.offerServices && payload.trades?.length) {
+    // Versionado por guardado: evita cache de URLs cuando se reemplazan imágenes.
+    const version = `v_${Date.now()}`;
     const rows: Array<{
       user_id: string;
       nombre_oficio: string;
       descripcion: string;
       foto_url: string | null;
       es_principal: boolean;
+      photo_urls: string[];
     }> = [];
 
     for (const t of payload.trades) {
-      let fotoUrl: string | null = null;
-      if (t.proofImageUri) {
+      const uploads: string[] = [];
+      const sources = [
+        ...((t.proofImageUris ?? []).map((u) => (u ?? '').trim()).filter(Boolean).slice(0, 5)),
+        ...((t.proofImageUri ?? '').trim() ? [(t.proofImageUri ?? '').trim()] : []),
+      ]
+        .filter(Boolean)
+        // evitamos duplicados triviales
+        .filter((u, i, arr) => arr.indexOf(u) === i)
+        .slice(0, 5);
+
+      for (let p = 0; p < sources.length; p++) {
+        const uri = sources[p]!;
         try {
-          const ext = t.proofImageUri.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
-          fotoUrl = await uploadImageFromUri(
-            'job-photos',
-            `${userId}/${t.id}.${ext}`,
-            t.proofImageUri,
-            guessMime(t.proofImageUri),
-          );
+          if (/^https?:\/\//i.test(uri)) {
+            uploads.push(uri);
+          } else {
+            const ext = uri.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+            const path = `${userId}/jobs/${t.id}/${version}/${p}.${ext}`;
+            uploads.push(await uploadImageFromUri('job-photos', path, uri, guessMime(uri)));
+          }
         } catch (e) {
           console.warn('[persistSignUpToSupabase] foto oficio omitida:', t.name, e);
         }
       }
+
+      const fotoUrl = uploads[0] ?? null;
       rows.push({
         user_id: userId,
         nombre_oficio: t.name.trim(),
         descripcion: t.details.trim(),
         foto_url: fotoUrl,
         es_principal: t.id === payload.primaryTradeId,
+        photo_urls: uploads.slice(0, 5),
       });
     }
 
+    // Intento moderno (photo_urls). Si el schema no lo tiene aún, caemos a legacy.
     const { error: je } = await supabase.from('jobs').insert(rows);
-    if (je) throw je;
+    if (!je) return;
+
+    const msg = `${je.message ?? ''} ${(je as { hint?: string }).hint ?? ''}`.toLowerCase();
+    const missingPhotos = msg.includes('photo_urls') && msg.includes('column');
+    if (!missingPhotos) throw je;
+
+    const legacyRows = rows.map((r) => ({
+      user_id: r.user_id,
+      nombre_oficio: r.nombre_oficio,
+      descripcion: r.descripcion,
+      foto_url: r.foto_url,
+      es_principal: r.es_principal,
+    }));
+    const { error: je2 } = await supabase.from('jobs').insert(legacyRows);
+    if (je2) throw je2;
   }
+}
+
+export async function deactivateProfessionalProfileInSupabase(): Promise<void> {
+  const sb = getSupabaseClient();
+  await sb.auth.getSession();
+  const { error } = await sb.rpc('deactivate_professional_profile');
+  if (error) throw error;
+}
+
+export async function persistProfessionalDescriptionInSupabase(desc: string): Promise<void> {
+  const sb = getSupabaseClient();
+  const {
+    data: { user },
+    error: ue,
+  } = await sb.auth.getUser();
+  if (ue || !user?.id) throw new Error('No hay sesión activa.');
+  const { error } = await sb
+    .from('profiles')
+    .update({ professional_description: (desc ?? '').trim() })
+    .eq('id', user.id);
+  if (error) throw error;
 }
 
 export async function persistWorkerGeoToSupabase(
@@ -448,39 +592,118 @@ export async function persistWorkerGeoToSupabase(
 
 export async function persistWorkerJobsToSupabase(params: {
   userId: string;
-  trades: Array<{ name: string; description: string; isPrimary: boolean }>;
+  trades: Array<{
+    id: string;
+    name: string;
+    description: string;
+    yearsExperience: number | null;
+    isPrimary: boolean;
+    proofImageUri?: string;
+    proofImageUris?: string[];
+  }>;
 }): Promise<void> {
   const supabase = getSupabaseClient();
 
   const trimmed = (params.trades ?? [])
     .map((t) => ({
+      id: String(t.id ?? ''),
       name: (t.name ?? '').trim(),
       description: (t.description ?? '').trim(),
+      yearsExperience:
+        t.yearsExperience == null || !Number.isFinite(Number(t.yearsExperience))
+          ? null
+          : Math.max(1, Math.min(50, Math.floor(Number(t.yearsExperience) || 0))),
       isPrimary: Boolean(t.isPrimary),
+      proofImageUri: (t.proofImageUri ?? '').trim() || undefined,
+      proofImageUris: Array.isArray(t.proofImageUris)
+        ? t.proofImageUris.map((u) => (u ?? '').trim()).filter(Boolean).slice(0, 5)
+        : [],
     }))
     .filter((t) => t.name.length > 0)
     .slice(0, 5);
 
-  // Preferimos RPC SECURITY DEFINER (evita problemas de RLS y asegura consistencia).
+  const wantsPhotos = trimmed.some((t) => Boolean(t.proofImageUri) || t.proofImageUris.length > 0);
+  // Versionado por guardado: evita cache de URLs cuando se reemplazan imágenes.
+  const version = `v_${Date.now()}`;
+
+  // Si hay fotos, subimos primero y las persistimos vía RPC (SECURITY DEFINER),
+  // para evitar RLS en escrituras directas que podrían dejar al worker "sin jobs" (y rompe la búsqueda).
+  const jobsForRpc: Array<{
+    name: string;
+    description: string;
+    yearsExperience: number | null;
+    isPrimary: boolean;
+    photoUrl?: string;
+    photoUrls?: string[];
+  }> = [];
+
+  for (let idx = 0; idx < trimmed.length; idx++) {
+    const t = trimmed[idx]!;
+    let uploaded: string[] = [];
+
+    if (wantsPhotos) {
+      // Orden esperado: la galería es `proofImageUris` (ya incluye la principal),
+      // y `proofImageUri` es solo un atajo. Si metemos ambos, duplicamos la primera.
+      const gallery = (t.proofImageUris ?? []).filter(Boolean);
+      const unique: string[] = [];
+      const seen = new Set<string>();
+      for (const u of gallery) {
+        if (u && !seen.has(u)) {
+          seen.add(u);
+          unique.push(u);
+        }
+      }
+      if (t.proofImageUri && !seen.has(t.proofImageUri)) {
+        unique.unshift(t.proofImageUri);
+      }
+      const sources = unique.filter(Boolean).slice(0, 5);
+
+      const uploads: string[] = [];
+      for (let p = 0; p < sources.length; p++) {
+        const uri = sources[p]!;
+        try {
+          if (/^https?:\/\//i.test(uri)) {
+            uploads.push(uri);
+          } else {
+            const ext = uri.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+            const path = `${params.userId}/jobs/${t.id || `job_${idx}`}/${version}/${p}.${ext}`;
+            uploads.push(await uploadImageFromUri('job-photos', path, uri, guessMime(uri)));
+          }
+        } catch (e) {
+          console.warn('[persistWorkerJobsToSupabase] foto oficio omitida:', t.name, e);
+        }
+      }
+      uploaded = uploads.slice(0, 5);
+    }
+
+    jobsForRpc.push({
+      name: t.name,
+      description: t.description,
+      yearsExperience: t.yearsExperience,
+      isPrimary: t.isPrimary || (idx === 0 && !trimmed.some((x) => x.isPrimary)),
+      photoUrl: uploaded[0] || undefined,
+      photoUrls: uploaded.length ? uploaded : undefined,
+    });
+  }
+
   const { error: re } = await supabase.rpc('update_worker_jobs', {
-    p_jobs: trimmed.length ? trimmed : null,
+    p_jobs: trimmed.length ? jobsForRpc : null,
   });
   if (!re) return;
 
-  // Fallback legacy: reemplazar set por tabla (por si no se aplicó la migración aún).
+  // Último recurso: en instalaciones muy viejas donde la RPC no exista.
+  // Intentamos no dejar al usuario sin jobs.
   const { error: de } = await supabase.from('jobs').delete().eq('user_id', params.userId);
   if (de) throw re;
-
   if (trimmed.length === 0) return;
 
-  const rows = trimmed.map((t, idx) => ({
+  const legacyRows = trimmed.map((t, idx) => ({
     user_id: params.userId,
     nombre_oficio: t.name,
     descripcion: t.description,
-    foto_url: null as string | null,
+    foto_url: null,
     es_principal: t.isPrimary || (idx === 0 && !trimmed.some((x) => x.isPrimary)),
   }));
-
-  const { error: ie } = await supabase.from('jobs').insert(rows);
-  if (ie) throw re;
+  const { error: ie2 } = await supabase.from('jobs').insert(legacyRows);
+  if (ie2) throw re;
 }

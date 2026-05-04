@@ -4,9 +4,12 @@ import type { AccountStackParamList } from './mainTypes';
 import { AccountGuestScreen } from '../screens/account/AccountGuestScreen';
 import { MyAccountScreen } from '../screens/account/MyAccountScreen';
 import { MyJobsScreen } from '../screens/jobs/MyJobsScreen';
+import { MyWorkOrdersScreen } from '../screens/jobs/MyWorkOrdersScreen';
+import { ContractedWorkOrdersScreen } from '../screens/jobs/ContractedWorkOrdersScreen';
 import { EditRegistrationScreen } from '../screens/account/EditRegistrationScreen';
 import { UserProfileScreen } from '../screens/account/UserProfileScreen';
 import { WorkerABMScreen } from '../screens/account/WorkerABMScreen';
+import { FavoritesScreen } from '../screens/account/FavoritesScreen';
 import { useAuth } from '../context/AuthContext';
 
 const Stack = createNativeStackNavigator<AccountStackParamList>();
@@ -61,7 +64,31 @@ export function AccountStack() {
         component={MyJobsScreen}
         options={{
           ...profileChildHeader,
+          title: 'Mis publicaciones',
+        }}
+      />
+      <Stack.Screen
+        name="MyWorkOrders"
+        component={MyWorkOrdersScreen}
+        options={{
+          ...profileChildHeader,
           title: 'Mis trabajos',
+        }}
+      />
+      <Stack.Screen
+        name="ContractedWorkOrders"
+        component={ContractedWorkOrdersScreen}
+        options={{
+          ...profileChildHeader,
+          title: 'Trabajos contratados',
+        }}
+      />
+      <Stack.Screen
+        name="Favorites"
+        component={FavoritesScreen}
+        options={{
+          ...profileChildHeader,
+          title: 'Mis favoritos',
         }}
       />
     </Stack.Navigator>

@@ -1,9 +1,6 @@
 import { useState } from 'react';
 import {
-  Alert,
   Image,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,18 +8,23 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { AppButton } from '../../components/common/AppButton';
+import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
+import { useAppToast } from '../../components/toast/toast';
+import { ImagePickerComponent } from '../../components/common/ImagePickerComponent';
 import { colors, radii, spacing } from '../../constants/theme';
 import { useFeed } from '../../context/FeedContext';
 import { useUserMode } from '../../context/UserModeContext';
+import { useAuth } from '../../context/AuthContext';
 import type { FeedStackScreenProps } from '../../navigation/mainTypes';
 import {
   CURRENT_USER_WORKER_ID,
   MAX_POST_IMAGES,
   normalizePostImageUrls,
 } from '../../types/feed';
+import { isSupabaseConfigured } from '../../config/supabase';
+import { createPostInSupabase } from '../../services/supabasePosts';
 
 type Props = FeedStackScreenProps<'PublishPost'>;
 
@@ -33,16 +35,19 @@ const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?img=68';
  */
 export function PublishPostScreen({ navigation }: Props) {
   const { addPost } = useFeed();
-  const { isWorkerMode, workerTrade } = useUserMode();
+  const { isWorker, workerTrade } = useUserMode();
+  const { user } = useAuth();
+  const toast = useAppToast();
   const [imageUris, setImageUris] = useState<string[]>([]);
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
+  const MAX_DESC = 200;
 
-  if (!isWorkerMode) {
+  if (!isWorker) {
     return (
       <View style={styles.centered}>
         <Text style={styles.warn}>
-          Activá &quot;Modo trabajador&quot; en Perfil para publicar.
+          Registrá tus servicios en Perfil para publicar.
         </Text>
         <AppButton title="Volver" onPress={() => navigation.goBack()} />
       </View>
@@ -51,74 +56,63 @@ export function PublishPostScreen({ navigation }: Props) {
 
   const slotsLeft = MAX_POST_IMAGES - imageUris.length;
 
-  async function pickImages() {
-    if (slotsLeft <= 0) return;
-
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert(
-        'Permisos',
-        'Necesitamos acceso a tu galería para elegir fotos del trabajo.',
-      );
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: true,
-      selectionLimit: slotsLeft,
-      quality: 0.85,
-    });
-
-    if (!result.canceled && result.assets.length > 0) {
-      const next = result.assets
-        .map((a) => a.uri)
-        .filter(Boolean)
-        .slice(0, slotsLeft);
-      setImageUris((prev) => normalizePostImageUrls([...prev, ...next]));
-    }
-  }
-
-  function removeAt(index: number) {
-    setImageUris((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  function handlePublish() {
+  async function handlePublish() {
     const urls = normalizePostImageUrls(imageUris);
     if (urls.length === 0) {
-      Alert.alert('Fotos', 'Agregá al menos una imagen del trabajo (hasta 3).');
+      toast.warning('Agregá al menos una imagen del trabajo (hasta 3).', 'Fotos');
       return;
     }
     const trimmed = description.trim();
     if (!trimmed) {
-      Alert.alert('Descripción', 'Escribí una breve descripción del trabajo.');
+      toast.warning('Escribí una breve descripción del trabajo.', 'Descripción');
+      return;
+    }
+    if (trimmed.length > MAX_DESC) {
+      toast.warning(`La descripción no puede superar ${MAX_DESC} caracteres.`, 'Descripción');
       return;
     }
 
     setLoading(true);
-    setTimeout(() => {
+    try {
+      let postId = `local-${Date.now()}`;
+      let createdAt = new Date().toISOString();
+      let imageUrls = urls;
+
+      if (isSupabaseConfigured()) {
+        const remote = await createPostInSupabase({
+          trade: workerTrade,
+          description: trimmed,
+          imageUris: urls,
+        });
+        postId = remote.postId;
+        createdAt = remote.createdAt;
+        imageUrls = remote.imageUrls;
+      }
+
+      const name = (user?.firstName ?? user?.fullName ?? 'Vos').trim() || 'Vos';
       addPost({
-        id: `local-${Date.now()}`,
-        workerId: CURRENT_USER_WORKER_ID,
-        workerFirstName: 'Vos',
-        workerAvatarUrl: DEFAULT_AVATAR,
+        id: postId,
+        workerId: user?.id ?? CURRENT_USER_WORKER_ID,
+        workerFirstName: name.split(' ')[0] ?? name,
+        workerAvatarUrl: user?.avatarUri ?? DEFAULT_AVATAR,
         trade: workerTrade,
-        workImageUrls: urls,
+        workImageUrls: imageUrls,
         description: trimmed,
-        createdAt: new Date().toISOString(),
+        createdAt,
         likeCount: 0,
         likedByMe: false,
       });
-      setLoading(false);
+
       navigation.goBack();
-    }, 400);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo publicar.', 'Publicar');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <AppKeyboardAvoidingView style={styles.flex}>
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
@@ -128,28 +122,20 @@ export function PublishPostScreen({ navigation }: Props) {
           nombre (sin apellido) en el feed.
         </Text>
 
-        <Text style={styles.label}>Fotos del trabajo ({imageUris.length}/{MAX_POST_IMAGES})</Text>
-        <View style={styles.thumbRow}>
-          {imageUris.map((uri, index) => (
-            <View key={`${uri}-${index}`} style={styles.thumbWrap}>
-              <Image source={{ uri }} style={styles.thumb} />
-              <Pressable
-                style={styles.removeBtn}
-                onPress={() => removeAt(index)}
-                hitSlop={8}
-                accessibilityLabel="Quitar foto"
-              >
-                <Ionicons name="close-circle" size={28} color={colors.primary} />
-              </Pressable>
-            </View>
-          ))}
-          {slotsLeft > 0 ? (
-            <Pressable style={styles.addTile} onPress={pickImages}>
-              <Ionicons name="images-outline" size={36} color="#E5E5E5" />
-              <Text style={styles.addTileText}>Agregar</Text>
-            </Pressable>
-          ) : null}
-        </View>
+        <ImagePickerComponent
+          mode="multi"
+          label={`Fotos del trabajo (${imageUris.length}/${MAX_POST_IMAGES})`}
+          hint="Podés usar cámara o galería. Recorte 1:1 automático antes de subir."
+          value={imageUris}
+          onChange={(next) => {
+            const arr = Array.isArray(next) ? next : [String(next ?? '')];
+            setImageUris(normalizePostImageUrls(arr.filter(Boolean)).slice(0, MAX_POST_IMAGES));
+          }}
+          maxCount={MAX_POST_IMAGES}
+          squareCrop
+          jpegQuality={0.88}
+        />
+        {slotsLeft <= 0 ? null : null}
 
         <Text style={styles.label}>Descripción</Text>
         <TextInput
@@ -159,12 +145,22 @@ export function PublishPostScreen({ navigation }: Props) {
           value={description}
           onChangeText={setDescription}
           multiline
-          maxLength={500}
+          maxLength={MAX_DESC}
         />
+        <View style={styles.counterRow}>
+          <Text style={[styles.counterText, description.trim().length >= MAX_DESC && styles.counterTextLimit]}>
+            {Math.min(description.trim().length, MAX_DESC)}/{MAX_DESC}
+          </Text>
+        </View>
 
-        <AppButton title="Publicar" onPress={handlePublish} loading={loading} />
+        <AppButton
+          title="Publicar"
+          onPress={() => void handlePublish()}
+          loading={loading}
+          disabled={!description.trim() || description.trim().length > MAX_DESC}
+        />
       </ScrollView>
-    </KeyboardAvoidingView>
+    </AppKeyboardAvoidingView>
   );
 }
 
@@ -189,48 +185,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: spacing.sm,
   },
-  thumbRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
-  },
-  thumbWrap: {
-    width: 100,
-    height: 100,
-    borderRadius: radii.card,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  thumb: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#2C2C2C',
-  },
-  removeBtn: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 14,
-  },
-  addTile: {
-    width: 100,
-    height: 100,
-    borderRadius: radii.card,
-    backgroundColor: '#1A1A1A',
-    borderWidth: 2,
-    borderColor: colors.primary,
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addTileText: {
-    color: '#E5E5E5',
-    fontSize: 13,
-    fontWeight: '600',
-    marginTop: 4,
-  },
   input: {
     backgroundColor: colors.surface,
     borderRadius: radii.input,
@@ -242,6 +196,19 @@ const styles = StyleSheet.create({
     minHeight: 120,
     textAlignVertical: 'top',
     marginBottom: spacing.lg,
+  },
+  counterRow: {
+    marginTop: -spacing.md,
+    marginBottom: spacing.lg,
+    alignItems: 'flex-end',
+  },
+  counterText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  counterTextLimit: {
+    color: colors.error,
   },
   centered: {
     flex: 1,

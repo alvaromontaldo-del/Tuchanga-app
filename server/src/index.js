@@ -177,6 +177,31 @@ app.post('/api/conversations/find-or-create', async (req, res) => {
   }
 });
 
+/** DELETE /api/conversations/:conversationId */
+app.delete('/api/conversations/:conversationId', async (req, res) => {
+  const userId = parseBearer(req);
+  if (!userId || !isUuid(userId)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const { conversationId } = req.params;
+  if (!isUuid(conversationId)) {
+    return res.status(400).json({ error: 'Invalid conversation' });
+  }
+  try {
+    const ok = await userInConversation(conversationId, userId);
+    if (!ok) return res.status(403).json({ error: 'Forbidden' });
+
+    // Borrado en cascada (messages → conversations) debería existir por FK; hacemos explícito por compat.
+    await pool.query(`DELETE FROM messages WHERE conversation_id = $1::uuid`, [conversationId]);
+    await pool.query(`DELETE FROM conversations WHERE id = $1::uuid`, [conversationId]);
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
