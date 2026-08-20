@@ -3,6 +3,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   Image,
   Platform,
@@ -16,10 +17,12 @@ import {
   View,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { AppScreen } from '../../components/layout/AppScreen';
+import { BrandLogoHorizontal } from '../../components/brand/BrandMark';
 import { AppButton } from '../../components/common/AppButton';
 import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
 import { AppTextInput } from '../../components/common/AppTextInput';
+import { ModeratedTextField } from '../../components/common/ModeratedTextField';
 import { LocationMap } from '../../components/location/LocationMap';
 import { SingleSelectModal } from '../../components/common/SingleSelectModal';
 import { TradeSearchModal } from '../../components/search/TradeSearchModal';
@@ -35,7 +38,7 @@ import {
 } from '../../data/phoneCountries';
 import { getDefaultRubroNombre } from '../../data/rubrosCatalog';
 import type { AuthStackScreenProps } from '../../navigation/types';
-import { signUp, type WorkerTradeDraft } from '../../services/auth';
+import { signUp, type WorkerTradeDraft, MSG_IDENTITY_FIELD, checkIdentityConflicts } from '../../services/auth';
 import {
   buildInternationalPhoneDisplay,
   formatArgentinaNationalSpacing,
@@ -46,6 +49,11 @@ import {
   validateNationalPhone,
 } from '../../utils/validation';
 import {
+  CONTACT_MODERATION_PROFILE_FIELD_MESSAGE,
+  validateContactInfo,
+  validateWorkerProfileTexts,
+} from '../../utils/contactModeration';
+import {
   birthDateIsoFromDate,
   calcAgeFromBirthDate,
   dateFromBirthDateIso,
@@ -54,8 +62,20 @@ import {
 } from '../../utils/birthDate';
 import { colors, radii, spacing } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
-import { closeAuthModalAndGoToInicio } from '../../navigation/openAuthModal';
+import { useCommerceShell } from '../../context/CommerceShellContext';
+import { closeAuthModalAndGoToInicio, closeAuthModalAndRedirect } from '../../navigation/openAuthModal';
+import {
+  fetchStoreRubrosCatalog,
+  registerMyStore,
+} from '../../services/storeRegistrationSupabase';
+import { StoreOpeningHoursEditor } from '../../components/store/StoreOpeningHoursEditor';
+import {
+  defaultStoreOpeningHours,
+  type StoreHoursSlot,
+} from '../../utils/storeOpeningHours';
+import type { StoreRubro } from '../../types/materials';
 import { getHighAccuracyPosition } from '../../utils/deviceGeolocation';
+import { normalizeLocalImageUri } from '../../utils/normalizeLocalImage';
 
 type Props = AuthStackScreenProps<'Register'>;
 
@@ -74,7 +94,9 @@ type DraftErrors = Partial<Record<
   | 'location'
   | 'professionalDescription'
   | 'coverageKm'
-  | 'trades',
+  | 'trades'
+  | 'storeName'
+  | 'storeRubros',
   string
 >>;
 
@@ -89,11 +111,21 @@ function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.floor(n)));
 }
 
-export function RegisterScreen({ navigation }: Props) {
-  const { signIn, setFlashMessage } = useAuth();
+export function RegisterScreen({ navigation, route }: Props) {
+  const { signIn, setFlashMessage, flashMessage } = useAuth();
+  const { enterCommerceIntent, chooseSessionRole, refresh: refreshCommerceShell } =
+    useCommerceShell();
   const { width } = useWindowDimensions();
   const contentWidth = Math.min(width - spacing.lg * 2, 520);
   const toast = useAppToast();
+  const redirectTo = route.params?.redirectTo;
+  const asCommerce = Boolean(route.params?.asCommerce);
+
+  useEffect(() => {
+    if (!flashMessage) return;
+    toast.info(flashMessage, 'YaChanga');
+    setFlashMessage(null);
+  }, [flashMessage, setFlashMessage, toast]);
 
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<DraftErrors>({});
@@ -119,9 +151,19 @@ export function RegisterScreen({ navigation }: Props) {
   /** Obligatorio solo si ofrece servicios; se guarda como bio en el perfil. */
   const [professionalDescription, setProfessionalDescription] = useState('');
 
+  // Alta comercio (solo asCommerce)
+  const [storeName, setStoreName] = useState('');
+  const [storeRubros, setStoreRubros] = useState<StoreRubro[]>([]);
+  const [selectedStoreRubros, setSelectedStoreRubros] = useState<string[]>([]);
+  const [storeOpeningHours, setStoreOpeningHours] = useState<StoreHoursSlot[]>(
+    defaultStoreOpeningHours(),
+  );
+  const [storeRubrosLoading, setStoreRubrosLoading] = useState(false);
+
   // Ubicación base
   const [addressQuery, setAddressQuery] = useState('');
   const [geo, setGeo] = useState<GeoPoint | null>(null);
+  const [locationDetails, setLocationDetails] = useState('');
   const [searching, setSearching] = useState(false);
   const [addressResults, setAddressResults] = useState<GeoPoint[]>([]);
   const requestIdRef = useRef(0);
@@ -136,6 +178,50 @@ export function RegisterScreen({ navigation }: Props) {
   const [trades, setTrades] = useState<WorkerTradeDraft[]>([]);
   const [primaryTradeId, setPrimaryTradeId] = useState<string | null>(null);
   const [tradePickerOpenForId, setTradePickerOpenForId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!asCommerce) return;
+    void enterCommerceIntent();
+    setOfferServices(false);
+    setTrades([]);
+    setPrimaryTradeId(null);
+    setCoverageKm('10');
+    setProfessionalDescription('');
+  }, [asCommerce, enterCommerceIntent]);
+
+  useEffect(() => {
+    if (!asCommerce) return;
+    let cancelled = false;
+    setStoreRubrosLoading(true);
+    void (async () => {
+      try {
+        const list = await fetchStoreRubrosCatalog();
+        if (!cancelled) setStoreRubros(list);
+      } catch (e) {
+        if (!cancelled) {
+          toast.error(
+            e instanceof Error ? e.message : 'No se pudieron cargar los rubros.',
+            'Rubros',
+          );
+          setStoreRubros([]);
+        }
+      } finally {
+        if (!cancelled) setStoreRubrosLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [asCommerce, toast]);
+
+  const workerContactModeration = useMemo(
+    () =>
+      validateWorkerProfileTexts(
+        professionalDescription,
+        trades.map((t) => t.details ?? ''),
+      ),
+    [professionalDescription, trades],
+  );
 
   const selectedPhoneCountry = useMemo(
     () => getPhoneCountryById(phoneCountryId) ?? PHONE_COUNTRIES[0],
@@ -174,11 +260,19 @@ export function RegisterScreen({ navigation }: Props) {
     const dniDigits = normalizeDigitsOnly(dni);
     if (!dniDigits) {
       setErrors((p) => ({ ...p, dni: 'El DNI es obligatorio.' }));
-    } else if (dniDigits.length < 7 || dniDigits.length > 9) {
-      setErrors((p) => ({ ...p, dni: 'Ingresá un DNI válido.' }));
-    } else {
-      setErrors((p) => ({ ...p, dni: undefined }));
+      return;
     }
+    if (dniDigits.length < 7 || dniDigits.length > 8) {
+      setErrors((p) => ({ ...p, dni: 'El DNI debe tener 7 u 8 dígitos.' }));
+      return;
+    }
+    setErrors((p) => ({ ...p, dni: undefined }));
+    void (async () => {
+      const conflict = await checkIdentityConflicts({ dni: dniDigits });
+      if (conflict?.field === 'dni') {
+        setErrors((p) => ({ ...p, dni: MSG_IDENTITY_FIELD.dni }));
+      }
+    })();
   }
 
   function blurBirthDate() {
@@ -207,20 +301,39 @@ export function RegisterScreen({ navigation }: Props) {
     const t = email.trim();
     if (!t) {
       setErrors((p) => ({ ...p, email: 'El email es obligatorio.' }));
-    } else if (!isValidEmail(t)) {
-      setErrors((p) => ({ ...p, email: 'Ingresá un email válido (ej. nombre@ejemplo.com).' }));
-    } else {
-      setErrors((p) => ({ ...p, email: undefined }));
+      return;
     }
+    if (!isValidEmail(t)) {
+      setErrors((p) => ({ ...p, email: 'Ingresá un email válido (ej. nombre@ejemplo.com).' }));
+      return;
+    }
+    setErrors((p) => ({ ...p, email: undefined }));
+    void (async () => {
+      const conflict = await checkIdentityConflicts({ email: t.toLowerCase() });
+      if (conflict?.field === 'email') {
+        setErrors((p) => ({ ...p, email: MSG_IDENTITY_FIELD.email }));
+      }
+    })();
   }
 
   function blurPhone() {
     const msg = validateNationalPhone(phoneCountryId, phoneNationalDigits);
     if (msg) {
       setErrors((p) => ({ ...p, phone: msg }));
-    } else {
-      setErrors((p) => ({ ...p, phone: undefined }));
+      return;
     }
+    setErrors((p) => ({ ...p, phone: undefined }));
+    const phone = buildInternationalPhoneDisplay(
+      selectedPhoneCountry.dial,
+      selectedPhoneCountry.id,
+      phoneNationalDigits,
+    );
+    void (async () => {
+      const conflict = await checkIdentityConflicts({ phone });
+      if (conflict?.field === 'phone') {
+        setErrors((p) => ({ ...p, phone: MSG_IDENTITY_FIELD.phone }));
+      }
+    })();
   }
 
   function blurPassword() {
@@ -252,7 +365,17 @@ export function RegisterScreen({ navigation }: Props) {
     blurConfirmMatchOnly();
   }
 
-  async function pickAvatar() {
+  async function applyAvatarUri(uri: string) {
+    try {
+      const stable = await normalizeLocalImageUri(uri, { squareCrop: true });
+      setAvatarUri(stable);
+      setErrors((p) => ({ ...p, avatar: undefined }));
+    } catch {
+      toast.warning('No se pudo procesar la foto. Probá de nuevo o elegí otra.', 'Foto');
+    }
+  }
+
+  async function pickAvatarFromGallery() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       toast.warning('Necesitamos acceso a tu galería para subir tu foto de perfil.', 'Permisos');
@@ -265,8 +388,35 @@ export function RegisterScreen({ navigation }: Props) {
       quality: 0.9,
     });
     if (!result.canceled && result.assets[0]?.uri) {
-      setAvatarUri(result.assets[0].uri);
+      await applyAvatarUri(result.assets[0].uri);
     }
+  }
+
+  async function pickAvatarFromCamera() {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      toast.warning('Necesitamos acceso a la cámara para sacar tu foto de perfil.', 'Permisos');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      // En Android el crop nativo de cámara es inestable; normalizamos después.
+      allowsEditing: Platform.OS === 'ios',
+      aspect: [1, 1],
+      quality: 0.9,
+      exif: false,
+    });
+    if (!result.canceled && result.assets[0]?.uri) {
+      await applyAvatarUri(result.assets[0].uri);
+    }
+  }
+
+  function pickAvatar() {
+    Alert.alert('Foto de perfil', '¿Cómo querés cargar tu foto?', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Tomar foto (Cámara)', onPress: () => void pickAvatarFromCamera() },
+      { text: 'Elegir de la galería', onPress: () => void pickAvatarFromGallery() },
+    ]);
   }
 
   async function pickTradePhoto(tradeId: string) {
@@ -371,7 +521,11 @@ export function RegisterScreen({ navigation }: Props) {
     return () => clearTimeout(t);
   }, [addressQuery]);
 
-  const coverageMeters = offerServices ? clampInt(Number(coverageKm) || 0, 1, 300) * 1000 : 0;
+  const coverageMeters = asCommerce
+    ? 0
+    : offerServices
+      ? clampInt(Number(coverageKm) || 0, 1, 300) * 1000
+      : 0;
 
   async function runReverseGeocode(lat: number, lng: number) {
     const reqId = ++reverseReqRef.current;
@@ -421,7 +575,9 @@ export function RegisterScreen({ navigation }: Props) {
 
     const dniDigits = normalizeDigitsOnly(dni);
     if (!dniDigits) next.dni = 'El DNI es obligatorio.';
-    else if (dniDigits.length < 7 || dniDigits.length > 9) next.dni = 'Ingresá un DNI válido.';
+    else if (dniDigits.length < 7 || dniDigits.length > 8) {
+      next.dni = 'El DNI debe tener 7 u 8 dígitos.';
+    }
 
     const bd = birthDate.trim();
     if (!bd) (next as any).birthDate = 'La fecha de nacimiento es obligatoria.';
@@ -436,9 +592,14 @@ export function RegisterScreen({ navigation }: Props) {
 
     if (!email.trim()) next.email = 'El email es obligatorio.';
     else if (!isValidEmail(email)) next.email = 'Ingresá un email válido (ej. nombre@ejemplo.com).';
+    else if (errors.email === MSG_IDENTITY_FIELD.email) next.email = MSG_IDENTITY_FIELD.email;
 
     const phoneErr = validateNationalPhone(phoneCountryId, phoneNationalDigits);
     if (phoneErr) next.phone = phoneErr;
+    else if (errors.phone === MSG_IDENTITY_FIELD.phone) next.phone = MSG_IDENTITY_FIELD.phone;
+
+    const dniDigitsCheck = normalizeDigitsOnly(dni);
+    if (dniDigitsCheck && errors.dni === MSG_IDENTITY_FIELD.dni) next.dni = MSG_IDENTITY_FIELD.dni;
 
     const pwdErr = getPasswordRegistrationError(password);
     if (pwdErr) next.password = pwdErr;
@@ -446,12 +607,26 @@ export function RegisterScreen({ navigation }: Props) {
 
     if (!geo) next.location = 'Seleccioná una dirección para obtener latitud/longitud.';
 
+    if (asCommerce) {
+      if (!storeName.trim()) next.storeName = 'El nombre del comercio es obligatorio.';
+      if (selectedStoreRubros.length === 0) {
+        next.storeRubros = 'Seleccioná al menos un rubro.';
+      }
+    }
+
     if (offerServices) {
       const desc = professionalDescription.trim();
       if (desc.length < MIN_PROFESSIONAL_DESCRIPTION_LEN) {
         next.professionalDescription = `La descripción profesional es obligatoria (mínimo ${MIN_PROFESSIONAL_DESCRIPTION_LEN} caracteres).`;
       } else if (desc.length > MAX_PROFESSIONAL_DESCRIPTION_LEN) {
         next.professionalDescription = `Máximo ${MAX_PROFESSIONAL_DESCRIPTION_LEN} caracteres.`;
+      } else if (validateContactInfo(professionalDescription).blocked) {
+        next.professionalDescription = CONTACT_MODERATION_PROFILE_FIELD_MESSAGE;
+      }
+
+      const blockedTrade = trades.findIndex((t) => validateContactInfo(t.details ?? '').blocked);
+      if (blockedTrade >= 0) {
+        next.trades = CONTACT_MODERATION_PROFILE_FIELD_MESSAGE;
       }
 
       const km = clampInt(Number(coverageKm) || 0, 1, 300);
@@ -482,11 +657,27 @@ export function RegisterScreen({ navigation }: Props) {
       setTermsOpen(true);
       return;
     }
-    if (!validate()) return;
-    if (!geo || !avatarUri) return;
+    if (!validate()) {
+      toast.error('Revisá los campos marcados en rojo.', 'Faltan datos', { durationMs: 3500 });
+      return;
+    }
+
+    if (!geo || !avatarUri) {
+      toast.error('Completá la foto de perfil y la ubicación para continuar.', 'Faltan datos', {
+        durationMs: 3500,
+      });
+      return;
+    }
+
+    const phone = buildInternationalPhoneDisplay(
+      selectedPhoneCountry.dial,
+      selectedPhoneCountry.id,
+      phoneNationalDigits,
+    );
 
     setLoading(true);
     try {
+      const wantWorker = asCommerce ? false : offerServices;
       const result = await signUp({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
@@ -494,34 +685,76 @@ export function RegisterScreen({ navigation }: Props) {
         avatarUri,
         birthDate: birthDate.trim(),
         email: email.trim(),
-        phone: buildInternationalPhoneDisplay(
-          selectedPhoneCountry.dial,
-          selectedPhoneCountry.id,
-          phoneNationalDigits,
-        ),
+        phone,
         password,
-        bio: offerServices ? professionalDescription.trim() : undefined,
+        bio: wantWorker ? professionalDescription.trim() : undefined,
         baseLocation: geo,
-        offerServices,
-        coverageKm: offerServices ? clampInt(Number(coverageKm) || 0, 1, 300) : undefined,
-        trades: offerServices ? trades : undefined,
-        primaryTradeId: offerServices ? primaryTradeId ?? undefined : undefined,
+        locationDetails: locationDetails.trim() || undefined,
+        offerServices: wantWorker,
+        coverageKm: wantWorker ? clampInt(Number(coverageKm) || 0, 1, 300) : undefined,
+        trades: wantWorker ? trades : undefined,
+        primaryTradeId: wantWorker ? primaryTradeId ?? undefined : undefined,
       });
 
       if (!result.ok) {
-        toast.error(result.message, 'Error', { durationMs: 4200 });
+        if (result.reason === 'email_confirmation') {
+          toast.success(result.message, '¡Cuenta creada!', { durationMs: 5500 });
+          navigation.navigate('Login', { asCommerce });
+          return;
+        }
+        if (result.reason === 'identity_taken' || result.field) {
+          const field = result.field;
+          if (field) {
+            setErrors((p) => ({
+              ...p,
+              [field]: MSG_IDENTITY_FIELD[field],
+            }));
+          }
+          toast.error(result.message, 'No se pudo crear la cuenta', { durationMs: 5500 });
+          return;
+        }
+        toast.error(result.message, 'No se pudo crear la cuenta', { durationMs: 4500 });
         return;
       }
-      setFlashMessage('¡Cuenta creada! Bienvenido/a a Tu Changa.');
+      setFlashMessage(
+        asCommerce
+          ? '¡Cuenta creada! Tu comercio quedó pendiente de aprobación.'
+          : '¡Cuenta creada! Bienvenido/a a YaChanga.',
+      );
       await signIn(result.user, true);
-      closeAuthModalAndGoToInicio();
+      if (asCommerce) {
+        await enterCommerceIntent();
+        await chooseSessionRole('commerce');
+        try {
+          await registerMyStore({
+            name: storeName.trim(),
+            phone,
+            address: geo.address.trim() || storeName.trim(),
+            latitude: geo.lat,
+            longitude: geo.lng,
+            rubroIds: selectedStoreRubros,
+            openingHours: storeOpeningHours,
+          });
+          refreshCommerceShell();
+        } catch (storeErr) {
+          toast.warning(
+            storeErr instanceof Error
+              ? storeErr.message
+              : 'La cuenta se creó, pero el alta del local quedó pendiente. Completala desde Cuenta comercio.',
+            'Comercio',
+            { durationMs: 6000 },
+          );
+        }
+      }
+      if (redirectTo && !asCommerce) closeAuthModalAndRedirect(redirectTo);
+      else closeAuthModalAndGoToInicio();
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+    <AppScreen style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
       <AppKeyboardAvoidingView style={styles.flex}>
         <ScrollView
           contentContainerStyle={styles.scroll}
@@ -529,12 +762,81 @@ export function RegisterScreen({ navigation }: Props) {
           showsVerticalScrollIndicator={false}
         >
           <View style={[styles.card, { width: contentWidth }]}>
-            <Text style={styles.title}>Crear cuenta</Text>
+            <View style={styles.brandWrap}>
+              <BrandLogoHorizontal
+                variant="register"
+                maxWidth={contentWidth}
+                style={styles.brandLogo}
+              />
+            </View>
+            <Text style={styles.title}>
+              {asCommerce ? 'Crear cuenta de comercio' : 'Crear cuenta'}
+            </Text>
             <Text style={styles.subtitle}>
-              Perfil único: empezás como cliente y, si querés, activás funciones de trabajador.
+              {asCommerce
+                ? 'Cargá los datos de tu local y del titular. El comercio queda pendiente de aprobación del admin.'
+                : 'Perfil único: empezás como cliente y, si querés, activás funciones de trabajador.'}
             </Text>
 
-            <Text style={styles.section}>Identidad</Text>
+            {asCommerce ? (
+              <>
+                <Text style={styles.section}>Datos del comercio</Text>
+                <AppTextInput
+                  label="Nombre del comercio *"
+                  value={storeName}
+                  onChangeText={(t) => {
+                    setStoreName(t);
+                    setErrors((p) => ({ ...p, storeName: undefined }));
+                  }}
+                  autoCapitalize="words"
+                  placeholder="Ej. Ferretería El Tornillo"
+                  maxLength={120}
+                  error={errors.storeName}
+                />
+                <Text style={styles.fieldLabelStatic}>Rubros * (podés elegir varios)</Text>
+                <Text style={styles.hint}>
+                  Elegí los rubros en los que vas a cotizar materiales.
+                </Text>
+                {storeRubrosLoading ? (
+                  <ActivityIndicator color={colors.primary} style={{ marginVertical: 8 }} />
+                ) : (
+                  <View style={styles.rubroWrap}>
+                    {storeRubros.map((r) => {
+                      const on = selectedStoreRubros.includes(r.id);
+                      return (
+                        <Pressable
+                          key={r.id}
+                          onPress={() => {
+                            setSelectedStoreRubros((prev) =>
+                              prev.includes(r.id)
+                                ? prev.filter((x) => x !== r.id)
+                                : [...prev, r.id],
+                            );
+                            setErrors((p) => ({ ...p, storeRubros: undefined }));
+                          }}
+                          style={[styles.rubroChip, on && styles.rubroChipOn]}
+                        >
+                          <Text style={[styles.rubroChipText, on && styles.rubroChipTextOn]}>
+                            {r.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
+                {errors.storeRubros ? (
+                  <Text style={styles.error}>{errors.storeRubros}</Text>
+                ) : null}
+                <StoreOpeningHoursEditor
+                  slots={storeOpeningHours}
+                  onChange={setStoreOpeningHours}
+                />
+              </>
+            ) : null}
+
+            <Text style={styles.section}>
+              {asCommerce ? 'Titular de la cuenta' : 'Identidad'}
+            </Text>
             <Pressable style={styles.avatarRow} onPress={pickAvatar} hitSlop={8}>
               <View style={styles.avatar}>
                 {avatarUri ? (
@@ -587,11 +889,12 @@ export function RegisterScreen({ navigation }: Props) {
               label="DNI *"
               value={dni}
               onChangeText={(t) => {
-                setDni(normalizeDigitsOnly(t));
+                setDni(normalizeDigitsOnly(t).slice(0, 8));
                 setErrors((p) => ({ ...p, dni: undefined }));
               }}
               onBlur={blurDni}
               keyboardType="number-pad"
+              maxLength={8}
               placeholder="Ej.: 12345678"
               error={errors.dni}
             />
@@ -713,7 +1016,9 @@ export function RegisterScreen({ navigation }: Props) {
               error={errors.confirm}
             />
 
-            <Text style={styles.section}>Ubicación base *</Text>
+            <Text style={styles.section}>
+              {asCommerce ? 'Dirección del local *' : 'Ubicación base *'}
+            </Text>
             <Text style={styles.hint}>
               Buscá tu dirección y elegí una sugerencia para guardar latitud/longitud. Si no queda
               exacto, mové el pin manualmente.
@@ -786,7 +1091,7 @@ export function RegisterScreen({ navigation }: Props) {
               <LocationMap
                 geo={{ lat: geo.lat, lng: geo.lng }}
                 coverageMeters={coverageMeters}
-                showCoverage={offerServices}
+                showCoverage={!asCommerce && offerServices}
                 locating={locating}
                 onLocateMe={() => void locateMe()}
                 onPinMoved={(lat: number, lng: number) => {
@@ -800,6 +1105,28 @@ export function RegisterScreen({ navigation }: Props) {
               />
             ) : null}
 
+            <Text style={styles.section}>
+              {asCommerce
+                ? 'Detalles para ubicar el local'
+                : 'Detalles para ubicar el domicilio'}
+            </Text>
+            <Text style={styles.hint}>
+              {asCommerce
+                ? 'Opcional. Referencias del local (entrada, entre calles, etc.).'
+                : 'Opcional. Referencias para que el profesional te encuentre (rejas, color de fachada, etc.).'}
+            </Text>
+            <TextInput
+              style={styles.locationDetailsInput}
+              value={locationDetails}
+              onChangeText={setLocationDetails}
+              placeholder="Ej. Portón negro, casa con pared celeste"
+              placeholderTextColor={colors.textSecondary}
+              multiline
+              maxLength={300}
+              textAlignVertical="top"
+            />
+
+            {!asCommerce ? (
             <View style={styles.toggleCard}>
               <View style={styles.toggleTextWrap}>
                 <Text style={styles.toggleTitle}>Quiero ofrecer mis servicios en la plataforma</Text>
@@ -830,18 +1157,35 @@ export function RegisterScreen({ navigation }: Props) {
                 thumbColor={offerServices ? colors.primary : '#F3F4F6'}
               />
             </View>
+            ) : (
+              <View style={styles.toggleCard}>
+                <View style={styles.toggleTextWrap}>
+                  <Text style={styles.toggleTitle}>Alta de comercio incluida</Text>
+                  <Text style={styles.toggleHint}>
+                    Con este formulario se crea la cuenta y se envía el local a revisión del admin.
+                  </Text>
+                </View>
+                <Ionicons name="storefront-outline" size={28} color={colors.primary} />
+              </View>
+            )}
 
-            {offerServices ? (
+            {!asCommerce && offerServices ? (
               <View style={styles.workerWrap}>
                 <Text style={styles.section}>Descripción profesional *</Text>
                 <Text style={styles.hint}>
                   Contá quién sos como profesional, experiencia y qué ofrecés (mínimo{' '}
                   {MIN_PROFESSIONAL_DESCRIPTION_LEN} caracteres). Se muestra en tu perfil público.
                 </Text>
-                <TextInput
+                <ModeratedTextField
+                  variant="plain"
+                  showIcon={false}
+                  policyMessage={CONTACT_MODERATION_PROFILE_FIELD_MESSAGE}
                   style={[
                     styles.textArea,
-                    errors.professionalDescription ? styles.textAreaError : null,
+                    styles.workerFieldSurface,
+                    errors.professionalDescription || workerContactModeration.professional.blocked
+                      ? styles.textAreaError
+                      : null,
                   ]}
                   value={professionalDescription}
                   onChangeText={(t) => {
@@ -849,10 +1193,11 @@ export function RegisterScreen({ navigation }: Props) {
                     setErrors((p) => ({ ...p, professionalDescription: undefined }));
                   }}
                   multiline
+                  textAlignVertical="top"
                   placeholder="Ej.: Electricista matriculado con 10 años de experiencia en instalaciones y reparaciones…"
                   placeholderTextColor={colors.textSecondary}
                 />
-                {errors.professionalDescription ? (
+                {errors.professionalDescription && !workerContactModeration.professional.blocked ? (
                   <Text style={styles.error}>{errors.professionalDescription}</Text>
                 ) : null}
                 <Text style={styles.summaryCounter}>
@@ -887,7 +1232,7 @@ export function RegisterScreen({ navigation }: Props) {
                 </Text>
                 {errors.trades ? <Text style={styles.error}>{errors.trades}</Text> : null}
 
-                {trades.map((t) => (
+                {trades.map((t, tradeIdx) => (
                   <View key={t.id} style={styles.tradeCard}>
                     <View style={styles.tradeTopRow}>
                       <Pressable
@@ -922,7 +1267,7 @@ export function RegisterScreen({ navigation }: Props) {
 
                     <Text style={styles.fieldLabel}>Oficio</Text>
                     <Pressable
-                      style={styles.dropdown}
+                      style={[styles.dropdown, styles.workerFieldSurface]}
                       onPress={() => setTradePickerOpenForId(t.id)}
                       accessibilityRole="button"
                     >
@@ -933,19 +1278,29 @@ export function RegisterScreen({ navigation }: Props) {
                     </Pressable>
 
                     <Text style={styles.fieldLabel}>Detalles / experiencia</Text>
-                    <TextInput
-                      style={styles.textArea}
+                    <ModeratedTextField
+                      variant="plain"
+                      showIcon={false}
+                      policyMessage={CONTACT_MODERATION_PROFILE_FIELD_MESSAGE}
+                      style={[
+                        styles.textArea,
+                        styles.workerFieldSurface,
+                        workerContactModeration.tradeDescriptions[tradeIdx]?.blocked
+                          ? styles.textAreaError
+                          : null,
+                      ]}
                       value={t.details}
                       onChangeText={(txt) => updateTrade(t.id, { details: txt })}
                       placeholder="Contá tu experiencia, herramientas, especialidad…"
                       placeholderTextColor={colors.textSecondary}
                       multiline
+                      textAlignVertical="top"
                       maxLength={600}
                     />
 
                     <Text style={styles.fieldLabel}>Fotos del oficio (hasta 5)</Text>
                     <Pressable
-                      style={styles.photoRow}
+                      style={[styles.photoRow, styles.workerFieldSurface]}
                       onPress={() => void pickTradePhoto(t.id)}
                       hitSlop={8}
                     >
@@ -1026,9 +1381,10 @@ export function RegisterScreen({ navigation }: Props) {
             ) : null}
 
             <AppButton
-              title="Crear cuenta"
+              title={asCommerce ? 'Crear cuenta de comercio' : 'Crear cuenta'}
               onPress={handleSubmit}
               loading={loading}
+              disabled={!asCommerce && offerServices && workerContactModeration.hasViolation}
               style={styles.submitButton}
             />
 
@@ -1042,7 +1398,10 @@ export function RegisterScreen({ navigation }: Props) {
 
             <View style={styles.footerRow}>
               <Text style={styles.muted}>¿Ya tenés cuenta? </Text>
-              <TextLink inline onPress={() => navigation.navigate('Login')}>
+              <TextLink
+                inline
+                onPress={() => navigation.navigate('Login', { asCommerce })}
+              >
                 Ingresar
               </TextLink>
             </View>
@@ -1056,16 +1415,14 @@ export function RegisterScreen({ navigation }: Props) {
             display="default"
             maximumDate={new Date()}
             onChange={(e, selected) => {
-              if (e.type === 'dismissed') {
-                setBirthPickerOpen(false);
-                return;
-              }
-              if (e.type === 'set' && selected) {
-                const iso = birthDateIsoFromDate(selected);
-                setBirthDate(iso);
-                setErrors((p) => ({ ...p, birthDate: undefined }));
-                setBirthPickerOpen(false);
-              }
+              // Cerrar primero: si no, Android vuelve a abrir el diálogo (doble aceptar).
+              setBirthPickerOpen(false);
+              if (e.type === 'dismissed') return;
+              // Algunos OEM no mandan type === 'set'; alcanza con selected.
+              if (!selected) return;
+              setBirthPickerDraft(selected);
+              setBirthDate(birthDateIsoFromDate(selected));
+              setErrors((p) => ({ ...p, birthDate: undefined }));
             }}
           />
         ) : null}
@@ -1166,7 +1523,7 @@ export function RegisterScreen({ navigation }: Props) {
           }}
         />
       </AppKeyboardAvoidingView>
-    </SafeAreaView>
+    </AppScreen>
   );
 }
 
@@ -1175,18 +1532,28 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   scroll: {
     flexGrow: 1,
-    paddingVertical: spacing.xl,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xl,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
   },
   card: {
     alignSelf: 'center',
-    paddingTop: spacing.sm,
+    paddingTop: 0,
+  },
+  brandWrap: {
+    width: '100%',
+    alignItems: 'flex-start',
+    marginBottom: spacing.sm,
+  },
+  brandLogo: {
+    alignSelf: 'flex-start',
   },
   title: {
     fontSize: 28,
     fontWeight: '800',
     color: colors.text,
+    marginTop: spacing.xs,
     marginBottom: spacing.xs,
     letterSpacing: -0.2,
   },
@@ -1350,6 +1717,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  locationDetailsInput: {
+    marginTop: spacing.sm,
+    minHeight: 88,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.input,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    fontSize: 15,
+    color: colors.text,
+  },
   dropdown: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1402,6 +1781,33 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   geoText: { flex: 1, fontSize: 13, fontWeight: '700', color: colors.textSecondary },
+  rubroWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  rubroChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  rubroChipOn: {
+    borderColor: colors.primary,
+    backgroundColor: '#FEE2E2',
+  },
+  rubroChipText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  rubroChipTextOn: {
+    color: colors.primary,
+  },
   toggleCard: {
     marginTop: spacing.lg,
     flexDirection: 'row',
@@ -1418,6 +1824,9 @@ const styles = StyleSheet.create({
   toggleTitle: { fontSize: 15, fontWeight: '900', color: colors.text, lineHeight: 20 },
   toggleHint: { fontSize: 13, color: colors.textSecondary, marginTop: 4, lineHeight: 18 },
   workerWrap: { marginTop: spacing.sm },
+  workerFieldSurface: {
+    backgroundColor: colors.surface,
+  },
   coverRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   coverInput: {
     width: 92,

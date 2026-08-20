@@ -13,12 +13,14 @@ import { openAuthModal } from './openAuthModal';
 
 const TAB_ICON: Record<string, ComponentProps<typeof Ionicons>['name']> = {
   Inicio: 'home-outline',
+  Agenda: 'calendar-outline',
   Mensajes: 'chatbubbles-outline',
   Perfil: 'person-circle-outline',
 };
 
 const TAB_ROOT_SCREEN: Record<string, string> = {
   Inicio: 'Home',
+  Agenda: 'Agenda',
   Mensajes: 'ConversationsList',
   Perfil: 'MyAccount',
 };
@@ -49,6 +51,9 @@ export function MainTabBar({ state, descriptors, navigation }: BottomTabBarProps
     <View style={[styles.shell, { paddingBottom: bottomPad }]}>
       <View style={styles.row}>
         {state.routes.map((route) => {
+          if (route.name === 'Agenda') {
+            if (!isAuthed || !isWorker) return null;
+          }
           if (route.name === 'Publicar') {
             if (!isAuthed || !isWorker) return null;
             return (

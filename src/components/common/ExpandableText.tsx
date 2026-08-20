@@ -1,6 +1,16 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, type TextProps, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  type TextProps,
+  View,
+  type ViewStyle,
+} from 'react-native';
 import { colors, spacing } from '../../constants/theme';
+
+/** Líneas visibles antes de mostrar "Ver más" (oficios, reseñas, bios, etc.). */
+export const EXPANDABLE_TEXT_LINES = 3;
 
 type Props = {
   text: string;
@@ -8,50 +18,67 @@ type Props = {
   moreLabel?: string;
   lessLabel?: string;
   textStyle?: TextProps['style'];
+  style?: ViewStyle;
   /** Alineación del enlace "Ver más" / "Ver menos" */
   moreAlign?: 'left' | 'right';
 };
 
 export function ExpandableText({
   text,
-  numberOfLinesCollapsed = 5,
+  numberOfLinesCollapsed = EXPANDABLE_TEXT_LINES,
   moreLabel = 'Ver más',
   lessLabel = 'Ver menos',
   textStyle,
+  style,
   moreAlign = 'left',
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [canExpand, setCanExpand] = useState(false);
-  const measuredOnce = useRef(false);
+  const [layoutWidth, setLayoutWidth] = useState(0);
+
+  useEffect(() => {
+    setExpanded(false);
+    setCanExpand(false);
+  }, [text, numberOfLinesCollapsed]);
 
   /**
-   * Importante: onTextLayout devuelve las líneas *renderizadas*.
-   * Si al Text visible le ponemos numberOfLines, nunca va a reportar "más de N" aunque haya truncado.
-   * Por eso medimos el texto completo en un Text oculto (sin clamp) y con eso decidimos el "Ver más".
+   * onTextLayout devuelve las líneas renderizadas.
+   * El Text visible con numberOfLines nunca reporta más de N líneas aunque haya truncado.
+   * Medimos el texto completo en un Text oculto (mismo ancho) para decidir el toggle.
    */
   const onMeasureLayout = useCallback(
-    (e: any) => {
-      if (measuredOnce.current) return;
-      const lines = e?.nativeEvent?.lines?.length ?? 0;
-      if (lines > numberOfLinesCollapsed) setCanExpand(true);
-      measuredOnce.current = true;
+    (e: { nativeEvent?: { lines?: unknown[] } }) => {
+      const lines = e.nativeEvent?.lines?.length ?? 0;
+      setCanExpand(lines > numberOfLinesCollapsed);
     },
     [numberOfLinesCollapsed],
   );
 
+  const onContainerLayout = useCallback((e: { nativeEvent: { layout: { width: number } } }) => {
+    const w = Math.round(e.nativeEvent.layout.width);
+    if (w > 0) setLayoutWidth(w);
+  }, []);
+
   const toggle = useCallback(() => setExpanded((p) => !p), []);
-  const clamped = useMemo(() => (!expanded ? numberOfLinesCollapsed : undefined), [expanded, numberOfLinesCollapsed]);
+  const clamped = useMemo(
+    () => (!expanded ? numberOfLinesCollapsed : undefined),
+    [expanded, numberOfLinesCollapsed],
+  );
+
+  if (!text.trim()) return null;
 
   return (
-    <View>
-      {/* Medición fuera de layout (no visible) */}
-      <Text
-        style={[textStyle, styles.measure]}
-        numberOfLines={undefined}
-        onTextLayout={onMeasureLayout}
-      >
-        {text}
-      </Text>
+    <View style={style} onLayout={onContainerLayout}>
+      {layoutWidth > 0 ? (
+        <Text
+          style={[textStyle, styles.measure, { width: layoutWidth }]}
+          onTextLayout={onMeasureLayout}
+          accessible={false}
+          importantForAccessibility="no"
+        >
+          {text}
+        </Text>
+      ) : null}
 
       <Text style={textStyle} numberOfLines={clamped}>
         {text}
@@ -77,9 +104,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     opacity: 0,
     zIndex: -1,
-    // Evitar que aporte altura.
-    height: 0,
-    width: '100%',
+    left: 0,
+    top: 0,
+    pointerEvents: 'none',
   },
   moreRowLeft: {
     width: '100%',
@@ -96,4 +123,3 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 });
-

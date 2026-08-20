@@ -1,9 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import { useScrollToTop } from '@react-navigation/native';
 import {
   Alert,
-  Image,
   Pressable,
   ScrollView,
   Share,
@@ -11,11 +10,12 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { AppScreen } from '../../components/layout/AppScreen';
 import { ClickableAvatar } from '../../components/common/ClickableAvatar';
 import { StarRating } from '../../components/profile/StarRating';
 import { colors, radii, spacing } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
+import { useCommerceShell } from '../../context/CommerceShellContext';
 import { useUserMode } from '../../context/UserModeContext';
 import { useWorkerProfile } from '../../context/WorkerProfileContext';
 import type { AccountStackScreenProps } from '../../navigation/accountTypes';
@@ -68,6 +68,8 @@ function Row({
 
 export function MyAccountScreen({ navigation }: Props) {
   const { signOut, user } = useAuth();
+  const { clearSessionRole, clearCommerceIntent, chooseSessionRole, hasCommerceStore } =
+    useCommerceShell();
   const { isWorker } = useUserMode();
   const { isWorkerRegistered } = useWorkerProfile();
   const isWorkerRegisteredAnywhere = isWorkerRegistered || Boolean(isWorker);
@@ -79,7 +81,7 @@ export function MyAccountScreen({ navigation }: Props) {
   const scrollRef = useRef<ScrollView | null>(null);
   useScrollToTop(scrollRef);
   return (
-    <SafeAreaView style={accountUi.screenBg} edges={['top']}>
+    <AppScreen style={accountUi.screenBg} edges={['top', 'bottom', 'left', 'right']}>
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={accountUi.scrollContent}
@@ -89,7 +91,7 @@ export function MyAccountScreen({ navigation }: Props) {
         <View style={styles.pageHeader}>
           <Text style={accountUi.pageTitle}>Perfil</Text>
           <Text style={accountUi.pageSubtitle}>
-            Tu identidad en Tu Changa y herramientas de cuenta.
+            Tu identidad en YaChanga y herramientas de cuenta.
           </Text>
         </View>
 
@@ -111,7 +113,9 @@ export function MyAccountScreen({ navigation }: Props) {
               <Text style={styles.heroName} numberOfLines={1}>
                 {displayName}
               </Text>
-              <StarRating score={ratingAverage} reviewCount={reviewCount} size={12} textSize={12} />
+              {isWorkerRegisteredAnywhere ? (
+                <StarRating score={ratingAverage} reviewCount={reviewCount} size={12} textSize={12} />
+              ) : null}
             </View>
             <Text style={styles.heroEmail} numberOfLines={1}>
               {user?.email ?? ''}
@@ -156,6 +160,23 @@ export function MyAccountScreen({ navigation }: Props) {
           )}
         </View>
 
+        {hasCommerceStore ? (
+          <>
+            <Text style={accountUi.sectionLabel}>MÓDULOS</Text>
+            <View style={accountUi.card}>
+              <Row
+                icon="storefront-outline"
+                title="Ir a módulo comercio"
+                subtitle="Pedidos de materiales y cotizaciones"
+                onPress={() => {
+                  void chooseSessionRole('commerce');
+                }}
+                isLast
+              />
+            </View>
+          </>
+        ) : null}
+
         <Text style={accountUi.sectionLabel}>CUENTA</Text>
         <View style={accountUi.card}>
           <Row
@@ -170,14 +191,20 @@ export function MyAccountScreen({ navigation }: Props) {
             subtitle="Profesionales guardados"
             onPress={() => navigation.navigate('Favorites')}
           />
+          <Row
+            icon="key-outline"
+            title="Cambiar contraseña"
+            subtitle="Actualizá tu clave de acceso"
+            onPress={() => navigation.navigate('ChangePassword')}
+          />
 
           <Row
             icon="share-social-outline"
             title="Compartir app"
-            subtitle="Invitá a otros a Tu Changa"
+            subtitle="Invitá a otros a YaChanga"
             onPress={() => {
               void Share.share({
-                message: 'Probá Tu Changa: encontrá profesionales y recomendá trabajos.',
+                message: 'Probá YaChanga: encontrá profesionales y recomendá trabajos.',
               });
             }}
           />
@@ -194,6 +221,8 @@ export function MyAccountScreen({ navigation }: Props) {
                   style: 'destructive',
                   onPress: () => {
                     void (async () => {
+                      await clearSessionRole();
+                      await clearCommerceIntent();
                       await signOut();
                       const parent = navigation.getParent();
                       if (parent && 'reset' in parent) {
@@ -213,7 +242,7 @@ export function MyAccountScreen({ navigation }: Props) {
           />
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </AppScreen>
   );
 }
 

@@ -28,7 +28,7 @@ export type ApiMessage = {
   status: string;
   created_at: string;
   clientMessageId?: string | null;
-  type?: 'text' | 'budget';
+  type?: 'text' | 'budget' | 'quotation' | 'system' | 'image';
   metadata?: Record<string, unknown>;
 };
 

@@ -1,4 +1,5 @@
 import { Platform, type TextStyle, type ViewStyle } from 'react-native';
+import type { NativeStackNavigationOptions } from '@react-navigation/native-stack';
 
 /**
  * Sistema de diseño Tu Changa (tokens).
@@ -83,3 +84,17 @@ export const stackChrome = {
   headerStyle: { backgroundColor: colors.surface },
   contentStyle: { backgroundColor: colors.background },
 } as const;
+
+/**
+ * Base estática (sin inset de status bar). En pantallas con header nativo preferí
+ * `useNativeStackScreenOptions()` desde `src/navigation/useNativeStackScreenOptions.ts`.
+ */
+export const nativeStackScreenOptions: NativeStackNavigationOptions = {
+  headerStyle: stackChrome.headerStyle,
+  headerShadowVisible: false,
+  headerTintColor: colors.text,
+  headerTitleStyle: { fontWeight: '700' },
+  contentStyle: stackChrome.contentStyle,
+  headerBackTitleVisible: false,
+  headerBackButtonDisplayMode: 'minimal',
+};

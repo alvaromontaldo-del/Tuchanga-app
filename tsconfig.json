@@ -3,5 +3,6 @@
   "compilerOptions": {
     "strict": true,
     "moduleSuffixes": [".native", ".web", ""]
-  }
+  },
+  "exclude": ["supabase"]
 }

@@ -4,6 +4,8 @@ import type { AuthStackParamList } from './types';
 export type OpenAuthModalOptions = {
   /** Ej. `worker:<uuid>` — ver `LoginScreen` / `navigateAfterAuthLogin`. */
   redirectTo?: string;
+  /** Login / registro orientado a comercio. */
+  asCommerce?: boolean;
 };
 
 export function openAuthModal(
@@ -17,18 +19,35 @@ export function openAuthModal(
   }
 
   if (screen === 'Login') {
-    const params = options?.redirectTo ? { redirectTo: options.redirectTo } : undefined;
+    const params =
+      options?.redirectTo || options?.asCommerce
+        ? {
+            ...(options.redirectTo ? { redirectTo: options.redirectTo } : {}),
+            ...(options.asCommerce ? { asCommerce: true } : {}),
+          }
+        : undefined;
     navigationRef.navigate('AuthModal', { screen: 'Login', params });
     return;
   }
 
   if (screen === 'Register') {
-    navigationRef.navigate('AuthModal', { screen: 'Register' });
+    const params =
+      options?.redirectTo || options?.asCommerce
+        ? {
+            ...(options.redirectTo ? { redirectTo: options.redirectTo } : {}),
+            ...(options.asCommerce ? { asCommerce: true } : {}),
+          }
+        : undefined;
+    navigationRef.navigate('AuthModal', { screen: 'Register', params });
     return;
   }
 
-  // ForgotPassword
-  navigationRef.navigate('AuthModal', { screen: 'ForgotPassword' });
+  if (screen === 'RegisterCommerce') {
+    navigationRef.navigate('AuthModal', { screen: 'RegisterCommerce' });
+    return;
+  }
+
+  navigationRef.navigate('AuthModal', { screen: 'ForgotPasswordRequest' });
 }
 
 /** Tras login exitoso: navega al destino guardado o al inicio. */

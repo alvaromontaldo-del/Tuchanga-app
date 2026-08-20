@@ -1,6 +1,7 @@
 /// <reference lib="deno.ns" />
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { sendExpoPush } from "../_shared/expoPush.ts";
 
 type WebhookPayload<T> = {
   type: "INSERT" | "UPDATE" | "DELETE";
@@ -15,8 +16,17 @@ type MessageRow = {
   conversation_id: string;
   sender_id: string;
   body: string;
+  type?: string;
+  metadata?: { audience?: string; event?: string } | string | null;
   created_at?: string;
 };
+
+function firstNameFromProfile(profile: { nombre?: string | null; apellido?: string | null } | null, fallback: string): string {
+  const raw = profile
+    ? `${profile.nombre ?? ""} ${profile.apellido ?? ""}`.trim()
+    : "";
+  return raw.split(/\s+/).filter(Boolean)[0] ?? fallback;
+}
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -25,32 +35,13 @@ function json(status: number, body: unknown) {
   });
 }
 
-async function sendExpoPush(params: {
+async function sendExpoPushMessage(params: {
   to: string;
   title: string;
   body: string;
   data?: Record<string, unknown>;
 }) {
-  const res = await fetch("https://exp.host/--/api/v2/push/send", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "application/json",
-    },
-    body: JSON.stringify({
-      to: params.to,
-      title: params.title,
-      body: params.body,
-      data: params.data ?? {},
-      sound: "default",
-      priority: "high",
-    }),
-  });
-  const txt = await res.text();
-  if (!res.ok) {
-    throw new Error(`expo_push_failed:${res.status}:${txt}`);
-  }
-  return txt;
+  return sendExpoPush(params);
 }
 
 Deno.serve(async (req) => {
@@ -79,6 +70,18 @@ Deno.serve(async (req) => {
     return json(200, { ok: true, ignored: true });
   }
 
+  // Webhooks a veces mandan metadata como string JSON.
+  let meta: { audience?: string; event?: string } | null = null;
+  if (msg.metadata && typeof msg.metadata === "object") {
+    meta = msg.metadata;
+  } else if (typeof msg.metadata === "string") {
+    try {
+      meta = JSON.parse(msg.metadata) as { audience?: string; event?: string };
+    } catch {
+      meta = null;
+    }
+  }
+
   const sb = createClient(SUPABASE_URL, SERVICE_ROLE, {
     auth: { persistSession: false },
   });
@@ -95,11 +98,32 @@ Deno.serve(async (req) => {
   }
 
   const sender = msg.sender_id;
-  const recipient =
-    conv.cliente_id === sender ? conv.trabajador_id : conv.trabajador_id === sender ? conv.cliente_id : null;
+  const audience =
+    msg.type === "system" && typeof meta?.audience === "string"
+      ? meta.audience
+      : null;
+
+  let recipient: string | null = null;
+  if (audience === "cliente") {
+    recipient = conv.cliente_id;
+  } else if (audience === "trabajador") {
+    recipient = conv.trabajador_id;
+  } else {
+    recipient =
+      conv.cliente_id === sender
+        ? conv.trabajador_id
+        : conv.trabajador_id === sender
+          ? conv.cliente_id
+          : null;
+  }
 
   if (!recipient) {
-    return json(200, { ok: true, skipped: "sender_not_participant" });
+    return json(200, { ok: true, skipped: "no_recipient" });
+  }
+
+  // Mensajes system con audiencia: el sender_id puede ser el mismo rol (p. ej. seña pagada).
+  if (!audience && recipient === sender) {
+    return json(200, { ok: true, skipped: "same_sender_recipient" });
   }
 
   // Buscar token del receptor.
@@ -113,28 +137,61 @@ Deno.serve(async (req) => {
     return json(200, { ok: true, skipped: "no_push_token" });
   }
 
-  const senderProfile = await sb
-    .from("profiles")
-    .select("nombre,apellido")
-    .eq("id", sender)
-    .maybeSingle();
+  let title = "Nuevo mensaje";
+  if (msg.type === "system" && audience) {
+    title = "YaChanga";
+  } else {
+    const senderProfile = await sb
+      .from("profiles")
+      .select("nombre,apellido")
+      .eq("id", sender)
+      .maybeSingle();
+    title = firstNameFromProfile(senderProfile.data, "Nuevo mensaje");
+  }
 
-  const senderNameRaw = senderProfile.data
-    ? `${senderProfile.data.nombre ?? ""} ${senderProfile.data.apellido ?? ""}`.trim()
-    : "Nuevo mensaje";
-  const senderName = senderNameRaw.split(/\s+/).filter(Boolean)[0] ?? "Nuevo mensaje";
+  const event =
+    msg.type === "system" && typeof meta?.event === "string"
+      ? meta.event
+      : null;
 
-  const body = (msg.body ?? "").trim().slice(0, 180) || "Nuevo mensaje";
+  let body = (msg.body ?? "").trim().slice(0, 180) || "Nuevo mensaje";
+  if (event === "trabajo_finalizado") {
+    if (audience !== "cliente") {
+      return json(200, { ok: true, skipped: "trabajo_finalizado_not_for_worker" });
+    }
+    body = "El profesional marcó el trabajo como finalizado. Podés dejar tu reseña.";
+  } else if (event === "seña_pagada_trabajador") {
+    body = "El costo de servicio de YaChanga fue pagado. Revisá el chat para coordinar la visita.";
+  } else if (event === "seña_pagada_cliente") {
+    body = "Tu costo de servicio de YaChanga fue acreditado correctamente.";
+  } else if (event === "saldo_pagado_trabajador") {
+    body = "El cliente indicó que pagó el saldo. Confirmá la recepción del pago en el chat.";
+  } else if (event === "saldo_pagado_cliente") {
+    body = "Indicaste que pagaste el saldo. Aguardá la confirmación del profesional.";
+  } else if (event === "saldo_confirmado_cliente") {
+    body = "El profesional confirmó que recibió el pago del saldo.";
+  } else if (event === "saldo_confirmado_trabajador") {
+    body = "Confirmaste la recepción del saldo. El trabajo quedó pagado.";
+  } else if (event === "precio_aceptado_trabajador") {
+    const { data: clientProf } = await sb
+      .from("profiles")
+      .select("nombre,apellido")
+      .eq("id", conv.cliente_id)
+      .maybeSingle();
+    const clientName = firstNameFromProfile(clientProf, "el cliente");
+    body = `Enviá a ${clientName} hasta 5 opciones para coordinar la visita.`;
+  }
 
   try {
-    await sendExpoPush({
+    await sendExpoPushMessage({
       to: prof.expo_push_token,
-      title: senderName,
+      title,
       body,
       data: {
         conversationId: msg.conversation_id,
         messageId: msg.id,
         senderId: msg.sender_id,
+        event,
       },
     });
   } catch (e) {

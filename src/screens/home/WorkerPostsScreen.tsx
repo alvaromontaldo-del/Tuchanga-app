@@ -18,6 +18,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useFeed } from '../../context/FeedContext';
 import type {
   FeedStackScreenProps,
+  MessagesStackScreenProps,
   SearchStackScreenProps,
 } from '../../navigation/mainTypes';
 import {
@@ -27,7 +28,10 @@ import {
 } from '../../services/supabasePosts';
 import type { FeedPost } from '../../types/feed';
 
-type Props = FeedStackScreenProps<'WorkerPosts'> | SearchStackScreenProps<'WorkerPosts'>;
+type Props =
+  | FeedStackScreenProps<'WorkerPosts'>
+  | SearchStackScreenProps<'WorkerPosts'>
+  | MessagesStackScreenProps<'WorkerPosts'>;
 
 function mergeWithFeedLikes(remote: FeedPost[], feed: FeedPost[]): FeedPost[] {
   const feedById = new Map(feed.map((p) => [p.id, p]));
@@ -77,8 +81,8 @@ export function WorkerPostsScreen({ route, navigation }: Props) {
         if (cancelled) return;
         const base: FeedPost[] = rows.map((r) => ({
           ...r,
-          likeCount: 0,
-          likedByMe: false,
+          likeCount: r.likeCount ?? 0,
+          likedByMe: r.likedByMe ?? false,
         }));
         setFetchedPosts(base);
       })

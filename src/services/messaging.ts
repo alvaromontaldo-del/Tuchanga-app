@@ -15,9 +15,14 @@ import {
   fetchTotalUnreadCountSupabase,
   findOrCreateConversationSupabase,
   subscribeToConversationMessages,
+  subscribeToUserInboxEvents,
+  dedupeInboxByPeer,
 } from './chatSupabase';
+import type { InboxRealtimeEvent } from './inboxState';
 
 export type { ApiConversation, ApiMessage };
+export type { InboxRealtimeEvent };
+export { dedupeInboxByPeer };
 
 export function conversationHasUnreadForUser(
   c: ApiConversation,
@@ -81,8 +86,8 @@ export async function loadMessages(userId: string, conversationId: string): Prom
 }
 
 /**
- * Abre o reutiliza el hilo cliente–trabajador. Solo debe llamarse en flujo "cliente contacta desde perfil":
- * en Supabase la RPC fija `cliente_id = auth.uid()` y deduplica por par (cliente, trabajador).
+ * Abre o reutiliza el hilo cliente–trabajador activo.
+ * Soft-deleted / ocultos no se reutilizan: la RPC crea una conversación nueva sin historial.
  */
 export async function openOrCreateChat(
   userId: string,
@@ -98,11 +103,21 @@ export function subscribeChatMessages(
   conversationId: string,
   onInsert: (msg: ApiMessage) => void,
   _userId: string,
+  onUpdate?: (msg: ApiMessage) => void,
 ): () => void {
   if (isSupabaseConfigured()) {
-    return subscribeToConversationMessages(conversationId, onInsert);
+    return subscribeToConversationMessages(conversationId, onInsert, onUpdate);
   }
   return () => {};
+}
+
+/** Realtime del inbox: badge del tab + lista sin polling. */
+export function subscribeInboxRealtime(
+  userId: string,
+  onEvent: (event: InboxRealtimeEvent) => void,
+): () => void {
+  if (!isSupabaseConfigured()) return () => {};
+  return subscribeToUserInboxEvents(userId, onEvent);
 }
 
 export async function deleteConversation(

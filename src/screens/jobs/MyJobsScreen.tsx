@@ -71,6 +71,7 @@ export function MyJobsScreen() {
               <ChangaPostListRow
                 key={post.id}
                 post={post}
+                showWorkerRating={false}
                 onPress={() => openPostDetail(post.id)}
                 onPressMenu={() => {
                   Alert.alert(

@@ -23,7 +23,7 @@ export function SplashLoadingScreen() {
           source={LOGO}
           style={{ width: logoW, height: logoH }}
           resizeMode="contain"
-          accessibilityLabel="Tu Changa"
+          accessibilityLabel="YaChanga"
         />
         <ActivityIndicator
           size="large"

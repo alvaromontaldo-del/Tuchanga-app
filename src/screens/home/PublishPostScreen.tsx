@@ -11,6 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { AppButton } from '../../components/common/AppButton';
 import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
+import { ModeratedTextField, useContactInfoValidation } from '../../components/common/ModeratedTextField';
 import { useAppToast } from '../../components/toast/toast';
 import { ImagePickerComponent } from '../../components/common/ImagePickerComponent';
 import { colors, radii, spacing } from '../../constants/theme';
@@ -25,6 +26,7 @@ import {
 } from '../../types/feed';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { createPostInSupabase } from '../../services/supabasePosts';
+import { mapContentModerationError } from '../../utils/contentModerationErrors';
 
 type Props = FeedStackScreenProps<'PublishPost'>;
 
@@ -34,7 +36,7 @@ const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?img=68';
  * Publicar hasta 3 fotos del trabajo y descripción.
  */
 export function PublishPostScreen({ navigation }: Props) {
-  const { addPost } = useFeed();
+  const { addPost, refresh } = useFeed();
   const { isWorker, workerTrade } = useUserMode();
   const { user } = useAuth();
   const toast = useAppToast();
@@ -42,6 +44,7 @@ export function PublishPostScreen({ navigation }: Props) {
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
   const MAX_DESC = 200;
+  const descriptionModeration = useContactInfoValidation(description);
 
   if (!isWorker) {
     return (
@@ -95,6 +98,8 @@ export function PublishPostScreen({ navigation }: Props) {
         workerId: user?.id ?? CURRENT_USER_WORKER_ID,
         workerFirstName: name.split(' ')[0] ?? name,
         workerAvatarUrl: user?.avatarUri ?? DEFAULT_AVATAR,
+        workerRatingAverage: user?.ratingAverage,
+        workerReviewCount: user?.reviewCount,
         trade: workerTrade,
         workImageUrls: imageUrls,
         description: trimmed,
@@ -103,9 +108,11 @@ export function PublishPostScreen({ navigation }: Props) {
         likedByMe: false,
       });
 
+      // Re-sincronizar feed (ratings / listado) tras confirmar en Supabase.
+      void refresh();
       navigation.goBack();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'No se pudo publicar.', 'Publicar');
+      toast.error(mapContentModerationError(e), 'Publicar');
     } finally {
       setLoading(false);
     }
@@ -138,14 +145,16 @@ export function PublishPostScreen({ navigation }: Props) {
         {slotsLeft <= 0 ? null : null}
 
         <Text style={styles.label}>Descripción</Text>
-        <TextInput
+        <ModeratedTextField
           style={styles.input}
+          containerStyle={styles.inputContainer}
           placeholder="Ej.: Instalación lista en 24 hs, cliente muy conforme."
           placeholderTextColor={colors.textSecondary}
           value={description}
           onChangeText={setDescription}
           multiline
           maxLength={MAX_DESC}
+          textAlignVertical="top"
         />
         <View style={styles.counterRow}>
           <Text style={[styles.counterText, description.trim().length >= MAX_DESC && styles.counterTextLimit]}>
@@ -157,7 +166,11 @@ export function PublishPostScreen({ navigation }: Props) {
           title="Publicar"
           onPress={() => void handlePublish()}
           loading={loading}
-          disabled={!description.trim() || description.trim().length > MAX_DESC}
+          disabled={
+            !description.trim() ||
+            description.trim().length > MAX_DESC ||
+            descriptionModeration.blocked
+          }
         />
       </ScrollView>
     </AppKeyboardAvoidingView>
@@ -185,17 +198,12 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: spacing.sm,
   },
+  inputContainer: {
+    marginBottom: spacing.lg,
+  },
   input: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.input,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
-    fontSize: 16,
-    color: colors.text,
     minHeight: 120,
     textAlignVertical: 'top',
-    marginBottom: spacing.lg,
   },
   counterRow: {
     marginTop: -spacing.md,

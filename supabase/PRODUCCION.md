@@ -72,8 +72,8 @@ Supabase → **Authentication → Providers → Email**:
 
 Revisá también:
 
-- **Authentication → URL configuration**: *Site URL* y *Redirect URLs* acordes a tu app (Expo: esquemas `exp://`, `tuapp://`, y URLs web si usás web).
-- Plantillas de email en *Authentication → Email templates* si querés marca y textos en español.
+- **Authentication → URL configuration**: *Site URL* y *Redirect URLs* acordes a tu app (Expo: esquemas `exp://`, `tuapp://`, y URLs web si usás web). **Recuperación de contraseña:** ver `supabase/RECUPERAR_CONTRASENA.md` (`tuchanga-app://reset-password`, no `localhost:3000`).
+- Plantillas de email en *Authentication → Email templates* si querés marca y textos en español. HTML listo: `supabase/email-templates/recovery-password.html`.
 
 ## 6. Checklist post-despliegue
 

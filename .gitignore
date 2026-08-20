@@ -6,6 +6,7 @@ node_modules/
 # Expo
 .expo/
 dist/
+dist-check/
 web-build/
 expo-env.d.ts
 
@@ -30,9 +31,14 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# Secretos locales (nunca subir)
 .env
-.env*.local
+.env.*
+!.env.example
+
+# FCM / Firebase (no commitear claves privadas)
+google-services-account.json
+*-firebase-adminsdk-*.json
 
 # typescript
 *.tsbuildinfo
@@ -40,3 +46,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Supabase CLI temp
+supabase/.temp/

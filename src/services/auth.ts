@@ -6,6 +6,7 @@ import type { User } from '@supabase/supabase-js';
 import { isSupabaseConfigured } from '../config/supabase';
 import { getSupabaseClient } from '../lib/supabase';
 import { newRandomUserId, stableUserIdFromEmail } from '../utils/stableUserId';
+import { userAuthDisplayName } from '../utils/storageOwnerFolder';
 import { calcAgeFromBirthDate, parseBirthDateParts } from '../utils/birthDate';
 import {
   clearPendingProfileSignup,
@@ -50,6 +51,140 @@ function mapSupabaseSignInError(raw: string): string {
   return raw;
 }
 
+/** Errores de registro (email/DNI/celular duplicados, etc.). */
+function mapSupabaseSignUpError(raw: string): string {
+  const m = raw.toLowerCase();
+  if (
+    m.includes('user already registered') ||
+    m.includes('already been registered') ||
+    m.includes('email address is already') ||
+    m.includes('email already') ||
+    (m.includes('duplicate') && m.includes('email'))
+  ) {
+    return MSG_IDENTITY.email;
+  }
+  if (
+    m.includes('profiles_dni') ||
+    (m.includes('duplicate') && m.includes('dni')) ||
+    (m.includes('unique') && m.includes('dni'))
+  ) {
+    return MSG_IDENTITY.dni;
+  }
+  if (
+    m.includes('profiles_telefono') ||
+    m.includes('profile_phone') ||
+    ((m.includes('duplicate') || m.includes('unique')) &&
+      (m.includes('telefono') || m.includes('phone') || m.includes('celular')))
+  ) {
+    return MSG_IDENTITY.phone;
+  }
+  if (m.includes('correo o dni ya se encuentra') || m.includes('ya está registrado')) {
+    return raw;
+  }
+  if (m.includes('too many requests') || m.includes('rate limit') || m.includes('over_email')) {
+    return 'Demasiados intentos de registro. Esperá unos minutos y probá de nuevo.';
+  }
+  return raw;
+}
+
+export type IdentityField = 'email' | 'dni' | 'phone';
+
+export const MSG_IDENTITY = {
+  email:
+    'No se pudo crear la cuenta: este correo ya está registrado. Probá ingresar o recuperá tu contraseña.',
+  dni: 'No se pudo crear la cuenta: este DNI ya está registrado.',
+  phone: 'No se pudo crear la cuenta: este celular ya está registrado.',
+} as const;
+
+/** Mensajes cortos para el campo del formulario. */
+export const MSG_IDENTITY_FIELD = {
+  email: 'Este correo ya está registrado.',
+  dni: 'Este DNI ya está registrado.',
+  phone: 'Este celular ya está registrado.',
+} as const;
+
+export type IdentityConflict = { field: IdentityField; message: string };
+
+function normalizePhoneDigitsForCompare(phone: string): string {
+  let d = String(phone ?? '').replace(/\D/g, '');
+  if (d.startsWith('54')) d = d.slice(2);
+  if (d.startsWith('0')) d = d.slice(1);
+  return d;
+}
+
+/**
+ * Chequea email / DNI / celular ya usados. Devuelve el primer conflicto (prioridad: email → DNI → celular).
+ */
+export async function checkIdentityConflicts(params: {
+  email?: string;
+  dni?: string;
+  phone?: string;
+}): Promise<IdentityConflict | null> {
+  if (!isSupabaseConfigured()) return null;
+  const sb = getSupabaseClient();
+  const email = (params.email ?? '').trim().toLowerCase();
+  const dniDigits = (params.dni ?? '').replace(/\D/g, '');
+  const phoneDigits = normalizePhoneDigitsForCompare(params.phone ?? '');
+
+  const checks: Array<Promise<IdentityConflict | null>> = [];
+
+  if (email) {
+    checks.push(
+      (async () => {
+        const { data, error } = await sb.rpc('auth_email_is_registered', { p_email: email });
+        if (!error && data === true) return { field: 'email' as const, message: MSG_IDENTITY.email };
+        return null;
+      })(),
+    );
+  }
+  if (dniDigits.length >= 7) {
+    checks.push(
+      (async () => {
+        const { data, error } = await sb.rpc('profile_dni_is_registered', { p_dni: dniDigits });
+        if (!error && data === true) return { field: 'dni' as const, message: MSG_IDENTITY.dni };
+        return null;
+      })(),
+    );
+  }
+  if (phoneDigits.length >= 8) {
+    checks.push(
+      (async () => {
+        const { data, error } = await sb.rpc('profile_phone_is_registered', {
+          p_phone: phoneDigits,
+        });
+        if (!error && data === true) return { field: 'phone' as const, message: MSG_IDENTITY.phone };
+        return null;
+      })(),
+    );
+  }
+
+  const results = await Promise.all(checks);
+  const order: IdentityField[] = ['email', 'dni', 'phone'];
+  for (const field of order) {
+    const hit = results.find((r) => r?.field === field);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+async function assertIdentityAvailable(
+  email: string,
+  dni: string,
+  phone: string,
+): Promise<IdentityConflict | null> {
+  return checkIdentityConflicts({ email, dni, phone });
+}
+
+function identityFieldFromMessage(message: string): IdentityField | undefined {
+  const m = message.toLowerCase();
+  if (m.includes('correo') || m.includes('email') || m.includes('e-mail')) return 'email';
+  if (m.includes('dni')) return 'dni';
+  if (m.includes('celular') || m.includes('teléfono') || m.includes('telefono') || m.includes('phone')) {
+    return 'phone';
+  }
+  return undefined;
+}
+
 function isLikelyAbortError(e: unknown): boolean {
   if (typeof DOMException !== 'undefined' && e instanceof DOMException && e.name === 'AbortError') {
     return true;
@@ -91,6 +226,9 @@ export type AuthUser = {
     lng: number;
   };
 
+  /** Referencias opcionales para ubicar el domicilio (rejas, color de pared, etc.). */
+  locationDetails?: string;
+
   worker?: {
     coverageKm: number;
     primaryTradeName: string;
@@ -121,7 +259,11 @@ export type AuthUser = {
   birthDate?: string;
 };
 
-export type AuthResult = { ok: true; user: AuthUser } | { ok: false; message: string };
+export type AuthFailureReason = 'error' | 'email_confirmation' | 'identity_taken';
+
+export type AuthResult =
+  | { ok: true; user: AuthUser }
+  | { ok: false; message: string; reason?: AuthFailureReason; field?: IdentityField };
 
 export type SignUpPayload = {
   firstName: string;
@@ -132,6 +274,8 @@ export type SignUpPayload = {
   password: string;
   phone: string;
   baseLocation: { address: string; lat: number; lng: number };
+  /** Referencias opcionales para ubicar el domicilio. */
+  locationDetails?: string;
   /** YYYY-MM-DD */
   birthDate: string;
 
@@ -343,27 +487,77 @@ export async function signUp(payload: SignUpPayload): Promise<AuthResult> {
   if (isSupabaseConfigured()) {
     try {
       const sb = getSupabaseClient();
+
+      const conflict = await assertIdentityAvailable(email, payload.dni, payload.phone);
+      if (conflict) {
+        return {
+          ok: false,
+          reason: 'identity_taken',
+          field: conflict.field,
+          message: conflict.message,
+        };
+      }
+
+      const displayLabel = userAuthDisplayName({
+        dni: payload.dni,
+        lastName: payload.lastName,
+      });
+      const phoneDigits = String(payload.phone ?? '').replace(/\D/g, '');
+      const meta: Record<string, string> = {};
+      if (displayLabel) {
+        meta.display_name = displayLabel;
+        meta.full_name = displayLabel;
+        meta.name = displayLabel;
+      }
+      if (phoneDigits.length >= 8) {
+        meta.phone = phoneDigits.startsWith('54') ? `+${phoneDigits}` : `+54${phoneDigits.replace(/^0/, '')}`;
+      }
+      if (payload.birthDate?.trim()) {
+        meta.birth_date = payload.birthDate.trim();
+      }
       const { data, error } = await sb.auth.signUp({
         email,
         password: payload.password,
+        options: {
+          data: meta,
+        },
       });
       if (error) {
-        return { ok: false, message: error.message };
+        const message = mapSupabaseSignUpError(error.message);
+        return {
+          ok: false,
+          reason: identityFieldFromMessage(message) ? 'identity_taken' : 'error',
+          field: identityFieldFromMessage(message),
+          message,
+        };
       }
       const uid = data.user?.id;
+      // Supabase a veces “responde OK” con identities vacío cuando el email ya existe
+      // (no revela si el correo está tomado). Lo tratamos como email duplicado.
+      const identities = data.user?.identities;
+      if (uid && Array.isArray(identities) && identities.length === 0) {
+        return {
+          ok: false,
+          reason: 'identity_taken',
+          field: 'email',
+          message: MSG_IDENTITY.email,
+        };
+      }
       if (!uid) {
         return {
           ok: false,
+          reason: 'email_confirmation',
           message:
-            'Revisá tu correo: si el proyecto exige confirmación, abrí el enlace y luego ingresá.',
+            '¡Felicitaciones! Revisá tu correo y validá el enlace de confirmación antes de ingresar.',
         };
       }
       if (!data.session) {
         await savePendingProfileSignup(uid, payload);
         return {
           ok: false,
+          reason: 'email_confirmation',
           message:
-            'Cuenta creada. Abrí el enlace de confirmación que te enviamos al correo; al ingresar por primera vez guardamos tu perfil (nombre, DNI, teléfono, dirección) automáticamente.',
+            '¡Felicitaciones! Tu cuenta fue creada. Revisá tu correo y validá el enlace que te enviamos; después ingresá con tu email y contraseña. Al entrar por primera vez guardamos tu perfil automáticamente.',
         };
       }
       const authUser = data.user;
@@ -376,9 +570,13 @@ export async function signUp(payload: SignUpPayload): Promise<AuthResult> {
         await clearPendingProfileSignup();
       } catch (e) {
         await savePendingProfileSignup(uid, payload);
+        const raw = e instanceof Error ? e.message : 'No se pudo guardar el perfil. Volvé a intentar o ingresá más tarde.';
+        const message = mapSupabaseSignUpError(raw);
         return {
           ok: false,
-          message: e instanceof Error ? e.message : 'No se pudo guardar el perfil. Volvé a intentar o ingresá más tarde.',
+          reason: identityFieldFromMessage(message) ? 'identity_taken' : 'error',
+          field: identityFieldFromMessage(message),
+          message,
         };
       }
       try {

@@ -18,6 +18,7 @@ import { openAuthModal } from '../../navigation/openAuthModal';
 import { displayNameFromUser, initialsFromAuthUser } from '../../utils/profileDisplay';
 import { accountUi } from './accountUi';
 import { StarRating } from '../../components/profile/StarRating';
+import { useUserMode } from '../../context/UserModeContext';
 import { formatBirthDateDisplay } from '../../utils/birthDate';
 
 type Props = AccountStackScreenProps<'UserProfile'>;
@@ -37,9 +38,9 @@ function formatMemberSince(iso: string | undefined): string {
   }
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value, isLast }: { label: string; value: string; isLast?: boolean }) {
   return (
-    <View style={styles.field}>
+    <View style={[styles.field, isLast && styles.fieldLast]}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <Text style={styles.fieldValue}>{value || '—'}</Text>
     </View>
@@ -49,6 +50,7 @@ function Field({ label, value }: { label: string; value: string }) {
 export function UserProfileScreen({ navigation }: Props) {
   const { displayUser, loading, error, refresh, isAuthed, isRestoring } =
     useCurrentUserProfile();
+  const { isWorker } = useUserMode();
 
   const kickedToLoginRef = useRef(false);
   useEffect(() => {
@@ -147,16 +149,6 @@ export function UserProfileScreen({ navigation }: Props) {
   const reviewCount = displayUser.reviewCount ?? 0;
   const birthDateLabel = formatBirthDateDisplay(displayUser.birthDate);
 
-  const isWorkerNow = Boolean(
-    displayUser.worker?.trades?.length && (displayUser.worker.coverageKm ?? 0) > 0,
-  );
-
-  const bioText =
-    displayUser.bio?.trim() ||
-    (isWorkerNow
-      ? 'Profesional en Tu Changa. Podés ampliar tu descripción en Editar perfil profesional.'
-      : '');
-
   const uri = displayUser.avatarUri?.trim();
 
   return (
@@ -193,12 +185,14 @@ export function UserProfileScreen({ navigation }: Props) {
           </View>
           <View style={styles.nameRow}>
             <Text style={styles.name}>{name}</Text>
-            <StarRating
-              score={ratingAverage}
-              reviewCount={reviewCount}
-              size={14}
-              textSize={13}
-            />
+            {isWorker ? (
+              <StarRating
+                score={ratingAverage}
+                reviewCount={reviewCount}
+                size={14}
+                textSize={13}
+              />
+            ) : null}
           </View>
           <Text style={styles.email}>{displayUser.email}</Text>
         </View>
@@ -227,13 +221,8 @@ export function UserProfileScreen({ navigation }: Props) {
           <Field
             label="Ubicación"
             value={displayUser.baseLocation?.address ?? displayUser.location ?? ''}
+            isLast
           />
-          {isWorkerNow ? (
-            <View style={[styles.field, styles.fieldLast]}>
-              <Text style={styles.fieldLabel}>Presentación</Text>
-              <Text style={styles.bioValue}>{bioText}</Text>
-            </View>
-          ) : null}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -335,7 +324,6 @@ const styles = StyleSheet.create({
   fieldLast: { borderBottomWidth: 0 },
   fieldLabel: { fontSize: 12, fontWeight: '700', color: colors.textSecondary, marginBottom: 4 },
   fieldValue: { fontSize: 16, color: colors.text },
-  bioValue: { fontSize: 15, color: colors.text, lineHeight: 22 },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',

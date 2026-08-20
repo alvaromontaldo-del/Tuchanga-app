@@ -2,18 +2,11 @@ import MapView, { Circle, Marker, UrlTile } from 'react-native-maps';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { osmTileUrlTemplate } from '../../config/nominatim';
 import { colors, radii, spacing } from '../../constants/theme';
+import type { LocationMapProps } from './locationMapTypes';
 
-export type LocationMapGeo = { lat: number; lng: number };
+export type { LocationMapGeo } from './locationMapTypes';
 
-type Props = {
-  geo: LocationMapGeo;
-  coverageMeters: number;
-  showCoverage: boolean;
-  onPinMoved: (lat: number, lng: number) => void;
-  onLocateMe?: () => void;
-  locating?: boolean;
-};
-
+/** iOS: MapKit nativo + teselas OSM (no requiere clave de Google). */
 export function LocationMap({
   geo,
   coverageMeters,
@@ -21,7 +14,7 @@ export function LocationMap({
   onPinMoved,
   onLocateMe,
   locating,
-}: Props) {
+}: LocationMapProps) {
   return (
     <View style={styles.wrap}>
       <MapView
@@ -62,7 +55,7 @@ export function LocationMap({
         ) : null}
       </MapView>
 
-      <View style={styles.overlay}>
+      <View style={styles.overlay} pointerEvents="box-none">
         <Pressable
           onPress={onLocateMe}
           disabled={!onLocateMe || locating}
@@ -98,7 +91,6 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     alignItems: 'flex-end',
     justifyContent: 'flex-start',
-    pointerEvents: 'box-none',
   },
   locateBtn: {
     height: 36,
@@ -110,13 +102,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.06)',
   },
-  locateBtnDisabled: {
-    opacity: 0.6,
-  },
-  locateText: {
-    fontSize: 13,
-    fontWeight: '900',
-    color: '#111827',
-  },
+  locateBtnDisabled: { opacity: 0.6 },
+  locateText: { fontSize: 13, fontWeight: '900', color: '#111827' },
 });
-

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChangaImagePost } from '../../components/feed/ChangaImagePost';
 import { useAppToast } from '../../components/toast/toast';
@@ -11,20 +11,73 @@ import { useFeed } from '../../context/FeedContext';
 import type { FeedStackScreenProps } from '../../navigation/mainTypes';
 import { openAuthModal } from '../../navigation/openAuthModal';
 import { openOrCreateChat } from '../../services/messaging';
-import { deletePostInSupabase, hidePostInSupabase } from '../../services/supabasePosts';
+import {
+  deletePostInSupabase,
+  fetchPostByIdFromSupabase,
+  hidePostInSupabase,
+} from '../../services/supabasePosts';
+import type { FeedPost } from '../../types/feed';
 
 type Props = FeedStackScreenProps<'PostDetail'>;
 
 export function PostDetailScreen({ route, navigation }: Props) {
   const { postId } = route.params;
   const { posts, toggleLike, removePostLocal } = useFeed();
-  const { user } = useAuth();
+  const { user, ensureActiveAccount } = useAuth();
   const toast = useAppToast();
   const [busy, setBusy] = useState<'none' | 'delete' | 'hide'>('none');
+  const [remotePost, setRemotePost] = useState<FeedPost | null>(null);
+  const [loadingRemote, setLoadingRemote] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
 
-  const post = useMemo(() => posts.find((p) => p.id === postId) ?? null, [posts, postId]);
+  const feedPost = useMemo(() => posts.find((p) => p.id === postId) ?? null, [posts, postId]);
+  const post = feedPost ?? remotePost;
 
-  if (!post) {
+  useEffect(() => {
+    if (feedPost) {
+      setUnavailable(false);
+      setRemotePost(null);
+      return;
+    }
+    if (!isSupabaseConfigured()) {
+      setUnavailable(true);
+      return;
+    }
+    let cancelled = false;
+    setLoadingRemote(true);
+    void (async () => {
+      try {
+        const fetched = await fetchPostByIdFromSupabase(postId);
+        if (cancelled) return;
+        if (!fetched) {
+          setUnavailable(true);
+          setRemotePost(null);
+        } else {
+          setUnavailable(false);
+          setRemotePost(fetched as FeedPost);
+        }
+      } catch {
+        if (!cancelled) setUnavailable(true);
+      } finally {
+        if (!cancelled) setLoadingRemote(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [feedPost, postId]);
+
+  if (loadingRemote && !post) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['bottom']}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!post || unavailable) {
     return (
       <SafeAreaView style={styles.safe} edges={['bottom']}>
         <View style={styles.centered}>
@@ -85,7 +138,6 @@ export function PostDetailScreen({ route, navigation }: Props) {
       if (isSupabaseConfigured()) {
         await hidePostInSupabase(p.id);
       }
-      // Optimistic: desaparece del feed local inmediatamente.
       removePostLocal(p.id);
       navigation.goBack();
       toast.success('Listo. No la vas a ver más en tu inicio.', 'Ocultada');
@@ -107,7 +159,7 @@ export function PostDetailScreen({ route, navigation }: Props) {
         showMessageButton={Boolean(user && user.id !== p.workerId)}
         onOpenMessage={async () => {
           if (!user) {
-            openAuthModal('Login');
+            openAuthModal('Register', { redirectTo: `worker:${p.workerId}` });
             return;
           }
           if (user.id === p.workerId) return;
@@ -120,6 +172,8 @@ export function PostDetailScreen({ route, navigation }: Props) {
             return;
           }
           try {
+            const ok = await ensureActiveAccount({ redirectTo: `worker:${p.workerId}` });
+            if (!ok) return;
             const res = await openOrCreateChat(user.id, {
               workerUserId: p.workerId,
               workerDisplayName: p.workerFirstName,
@@ -133,25 +187,13 @@ export function PostDetailScreen({ route, navigation }: Props) {
               workerId: p.workerId,
             });
           } catch (e) {
-            toast.error(e instanceof Error ? e.message : 'No se pudo abrir el chat', 'Chat', {
-              durationMs: 4200,
-            });
+            const stillOk = await ensureActiveAccount({ redirectTo: `worker:${p.workerId}` });
+            if (!stillOk) return;
+            toast.error(e instanceof Error ? e.message : 'No se pudo abrir el chat.', 'Chat');
           }
         }}
-        onRequestDelete={
-          isOwner
-            ? () => {
-                void confirmDelete();
-              }
-            : undefined
-        }
-        onRequestHide={
-          user && user.id !== p.workerId
-            ? () => {
-                void hideForMe();
-              }
-            : undefined
-        }
+        onRequestDelete={isOwner ? () => void confirmDelete() : undefined}
+        onRequestHide={!isOwner && user ? () => void hideForMe() : undefined}
       />
     </SafeAreaView>
   );
@@ -159,10 +201,21 @@ export function PostDetailScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
-  muted: { color: colors.textSecondary, fontWeight: '700', textAlign: 'center' },
-  backBtn: { marginTop: spacing.lg, backgroundColor: colors.primary, paddingVertical: 12, paddingHorizontal: spacing.lg, borderRadius: 14 },
-  backBtnText: { color: '#fff', fontWeight: '900' },
-  pressed: { opacity: 0.92 },
+  centered: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xl,
+    gap: spacing.md,
+  },
+  muted: { color: colors.textSecondary, textAlign: 'center', fontSize: 16 },
+  backBtn: {
+    marginTop: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderRadius: 999,
+    backgroundColor: colors.primary,
+  },
+  backBtnText: { color: '#fff', fontWeight: '800' },
+  pressed: { opacity: 0.85 },
 });
-

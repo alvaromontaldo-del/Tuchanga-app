@@ -48,7 +48,7 @@ export function HomeScreen() {
   const route = useRoute<HomeRoute>();
   const toast = useAppToast();
   const { posts, toggleLike, refresh, removePostLocal } = useFeed();
-  const { user, flashMessage, setFlashMessage } = useAuth();
+  const { user, flashMessage, setFlashMessage, ensureActiveAccount } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState('');
   const isFocusedScreen = useIsFocused();
@@ -164,7 +164,7 @@ export function HomeScreen() {
   useEffect(() => {
     if (!flashMessage) return;
     const t = setTimeout(() => {
-      toast.info(flashMessage, 'Tu Changa');
+      toast.info(flashMessage, 'YaChanga');
       setFlashMessage(null);
     }, 80);
     return () => clearTimeout(t);
@@ -281,7 +281,7 @@ export function HomeScreen() {
             showMessageButton={Boolean(user && user.id !== post.workerId)}
             onOpenMessage={async () => {
               if (!user) {
-                openAuthModal('Login');
+                openAuthModal('Register', { redirectTo: `worker:${post.workerId}` });
                 return;
               }
               if (user.id === post.workerId) return;
@@ -294,6 +294,10 @@ export function HomeScreen() {
                 return;
               }
               try {
+                const ok = await ensureActiveAccount({
+                  redirectTo: `worker:${post.workerId}`,
+                });
+                if (!ok) return;
                 const res = await openOrCreateChat(user.id, {
                   workerUserId: post.workerId,
                   workerDisplayName: post.workerFirstName,
@@ -307,6 +311,10 @@ export function HomeScreen() {
                   workerId: post.workerId,
                 });
               } catch (e) {
+                const stillOk = await ensureActiveAccount({
+                  redirectTo: `worker:${post.workerId}`,
+                });
+                if (!stillOk) return;
                 toast.error(
                   e instanceof Error ? e.message : 'No se pudo abrir el chat',
                   'Chat',

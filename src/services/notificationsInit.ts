@@ -16,13 +16,20 @@ export function initNotificationHandlerOnce() {
         const convId = typeof data.conversationId === 'string' ? data.conversationId : null;
         const active = getActiveConversationForNotifications();
         const isActiveConversation = Boolean(convId && active && convId === active);
+        const show = !isActiveConversation;
         return {
-          shouldShowAlert: !isActiveConversation,
-          shouldPlaySound: !isActiveConversation,
+          shouldShowBanner: show,
+          shouldShowList: show,
+          shouldPlaySound: show,
           shouldSetBadge: true,
         };
       } catch {
-        return { shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: true };
+        return {
+          shouldShowBanner: true,
+          shouldShowList: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+        };
       }
     },
   });

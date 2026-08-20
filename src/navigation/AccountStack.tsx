@@ -1,5 +1,10 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useMemo } from 'react';
 import { colors } from '../constants/theme';
+import {
+  mergeNativeStackScreenOptions,
+  useNativeStackScreenOptions,
+} from './useNativeStackScreenOptions';
 import type { AccountStackParamList } from './mainTypes';
 import { AccountGuestScreen } from '../screens/account/AccountGuestScreen';
 import { MyAccountScreen } from '../screens/account/MyAccountScreen';
@@ -10,21 +15,23 @@ import { EditRegistrationScreen } from '../screens/account/EditRegistrationScree
 import { UserProfileScreen } from '../screens/account/UserProfileScreen';
 import { WorkerABMScreen } from '../screens/account/WorkerABMScreen';
 import { FavoritesScreen } from '../screens/account/FavoritesScreen';
+import { ChangePasswordScreen } from '../screens/account/ChangePasswordScreen';
 import { useAuth } from '../context/AuthContext';
 
 const Stack = createNativeStackNavigator<AccountStackParamList>();
 
-const profileChildHeader = {
-  headerShown: true as const,
-  headerStyle: { backgroundColor: colors.brandLogoMat },
-  headerShadowVisible: false,
-  headerTintColor: colors.text,
-  headerTitleStyle: { fontWeight: '700' as const, fontSize: 17 },
-  headerBackTitleVisible: false,
-};
-
 export function AccountStack() {
   const { isAuthed } = useAuth();
+  const stackOptions = useNativeStackScreenOptions();
+  const profileChildHeader = useMemo(
+    () =>
+      mergeNativeStackScreenOptions(stackOptions, {
+        headerShown: true,
+        headerStyle: { backgroundColor: colors.brandLogoMat },
+        headerTitleStyle: { fontWeight: '700', fontSize: 17 },
+      }),
+    [stackOptions],
+  );
 
   /** Stack separado: si mezclamos invitado + cuenta en un solo stack, al loguear puede quedar la ruta invitada activa. */
   if (!isAuthed) {
@@ -39,7 +46,7 @@ export function AccountStack() {
     <Stack.Navigator
       key="account-authed"
       initialRouteName="MyAccount"
-      screenOptions={{ headerShown: false }}
+      screenOptions={mergeNativeStackScreenOptions(stackOptions, { headerShown: false })}
     >
       <Stack.Screen name="MyAccount" component={MyAccountScreen} />
       <Stack.Screen
@@ -89,6 +96,14 @@ export function AccountStack() {
         options={{
           ...profileChildHeader,
           title: 'Mis favoritos',
+        }}
+      />
+      <Stack.Screen
+        name="ChangePassword"
+        component={ChangePasswordScreen}
+        options={{
+          ...profileChildHeader,
+          title: 'Cambiar contraseña',
         }}
       />
     </Stack.Navigator>

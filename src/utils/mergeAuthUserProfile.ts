@@ -45,6 +45,7 @@ export function mergeAuthUserProfile(
     phone: pickStr(fresh.phone, ctx.phone),
     avatarUri: fresh.avatarUri?.trim() || ctx.avatarUri?.trim() || undefined,
     location: pickStr(fresh.location, ctx.location),
+    locationDetails: pickStr(fresh.locationDetails, ctx.locationDetails),
     bio: pickStr(fresh.bio, ctx.bio),
     profileCreatedAt: fresh.profileCreatedAt ?? ctx.profileCreatedAt,
     baseLocation: mergeBaseLocation(ctx.baseLocation, fresh.baseLocation),

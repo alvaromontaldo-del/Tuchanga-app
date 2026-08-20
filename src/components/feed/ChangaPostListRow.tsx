@@ -10,6 +10,8 @@ export type ChangaPostListRowProps = {
   onPress: () => void;
   /** Menú ⋮ (eliminar, ocultar, etc.) — el padre muestra Alert u hoja */
   onPressMenu?: () => void;
+  /** Estrellas de ranking. Default true; Mis publicaciones las oculta. */
+  showWorkerRating?: boolean;
 };
 
 function thumbUri(post: FeedPost): string | undefined {
@@ -19,11 +21,19 @@ function thumbUri(post: FeedPost): string | undefined {
 /**
  * Fila de publicación para listas (Mis trabajos, publicaciones de perfil): misma silueta que resultados de búsqueda.
  */
-export function ChangaPostListRow({ post, onPress, onPressMenu }: ChangaPostListRowProps) {
+export function ChangaPostListRow({
+  post,
+  onPress,
+  onPressMenu,
+  showWorkerRating = true,
+}: ChangaPostListRowProps) {
   const uri = thumbUri(post);
   const rating = post.workerRatingAverage;
   const showRating =
-    typeof rating === 'number' && !Number.isNaN(rating) && rating > 0;
+    showWorkerRating &&
+    typeof rating === 'number' &&
+    !Number.isNaN(rating) &&
+    rating > 0;
 
   return (
     <View style={styles.wrap}>

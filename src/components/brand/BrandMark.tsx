@@ -1,4 +1,5 @@
 import { Image, type ImageStyle, type StyleProp, useWindowDimensions } from 'react-native';
+import { APP_NAME } from '../../constants/brand';
 
 /** Logo horizontal oficial (PNG con wordmark). */
 export const brandLogoHorizontal = require('../../../assets/brand/logo-yachanga-v22_bold_tracking1.png');
@@ -11,12 +12,17 @@ export const BRAND_HORIZONTAL_ASPECT = 1024 / 431;
  * `contain` mantiene proporción; altura deriva del ancho y del aspect ratio real.
  */
 export function getBrandLogoLayout(
-  variant: 'header' | 'hero' | 'compact',
+  variant: 'header' | 'hero' | 'compact' | 'register',
   windowWidth: number,
 ): { width: number; height: number } {
   const capW = Math.min(windowWidth, 560);
 
   switch (variant) {
+    case 'register': {
+      const w = Math.min(340, Math.round(capW * 0.9));
+      const h = Math.round(Math.min(88, w / BRAND_HORIZONTAL_ASPECT));
+      return { width: w, height: Math.max(h, 44) };
+    }
     case 'hero': {
       const w = Math.min(280, Math.round(capW * 0.78));
       const h = Math.round(Math.min(58, w / BRAND_HORIZONTAL_ASPECT));
@@ -40,7 +46,7 @@ export function getBrandLogoLayout(
 }
 
 type BrandLogoHorizontalProps = {
-  variant?: 'header' | 'hero' | 'compact';
+  variant?: 'header' | 'hero' | 'compact' | 'register';
   /** Limita el ancho (p. ej. ancho de la tarjeta en login). */
   maxWidth?: number;
   style?: StyleProp<ImageStyle>;
@@ -60,10 +66,11 @@ export function BrandLogoHorizontal({
   let width: number;
   let height: number;
 
-  if (variant === 'hero' && maxWidth != null) {
-    /** Hasta el ancho del contenedor (p. ej. tarjeta de login), sin desproporcionar en tablets. */
-    width = Math.round(Math.min(maxWidth, 420, capW * 0.94));
-    height = Math.round(Math.max(width / BRAND_HORIZONTAL_ASPECT, 36));
+  if ((variant === 'hero' || variant === 'register') && maxWidth != null) {
+    /** Hasta el ancho del contenedor (login/registro), sin desproporcionar en tablets. */
+    const cap = variant === 'register' ? 480 : 420;
+    width = Math.round(Math.min(maxWidth, cap, capW * 0.94));
+    height = Math.round(Math.max(width / BRAND_HORIZONTAL_ASPECT, variant === 'register' ? 44 : 36));
   } else {
     ({ width, height } = getBrandLogoLayout(variant, windowWidth));
     if (maxWidth != null && width > maxWidth) {
@@ -75,7 +82,7 @@ export function BrandLogoHorizontal({
   return (
     <Image
       source={brandLogoHorizontal}
-      accessibilityLabel="Tu Changa"
+      accessibilityLabel={APP_NAME}
       resizeMode="contain"
       style={[{ width, height }, style]}
     />

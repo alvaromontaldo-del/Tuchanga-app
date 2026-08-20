@@ -1,10 +1,12 @@
 {
   "cli": {
-    "version": ">= 16.0.0"
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
       "environment": "preview",
+      "channel": "development",
       "developmentClient": true,
       "distribution": "internal",
       "android": {
@@ -16,7 +18,9 @@
     },
     "preview": {
       "environment": "preview",
+      "channel": "preview",
       "distribution": "store",
+      "autoIncrement": true,
       "android": {
         "buildType": "apk"
       },
@@ -24,8 +28,32 @@
         "simulator": false
       }
     },
+    "preview-ios-internal": {
+      "environment": "preview",
+      "channel": "preview",
+      "distribution": "internal",
+      "autoIncrement": true,
+      "ios": {
+        "simulator": false
+      }
+    },
     "production": {
+      "channel": "production",
       "distribution": "store"
+    }
+  },
+  "submit": {
+    "preview": {
+      "ios": {
+        "ascAppId": "6786872717",
+        "appleId": "alvaro.montaldo79@gmail.com"
+      }
+    },
+    "production": {
+      "ios": {
+        "ascAppId": "6786872717",
+        "appleId": "alvaro.montaldo79@gmail.com"
+      }
     }
   }
 }

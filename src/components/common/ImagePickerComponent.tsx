@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
@@ -13,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { colors, radii, spacing } from '../../constants/theme';
+import { normalizeLocalImageUri } from '../../utils/normalizeLocalImage';
 import { useAppToast } from '../toast/toast';
 
 type PickerMode = 'single' | 'multi';
@@ -36,56 +36,6 @@ type Props = {
   /** Mostrar botón para cambiar cámara. */
   allowCameraFlip?: boolean;
 };
-
-async function cropToSquareCenter(params: {
-  uri: string;
-  quality: number;
-}): Promise<string> {
-  // 1) Pasada “no-op” para obtener dimensiones (y normalizar orientación).
-  const meta = await ImageManipulator.manipulateAsync(
-    params.uri,
-    [],
-    {
-      compress: 1,
-      format: ImageManipulator.SaveFormat.JPEG,
-    },
-  );
-
-  const w = Math.max(1, Math.floor(Number(meta.width) || 1));
-  const h = Math.max(1, Math.floor(Number(meta.height) || 1));
-  const size = Math.min(w, h);
-  const originX = Math.max(0, Math.floor((w - size) / 2));
-  const originY = Math.max(0, Math.floor((h - size) / 2));
-
-  const cropped = await ImageManipulator.manipulateAsync(
-    params.uri,
-    [
-      {
-        crop: {
-          originX,
-          originY,
-          width: size,
-          height: size,
-        },
-      },
-    ],
-    {
-      compress: Math.max(0.2, Math.min(1, params.quality)),
-      format: ImageManipulator.SaveFormat.JPEG,
-    },
-  );
-
-  return cropped.uri;
-}
-
-async function processAssetUri(params: {
-  uri: string;
-  squareCrop: boolean;
-  quality: number;
-}): Promise<string> {
-  if (!params.squareCrop) return params.uri;
-  return cropToSquareCenter({ uri: params.uri, quality: params.quality });
-}
 
 export function ImagePickerComponent({
   mode,
@@ -135,7 +85,8 @@ export function ImagePickerComponent({
     [controlled, maxCount, mode, onChange],
   );
 
-  const canAddMore = mode === 'single' ? uris.length === 0 : uris.length < maxCount;
+  // En modo single, permitir reemplazar la foto aunque ya exista.
+  const canAddMore = mode === 'single' ? true : uris.length < maxCount;
 
   const ensureGalleryPerm = useCallback(async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -168,9 +119,7 @@ export function ImagePickerComponent({
 
       const processed: string[] = [];
       for (const uri of assets) {
-        processed.push(
-          await processAssetUri({ uri, squareCrop, quality: jpegQuality }),
-        );
+        processed.push(await normalizeLocalImageUri(uri, { squareCrop }));
       }
 
       if (mode === 'single') setUris([processed[0] ?? ''].filter(Boolean));
@@ -206,11 +155,7 @@ export function ImagePickerComponent({
       const uri = String(pic?.uri ?? '').trim();
       if (!uri) return;
 
-      const processed = await processAssetUri({
-        uri,
-        squareCrop,
-        quality: jpegQuality,
-      });
+      const processed = await normalizeLocalImageUri(uri, { squareCrop });
 
       if (mode === 'single') setUris([processed]);
       else setUris([...uris, processed].slice(0, maxCount));

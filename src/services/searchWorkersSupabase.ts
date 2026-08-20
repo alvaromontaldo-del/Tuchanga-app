@@ -49,9 +49,8 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
     const firstName = r.nombre?.trim() || 'Profesional';
     const categories = Array.isArray(r.all_trades) ? r.all_trades : [];
     const primary = r.primary_trade?.trim() || categories[0] || 'Servicios';
-    const summary =
-      r.summary_jobs?.trim() ||
-      `${primary}${categories.length > 1 ? ` · ${categories.slice(1, 3).join(' · ')}` : ''}`;
+    // Solo el oficio principal en la tarjeta de búsqueda (sin descripción larga).
+    const summary = primary;
 
     const worker: SearchableWorker = {
       id: r.profile_id,

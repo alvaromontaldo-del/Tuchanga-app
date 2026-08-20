@@ -1,16 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { AppScreen } from '../../components/layout/AppScreen';
 import { colors, radii, spacing } from '../../constants/theme';
 import { openAuthModal } from '../../navigation/openAuthModal';
 import { accountUi } from './accountUi';
 
 /**
- * Tab Perfil sin sesión: solo acceso a login o registro (sin menú de cuenta).
+ * Tab Perfil sin sesión: login / registro. El modo comercio vive en el Login.
  */
 export function AccountGuestScreen() {
   return (
-    <SafeAreaView style={accountUi.screenBg} edges={['top']}>
+    <AppScreen style={accountUi.screenBg} edges={['top', 'bottom', 'left', 'right']}>
       <View style={styles.pageHeader}>
         <Text style={[accountUi.pageTitle, styles.centerText]}>Perfil</Text>
         <Text style={[accountUi.pageSubtitle, styles.centerText]}>
@@ -38,7 +38,22 @@ export function AccountGuestScreen() {
           <Text style={styles.secondaryBtnText}>Crear cuenta</Text>
         </Pressable>
       </View>
-    </SafeAreaView>
+
+      <View style={[accountUi.card, styles.authCard]}>
+        <Text style={styles.commerceHint}>
+          ¿Tenés un corralón, ferretería u otro local? En el login marcá “Soy comercio”.
+        </Text>
+        <Pressable
+          style={({ pressed }) => [styles.commerceBtn, pressed && styles.pressed]}
+          onPress={() => openAuthModal('Login', { asCommerce: true })}
+          accessibilityRole="button"
+          accessibilityLabel="Ir al login como comercio"
+        >
+          <Ionicons name="storefront-outline" size={22} color={colors.primary} />
+          <Text style={styles.commerceBtnText}>Ir al login de comercio</Text>
+        </Pressable>
+      </View>
+    </AppScreen>
   );
 }
 
@@ -53,6 +68,7 @@ const styles = StyleSheet.create({
   authCard: {
     padding: spacing.lg,
     gap: spacing.md,
+    marginBottom: spacing.md,
   },
   primaryBtn: {
     flexDirection: 'row',
@@ -74,5 +90,23 @@ const styles = StyleSheet.create({
   },
   primaryBtnText: { fontSize: 16, fontWeight: '800', color: '#fff' },
   secondaryBtnText: { fontSize: 16, fontWeight: '800', color: colors.primary },
+  commerceHint: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  commerceBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: 14,
+    borderRadius: radii.button,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  commerceBtnText: { fontSize: 16, fontWeight: '800', color: colors.primary },
   pressed: { opacity: 0.9 },
 });

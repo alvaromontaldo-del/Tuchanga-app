@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
 import { IntegerRatingStars } from '../../components/profile/IntegerRatingStars';
+import { ExpandableText } from '../../components/common/ExpandableText';
 import { colors, radii, spacing } from '../../constants/theme';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { getWorkerBackendUserId } from '../../data/workerChatIds';
@@ -8,6 +9,7 @@ import { getReviewsForWorker, getWorkerById } from '../../data/mockFeed';
 import { getSupabaseClient } from '../../lib/supabase';
 import type {
   FeedStackScreenProps,
+  MessagesStackScreenProps,
   SearchStackScreenProps,
 } from '../../navigation/mainTypes';
 import type { WorkerReview } from '../../types/feed';
@@ -15,7 +17,8 @@ import { formatPostDate } from '../../utils/formatDate';
 
 type Props =
   | FeedStackScreenProps<'WorkerReviews'>
-  | SearchStackScreenProps<'WorkerReviews'>;
+  | SearchStackScreenProps<'WorkerReviews'>
+  | MessagesStackScreenProps<'WorkerReviews'>;
 
 function ReviewRow({ item }: { item: WorkerReview }) {
   return (
@@ -25,7 +28,14 @@ function ReviewRow({ item }: { item: WorkerReview }) {
       <View style={styles.starsWrap}>
         <IntegerRatingStars rating={item.rating} size={20} />
       </View>
-      <Text style={styles.comment}>{item.comment}</Text>
+      {item.comment?.trim() ? (
+        <ExpandableText
+          key={`${item.id}-comment`}
+          text={item.comment.trim()}
+          textStyle={styles.commentText}
+          style={styles.commentWrap}
+        />
+      ) : null}
       <Text style={styles.date}>{formatPostDate(item.createdAt)}</Text>
     </View>
   );
@@ -207,12 +217,14 @@ const styles = StyleSheet.create({
   starsWrap: {
     marginLeft: spacing.sm,
   },
-  comment: {
+  commentWrap: {
+    marginLeft: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  commentText: {
     fontSize: 15,
     lineHeight: 22,
     color: colors.textSecondary,
-    marginLeft: spacing.sm,
-    marginTop: spacing.sm,
   },
   date: {
     fontSize: 12,

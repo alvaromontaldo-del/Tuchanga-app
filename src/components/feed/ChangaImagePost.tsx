@@ -10,6 +10,7 @@ import { colors, radii, spacing, typography } from '../../constants/theme';
 import { formatPostDate } from '../../utils/formatDate';
 import type { FeedPost } from '../../types/feed';
 import { StarRating } from '../profile/StarRating';
+import { APP_NAME } from '../../constants/brand';
 
 type Props = {
   post: FeedPost;
@@ -44,10 +45,10 @@ export function ChangaImagePost({
   async function onShare() {
     try {
       const { workerFirstName, trade, workerId } = post;
-      const message = `¡Mirá el trabajo de ${workerFirstName} en Tu Changa! Oficio: ${trade}. Link: https://tuchanga.app/perfil/${workerId}`;
+      const message = `¡Mirá el trabajo de ${workerFirstName} en ${APP_NAME}! Oficio: ${trade}. Link: https://tuchanga.app/perfil/${workerId}`;
       await Share.share({
         message,
-        title: 'Tu Changa',
+        title: 'Compartir publicación',
       });
     } catch {
       /* cancelación */

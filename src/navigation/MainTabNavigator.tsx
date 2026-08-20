@@ -1,6 +1,7 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import type { MainTabParamList } from './mainTypes';
 import { AccountStack } from './AccountStack';
+import { AgendaStack } from './AgendaStack';
 import { FeedStack } from './FeedStack';
 import { MainTabBar } from './MainTabBar';
 import { MessagesStack } from './MessagesStack';
@@ -22,6 +23,13 @@ export function MainTabNavigator() {
         component={FeedStack}
         options={{
           title: 'Inicio',
+        }}
+      />
+      <Tab.Screen
+        name="Agenda"
+        component={AgendaStack}
+        options={{
+          title: 'Agenda',
         }}
       />
       <Tab.Screen

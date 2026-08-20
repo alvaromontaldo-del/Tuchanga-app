@@ -1,38 +1,53 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ExpandableText } from '../../components/common/ExpandableText';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { getSupabaseClient } from '../../lib/supabase';
 import { formatPostDate } from '../../utils/formatDate';
 
-type QuoteRow = {
+import { fetchContratacionesByUser } from '../../services/contratacionesSupabase';
+import type { Contratacion, ContratacionEstadoPago, ContratacionEstadoTrabajo } from '../../types/contrataciones';
+
+type OrderRow = {
   conversation_id: string;
   worker_id: string;
   client_id: string;
   id: string;
   amount: number;
   description: string;
-  work_status: 'PENDING' | 'COMPLETED_BY_WORKER';
-  payment_status: 'PENDING' | 'PAID';
-  paid_at: string | null;
-  completed_by_worker_at: string | null;
+  estado_trabajo: ContratacionEstadoTrabajo;
+  estado_pago: ContratacionEstadoPago;
   updated_at: string;
   created_at: string;
 };
 
-function toNum(v: unknown): number {
-  const n = typeof v === 'number' ? v : Number(v);
-  return Number.isFinite(n) ? n : 0;
+function statusBadge(row: OrderRow): { label: string; tone: 'pending' | 'paid' | 'done' } {
+  const done = row.estado_trabajo === 'finalizado';
+  const paid = row.estado_pago === 'totalmente_pagado' || row.estado_pago === 'seña_pagada';
+  if (done && row.estado_pago === 'totalmente_pagado') {
+    return { label: 'Finalizado · Pagado', tone: 'done' };
+  }
+  if (done) return { label: 'Finalizado', tone: 'done' };
+  if (paid) return { label: 'Costo de servicio pagado', tone: 'paid' };
+  if (row.estado_trabajo === 'cancelado') return { label: 'Cancelado', tone: 'pending' };
+  return { label: 'En curso', tone: 'pending' };
 }
 
-function statusBadge(q: QuoteRow): { label: string; tone: 'pending' | 'paid' | 'done' } {
-  const done = q.work_status === 'COMPLETED_BY_WORKER';
-  const paid = q.payment_status === 'PAID';
-  if (done && paid) return { label: 'Finalizado · Pagado', tone: 'done' };
-  if (done && !paid) return { label: 'Finalizado · Pendiente de pago', tone: 'done' };
-  if (!done && paid) return { label: 'Pagado', tone: 'paid' };
-  return { label: 'Pendiente', tone: 'pending' };
+function mapContratacion(c: Contratacion): OrderRow {
+  return {
+    id: c.id,
+    conversation_id: c.conversation_id,
+    worker_id: c.worker_id,
+    client_id: c.client_id,
+    amount: c.precio_final,
+    description: c.service_detail,
+    estado_trabajo: c.estado_trabajo,
+    estado_pago: c.estado_pago,
+    updated_at: c.updated_at,
+    created_at: c.created_at,
+  };
 }
 
 function formatWorkerLabel(full: string): string {
@@ -47,7 +62,7 @@ function formatWorkerLabel(full: string): string {
 
 export function ContractedWorkOrdersScreen() {
   const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState<QuoteRow[]>([]);
+  const [rows, setRows] = useState<OrderRow[]>([]);
   const [workerNameById, setWorkerNameById] = useState<Record<string, string>>({});
 
   const currency = useMemo(
@@ -69,38 +84,8 @@ export function ContractedWorkOrdersScreen() {
           if (!cancelled) setRows([]);
           return;
         }
-        const sb = getSupabaseClient();
-        const {
-          data: { user },
-        } = await sb.auth.getUser();
-        if (!user?.id) {
-          if (!cancelled) setRows([]);
-          return;
-        }
-        const { data, error } = await sb
-          .from('service_jobs')
-          .select(
-            'id,conversation_id,worker_id,client_id,amount,description,work_status,payment_status,paid_at,completed_by_worker_at,updated_at,created_at',
-          )
-          // Solo trabajos donde el usuario actuó como cliente/contratante
-          .eq('client_id', user.id)
-          .order('updated_at', { ascending: false })
-          .limit(60);
-        if (error) throw error;
-        const mapped = (data ?? []).map((r: any) => ({
-          id: r.id,
-          conversation_id: r.conversation_id,
-          worker_id: r.worker_id,
-          client_id: r.client_id,
-          amount: toNum(r.amount),
-          description: String(r.description ?? ''),
-          work_status: (r.work_status as QuoteRow['work_status']) ?? 'PENDING',
-          payment_status: (r.payment_status as QuoteRow['payment_status']) ?? 'PENDING',
-          paid_at: r.paid_at ?? null,
-          completed_by_worker_at: r.completed_by_worker_at ?? null,
-          updated_at: String(r.updated_at ?? r.created_at),
-          created_at: String(r.created_at),
-        }));
+        const data = await fetchContratacionesByUser({ role: 'cliente', limit: 60 });
+        const mapped = data.map(mapContratacion);
         if (!cancelled) setRows(mapped);
       } catch {
         if (!cancelled) setRows([]);
@@ -171,9 +156,11 @@ export function ContractedWorkOrdersScreen() {
                   Profesional: <Text style={styles.workerNameStrong}>{workerName}</Text>
                 </Text>
                 <Text style={styles.amount}>{fmtMoney(q.amount)}</Text>
-                <Text style={styles.detail} numberOfLines={3}>
-                  {q.description?.trim() || 'Sin detalle del servicio.'}
-                </Text>
+                <ExpandableText
+                  text={q.description?.trim() || 'Sin detalle del servicio.'}
+                  numberOfLinesCollapsed={3}
+                  textStyle={styles.detail}
+                />
                 <Text style={styles.date}>{formatPostDate(q.created_at)}</Text>
               </View>
             );

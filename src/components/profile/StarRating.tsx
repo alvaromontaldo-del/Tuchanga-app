@@ -12,6 +12,10 @@ type Props = {
   textSize?: number;
   /** Al tocar el bloque de calificación / reseñas (solo si hay reseñas) */
   onPressReviews?: () => void;
+  /** Si false, no muestra el conteo entre paréntesis. */
+  showCount?: boolean;
+  /** Alineación horizontal compacta (p. ej. junto a una etiqueta). */
+  inline?: boolean;
 };
 
 /**
@@ -24,6 +28,8 @@ export function StarRating({
   size = 14,
   textSize,
   onPressReviews,
+  showCount = true,
+  inline = false,
 }: Props) {
   const safeScore = typeof score === 'number' && !Number.isNaN(score) ? score : 0;
   const safeCount = typeof reviewCount === 'number' && Number.isFinite(reviewCount) ? reviewCount : 0;
@@ -44,6 +50,7 @@ export function StarRating({
   const tappable = Boolean(onPressReviews) && hasReviews;
   const countText = `(${safeCount})`;
   const resolvedTextSize = Math.max(11, Math.floor(Number(textSize ?? Math.max(12, size - 1)) || 12));
+  const wrapStyle = inline ? styles.wrapInline : styles.wrap;
 
   const Content = (
     <View style={styles.row}>
@@ -57,18 +64,20 @@ export function StarRating({
         />
       ))}
       <Text style={[styles.score, { fontSize: resolvedTextSize }]}>{clamped.toFixed(1)}</Text>
-      <Text style={[styles.count, { fontSize: resolvedTextSize }]}>{countText}</Text>
+      {showCount && hasReviews ? (
+        <Text style={[styles.count, { fontSize: resolvedTextSize }]}>{countText}</Text>
+      ) : null}
     </View>
   );
 
   if (!tappable) {
-    return <View style={styles.wrap}>{Content}</View>;
+    return <View style={wrapStyle}>{Content}</View>;
   }
 
   return (
     <Pressable
       onPress={onPressReviews}
-      style={({ pressed }) => [styles.wrap, pressed && styles.pressed]}
+      style={({ pressed }) => [wrapStyle, pressed && styles.pressed]}
       accessibilityRole="button"
       accessibilityLabel="Ver reseñas de clientes"
     >
@@ -81,6 +90,9 @@ const styles = StyleSheet.create({
   wrap: {
     alignItems: 'center',
     marginTop: spacing.xs,
+  },
+  wrapInline: {
+    alignItems: 'center',
   },
   pressed: {
     opacity: 0.75,

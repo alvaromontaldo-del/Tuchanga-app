@@ -8,6 +8,7 @@ const path = require('path');
 
 const MARKER = '_expoNgrokAuthToken';
 const V2 = 'PATCH_NGROK_V2';
+const V3 = 'PATCH_NGROK_V3_CONFIG_PATH';
 
 const candidates = [
   path.join(__dirname, '..', 'node_modules', 'expo', 'node_modules', '@expo', 'cli', 'build', 'src', 'start', 'server', 'AsyncNgrok.js'),
@@ -98,6 +99,43 @@ function _useOwnNgrokAccount() {
     }
 
     changed = true;
+  }
+
+  // Prefer official ngrok v3 config on Windows (%LOCALAPPDATA%\\ngrok\\ngrok.yml) over ~/.expo/ngrok.yml.
+  if (!s.includes(V3)) {
+    const osNeedle = 'function _path() {';
+    const osInsert = `function _os() {
+    const data = /*#__PURE__*/ _interop_require_wildcard(require("os"));
+    _os = function() {
+        return data;
+    };
+    return data;
+}
+function _path() {`;
+
+    if (s.includes(osNeedle) && !s.includes('function _os()')) {
+      s = s.replace(osNeedle, osInsert);
+    }
+
+    const cfgNeedle = `            // Global config path.
+            const configPath = _path().join((0, _UserSettings.getSettingsDirectory)(), 'ngrok.yml');`;
+    const cfgRepl = `            // Global config path.
+            /* ${V3} */
+            const fs = require('fs');
+            const path = _path();
+            const os = _os();
+            const localAppData = process.env.LOCALAPPDATA;
+            const ngrokLocalConfig =
+                localAppData && typeof localAppData === 'string' && localAppData.trim() !== ''
+                    ? path.join(localAppData.trim(), 'ngrok', 'ngrok.yml')
+                    : null;
+            const expoLegacyConfig = path.join((0, _UserSettings.getSettingsDirectory)(), 'ngrok.yml');
+            const configPath = ngrokLocalConfig ?? expoLegacyConfig;`;
+
+    if (s.includes(cfgNeedle)) {
+      s = s.replace(cfgNeedle, cfgRepl);
+      changed = true;
+    }
   }
 
   if (changed) {

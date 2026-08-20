@@ -3,7 +3,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Image,
   Pressable,
   ScrollView,
@@ -11,6 +10,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { ImageLightboxModal } from '../../components/common/ImageLightboxModal';
 import { ExpandableText } from '../../components/common/ExpandableText';
 import { ClickableAvatar } from '../../components/common/ClickableAvatar';
@@ -29,13 +29,15 @@ import { fetchWorkerPublicProfileFromSupabase } from '../../services/workerProfi
 import { StarRating } from '../../components/profile/StarRating';
 import type {
   FeedStackScreenProps,
+  MessagesStackScreenProps,
   SearchStackScreenProps,
 } from '../../navigation/mainTypes';
 import type { WorkerPublicProfile, WorkerTradeEntry } from '../../types/feed';
 
 type Props =
   | FeedStackScreenProps<'WorkerProfile'>
-  | SearchStackScreenProps<'WorkerProfile'>;
+  | SearchStackScreenProps<'WorkerProfile'>
+  | MessagesStackScreenProps<'WorkerProfile'>;
 
 /** Evita conflicto de tipos entre stack de feed y de búsqueda (mismas rutas). */
 type WorkerProfileFlowNav = NativeStackNavigationProp<
@@ -99,7 +101,7 @@ function mergeTradesForCurrentUser(
 export function WorkerProfileScreen({ route, navigation }: Props) {
   const { workerId, conversationId: originConversationId } = route.params;
   const { workerTrade, isWorker } = useUserMode();
-  const { user, isRestoring } = useAuth();
+  const { user, isRestoring, ensureActiveAccount } = useAuth();
   const { isFavorite, toggleFavoriteById } = useFavorites();
   const toast = useAppToast();
   const mockWorker = getWorkerById(workerId);
@@ -144,6 +146,22 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
       cancelled = true;
     };
   }, [workerId, isRestoring, user]);
+
+  // Al volver a la pantalla (p. ej. tras una reseña), refrescar estrellas.
+  useFocusEffect(
+    useCallback(() => {
+      if (!isSupabaseConfigured() || !isWorkerUserIdUuid(workerId)) return;
+      if (isRestoring || !user) return;
+      if (getWorkerById(workerId)) return;
+      let cancelled = false;
+      void fetchWorkerPublicProfileFromSupabase(workerId).then((w) => {
+        if (!cancelled && w) setRemoteWorker(w);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [workerId, isRestoring, user]),
+  );
 
   const authGateOpenedRef = useRef(false);
   useEffect(() => {
@@ -204,7 +222,6 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
           Perfil no disponible. Este trabajador puede ser un usuario nuevo o no tener oficios
           cargados.
         </Text>
-        <Text style={styles.id}>ID: {workerId}</Text>
       </View>
     );
   }
@@ -265,8 +282,12 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
   }
 
   async function onContact() {
-    if (!user?.id || !workerBackendId) return;
+    if (!workerBackendId) return;
     if (contactBusy) return;
+    if (!user?.id) {
+      openAuthModal('Register', { redirectTo: `worker:${workerBackendId}` });
+      return;
+    }
     if (!isMessagingAvailable()) {
       toast.warning(
         'Agregá Supabase (EXPO_PUBLIC_SUPABASE_URL y EXPO_PUBLIC_SUPABASE_ANON_KEY) o el servidor Node (EXPO_PUBLIC_API_URL) y reiniciá Expo.',
@@ -277,14 +298,15 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
     }
     try {
       setContactBusy(true);
-      // Si llegamos desde un chat, evitamos re-crear/re-abrir y solo volvemos a esa conversación.
+      const redirectTo = `worker:${workerBackendId}`;
+      const ok = await ensureActiveAccount({ redirectTo });
+      if (!ok) return;
+
+      // Si llegamos desde un chat, volvemos atrás (evita duplicar pantalla y canales Realtime).
       if (originConversationId) {
-        (navigation as unknown as WorkerProfileFlowNav).navigate('ChatConversation', {
-          conversationId: originConversationId,
-          otherDisplayName: workerFirst,
-          headerSubtitle: primaryTradeLabel ? `Profesional · ${primaryTradeLabel}` : 'Profesional',
-          workerId: workerBackendId,
-        });
+        if (navigation.canGoBack()) {
+          navigation.goBack();
+        }
         return;
       }
       const res = await openOrCreateChat(user.id, {
@@ -300,6 +322,16 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
         workerId: workerBackendId,
       });
     } catch (e) {
+      const { isDeletedOrInvalidAuthError } = await import('../../services/sessionValidity');
+      if (isDeletedOrInvalidAuthError(e)) {
+        await ensureActiveAccount({ redirectTo: `worker:${workerBackendId}` });
+        return;
+      }
+      // Si el chat falla por cuenta inexistente / JWT inválido, ensureActiveAccount lo detecta.
+      const stillOk = await ensureActiveAccount({
+        redirectTo: workerBackendId ? `worker:${workerBackendId}` : undefined,
+      });
+      if (!stillOk) return;
       toast.error(
         e instanceof Error ? e.message : 'No se pudo abrir el chat',
         'Chat',
@@ -397,14 +429,18 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
                     styles.contactBtn,
                     pressed && styles.contactBtnPressed,
                   ]}
-                  onPress={() => openAuthModal('Login')}
+                  onPress={() =>
+                    openAuthModal('Register', {
+                      redirectTo: workerBackendId ? `worker:${workerBackendId}` : undefined,
+                    })
+                  }
                   accessibilityRole="button"
-                  accessibilityLabel="Iniciar sesión para contactar"
+                  accessibilityLabel="Registrarse para contactar"
                 >
-                  <Text style={styles.contactBtnText}>Iniciá sesión para contactar</Text>
+                  <Text style={styles.contactBtnText}>Registrate para contactar</Text>
                 </Pressable>
                 <Text style={styles.contactHint}>
-                  Creá o ingresá a tu cuenta para chatear con {worker.firstName}.
+                  Creá tu cuenta para chatear con {worker.firstName}.
                 </Text>
               </>
             ) : (
@@ -437,7 +473,9 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
         ) : null}
 
         <Text style={styles.sectionTitle}>Sobre {worker.firstName}</Text>
-        <Text style={styles.bio}>{worker.bio}</Text>
+        {worker.bio?.trim() ? (
+          <ExpandableText text={worker.bio.trim()} textStyle={styles.bio} />
+        ) : null}
 
         <Text style={styles.sectionTitle}>Oficios</Text>
 
@@ -453,14 +491,15 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
               experiencia en este oficio
             </Text>
             {trade.photoUrls?.length ? (
-              <FlatList
-                data={trade.photoUrls}
-                keyExtractor={(u, i) => `${u}-${i}`}
+              <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.tradePhotos}
-                renderItem={({ item: url, index: photoIndex }) => (
+                nestedScrollEnabled
+              >
+                {trade.photoUrls.map((url, photoIndex) => (
                   <Pressable
+                    key={`${url}-${photoIndex}`}
                     onPress={() => {
                       setLightboxPhotos(trade.photoUrls ?? []);
                       setLightboxIndex(photoIndex);
@@ -471,10 +510,16 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
                   >
                     <Image source={{ uri: url }} style={styles.tradePhoto} />
                   </Pressable>
-                )}
+                ))}
+              </ScrollView>
+            ) : null}
+            {trade.description?.trim() ? (
+              <ExpandableText
+                text={trade.description.trim()}
+                textStyle={styles.tradeDescriptionText}
+                style={styles.tradeDescriptionWrap}
               />
             ) : null}
-            <ExpandableText text={trade.description} numberOfLinesCollapsed={5} textStyle={styles.tradeDescription} />
           </View>
         );
         })}
@@ -631,10 +676,12 @@ const styles = StyleSheet.create({
     marginLeft: spacing.sm,
     marginBottom: spacing.sm,
   },
-  tradeDescription: {
+  tradeDescriptionWrap: {
+    marginLeft: spacing.sm,
+  },
+  tradeDescriptionText: {
     ...typography.body,
     lineHeight: 22,
-    marginLeft: spacing.sm,
   },
   tradePhotos: {
     marginLeft: spacing.sm,

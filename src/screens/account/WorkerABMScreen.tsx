@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -12,9 +13,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { AppScreen } from '../../components/layout/AppScreen';
 import { AppButton } from '../../components/common/AppButton';
-import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
+import { ModeratedTextField } from '../../components/common/ModeratedTextField';
 import { useAppToast } from '../../components/toast/toast';
 import { TradeSearchModal } from '../../components/search/TradeSearchModal';
 import { ImagePickerComponent } from '../../components/common/ImagePickerComponent';
@@ -38,6 +39,11 @@ import {
 } from '../../services/supabaseUser';
 import { fetchSearchWorkerHitsFromSupabase } from '../../services/searchWorkersSupabase';
 import type { AuthUser } from '../../services/auth';
+import {
+  CONTACT_MODERATION_PROFILE_FIELD_MESSAGE,
+  validateContactInfo,
+  validateWorkerProfileTexts,
+} from '../../utils/contactModeration';
 
 type Props = AccountStackScreenProps<'WorkerABM'>;
 
@@ -169,6 +175,24 @@ function validateDetailed(
     });
   }
 
+  if (validateContactInfo(professionalDescription).blocked) {
+    issues.push({
+      field: 'professionalDescription',
+      scroll: 'professional',
+      msg: CONTACT_MODERATION_PROFILE_FIELD_MESSAGE,
+    });
+  }
+
+  for (const { t, i } of named) {
+    if (validateContactInfo(t.description).blocked) {
+      issues.push({
+        field: `trade_${i}_description`,
+        scroll: `trade_${i}`,
+        msg: CONTACT_MODERATION_PROFILE_FIELD_MESSAGE,
+      });
+    }
+  }
+
   const errors: Record<string, string> = {};
   for (const it of issues) {
     if (!errors[it.field]) errors[it.field] = it.msg;
@@ -180,10 +204,12 @@ function tradeCardHasError(
   idx: number,
   trades: WorkerTrade[],
   fieldErrors: Record<string, string>,
+  tradeContactBlocked?: boolean,
 ) {
   if (fieldErrors[`trade_${idx}_name`]) return true;
   if (fieldErrors[`trade_${idx}_years`]) return true;
   if (fieldErrors[`trade_${idx}_description`]) return true;
+  if (tradeContactBlocked) return true;
   const firstNamed = trades.findIndex((t) => t.name.trim().length > 0);
   if (fieldErrors.primary && idx === firstNamed && firstNamed >= 0) return true;
   return false;
@@ -212,8 +238,31 @@ export function WorkerABMScreen({ navigation }: Props) {
 
   const [tradeModal, setTradeModal] = useState<{ idx: number } | null>(null);
 
+  const contactModeration = useMemo(
+    () =>
+      validateWorkerProfileTexts(
+        professionalDescription,
+        trades.map((t) => t.description),
+      ),
+    [professionalDescription, trades],
+  );
+
   const scrollRef = useRef<ScrollView>(null);
   const layoutYs = useRef<Record<string, number>>({});
+  const tabBarHeight = useBottomTabBarHeight();
+  const [scrollViewportHeight, setScrollViewportHeight] = useState(0);
+
+  const scrollContentStyle = useMemo(
+    () => [
+      styles.scrollContent,
+      scrollViewportHeight > 0 ? { minHeight: scrollViewportHeight } : null,
+      {
+        paddingBottom:
+          tabBarHeight + spacing.lg + (Platform.OS === 'ios' ? spacing.md : 0),
+      },
+    ],
+    [scrollViewportHeight, tabBarHeight],
+  );
 
   // Reset fuerte al cambiar de usuario (evita heredar estado del formulario entre cuentas).
   useEffect(() => {
@@ -449,7 +498,7 @@ export function WorkerABMScreen({ navigation }: Props) {
         /* ignore */
       }
 
-      toast.success('Perfil profesional guardado.', 'Tu Changa');
+      toast.success('Perfil profesional guardado.', 'YaChanga');
       if (navigation.canGoBack()) navigation.goBack();
       else navigation.navigate('MyAccount');
     } catch (e) {
@@ -507,56 +556,66 @@ export function WorkerABMScreen({ navigation }: Props) {
   }
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <AppKeyboardAvoidingView style={{ flex: 1 }} extraOffset={44}>
-      <View style={styles.topBar}>
-        <Pressable
-          onPress={() => {
-            if (navigation.canGoBack()) navigation.goBack();
-            else navigation.navigate('MyAccount');
+    <AppScreen style={styles.safe} edges={['top', 'bottom', 'left', 'right']}>
+      <View style={styles.screenBody}>
+        <View style={styles.topBar}>
+          <Pressable
+            onPress={() => {
+              if (navigation.canGoBack()) navigation.goBack();
+              else navigation.navigate('MyAccount');
+            }}
+            hitSlop={12}
+            style={styles.backBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Volver"
+          >
+            <Ionicons name="chevron-back" size={24} color={colors.text} />
+          </Pressable>
+          <Text style={styles.topBarTitle} numberOfLines={1}>
+            {workerProfile ? 'Perfil profesional' : 'Ofrecer mis servicios'}
+          </Text>
+          <View style={{ width: 44 }} />
+        </View>
+
+        <View
+          style={styles.scrollWrap}
+          onLayout={(e) => {
+            setScrollViewportHeight(e.nativeEvent.layout.height);
           }}
-          hitSlop={12}
-          style={styles.backBtn}
-          accessibilityRole="button"
-          accessibilityLabel="Volver"
         >
-          <Ionicons name="chevron-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={styles.topBarTitle} numberOfLines={1}>
-          {workerProfile ? 'Perfil profesional' : 'Ofrecer mis servicios'}
-        </Text>
-        <View style={{ width: 44 }} />
-      </View>
+          <ScrollView
+            ref={scrollRef}
+            style={styles.scroll}
+            contentContainerStyle={scrollContentStyle}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            showsVerticalScrollIndicator={false}
+            automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+            contentInsetAdjustmentBehavior="automatic"
+          >
+            <View style={styles.scrollHeader}>
+              <Text style={styles.subtitle}>
+                El domicilio para el mapa y la búsqueda lo editás en Perfil → Modificar datos. Acá
+                ajustás radio, oficios y descripción.
+              </Text>
+            </View>
 
-      <View style={styles.header}>
-        <Text style={styles.subtitle}>
-          El domicilio para el mapa y la búsqueda lo editás en Perfil → Modificar datos. Acá ajustás
-          radio, oficios y descripción.
-        </Text>
-      </View>
+            {deleteBanner ? (
+              <View style={styles.infoBox}>
+                <Ionicons name="information-circle-outline" size={18} color="#1D4ED8" />
+                <Text style={styles.infoText}>{deleteBanner}</Text>
+              </View>
+            ) : null}
 
-      <ScrollView
-        ref={scrollRef}
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-      >
-        {deleteBanner ? (
-          <View style={styles.infoBox}>
-            <Ionicons name="information-circle-outline" size={18} color="#1D4ED8" />
-            <Text style={styles.infoText}>{deleteBanner}</Text>
-          </View>
-        ) : null}
+            {Object.keys(fieldErrors).length > 0 ? (
+              <View style={styles.errorBox}>
+                <Ionicons name="alert-circle-outline" size={18} color="#991B1B" />
+                <Text style={styles.errorText}>Revisá los campos marcados en rojo.</Text>
+              </View>
+            ) : null}
 
-        {Object.keys(fieldErrors).length > 0 ? (
-          <View style={styles.errorBox}>
-            <Ionicons name="alert-circle-outline" size={18} color="#991B1B" />
-            <Text style={styles.errorText}>Revisá los campos marcados en rojo.</Text>
-          </View>
-        ) : null}
-
-        <Text style={styles.sectionTitle}>Oficios (hasta 5)</Text>
-        {trades.map((t, idx) => (
+            <Text style={styles.sectionTitle}>Oficios (hasta 5)</Text>
+            {trades.map((t, idx) => (
           <View
             key={t.id}
             collapsable={false}
@@ -565,7 +624,12 @@ export function WorkerABMScreen({ navigation }: Props) {
             }}
             style={[
               styles.tradeCard,
-              tradeCardHasError(idx, trades, fieldErrors) && styles.fieldGroupError,
+              tradeCardHasError(
+                idx,
+                trades,
+                fieldErrors,
+                contactModeration.tradeDescriptions[idx]?.blocked,
+              ) && styles.fieldGroupError,
             ]}
           >
             <View style={styles.tradeTopRow}>
@@ -633,22 +697,28 @@ export function WorkerABMScreen({ navigation }: Props) {
             ) : null}
 
             <Text style={styles.fieldLabel}>Descripción del oficio</Text>
-            <TextInput
+            <ModeratedTextField
+              variant="plain"
+              showIcon={false}
+              policyMessage={CONTACT_MODERATION_PROFILE_FIELD_MESSAGE}
               value={t.description}
               onChangeText={(v) => updateTrade(idx, { description: v })}
               style={[
                 styles.textArea,
-                fieldErrors[`trade_${idx}_description`] ? styles.inputError : null,
+                fieldErrors[`trade_${idx}_description`] || contactModeration.tradeDescriptions[idx]?.blocked
+                  ? styles.inputError
+                  : null,
               ]}
               placeholder="Qué hacés, qué te diferencia, herramientas, etc."
               placeholderTextColor={colors.textSecondary}
               multiline
+              textAlignVertical="top"
             />
-            {fieldErrors[`trade_${idx}_description`] ? (
+            {fieldErrors[`trade_${idx}_description`] &&
+            !contactModeration.tradeDescriptions[idx]?.blocked ? (
               <Text style={styles.inlineError}>{fieldErrors[`trade_${idx}_description`]}</Text>
             ) : null}
 
-            <Text style={styles.fieldLabel}>Fotos del oficio (hasta 5)</Text>
             <ImagePickerComponent
               mode="multi"
               label="Fotos del oficio (hasta 5)"
@@ -744,7 +814,10 @@ export function WorkerABMScreen({ navigation }: Props) {
           <Text style={[styles.sectionTitle, { marginTop: spacing.lg }]}>
             Descripción profesional
           </Text>
-          <TextInput
+          <ModeratedTextField
+            variant="plain"
+            showIcon={false}
+            policyMessage={CONTACT_MODERATION_PROFILE_FIELD_MESSAGE}
             value={professionalDescription}
             onChangeText={(v) => {
               setProfessionalDescription(v);
@@ -757,31 +830,42 @@ export function WorkerABMScreen({ navigation }: Props) {
             style={[
               styles.textArea,
               { minHeight: 120 },
-              fieldErrors.professionalDescription ? styles.inputError : null,
+              fieldErrors.professionalDescription || contactModeration.professional.blocked
+                ? styles.inputError
+                : null,
             ]}
             placeholder="Contá tu experiencia general, disponibilidad, garantías, etc."
             placeholderTextColor={colors.textSecondary}
             multiline
+            textAlignVertical="top"
           />
-          {fieldErrors.professionalDescription ? (
-            <Text style={styles.inlineError}>{fieldErrors.professionalDescription}</Text>
-          ) : null}
+            {fieldErrors.professionalDescription && !contactModeration.professional.blocked ? (
+              <Text style={styles.inlineError}>{fieldErrors.professionalDescription}</Text>
+            ) : null}
+            </View>
+
+            <View style={styles.actionsSpacer} />
+
+            <View style={styles.formActions}>
+              <AppButton
+                title="Guardar"
+                onPress={() => void onSave()}
+                loading={saving}
+                disabled={contactModeration.hasViolation}
+              />
+              {workerProfile ? (
+                <Pressable
+                  onPress={() => {
+                    void onDelete();
+                  }}
+                  style={({ pressed }) => [styles.deleteBtn, pressed && styles.pressed]}
+                >
+                  <Text style={styles.deleteText}>Dar de baja (eliminar)</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </ScrollView>
         </View>
-
-      </ScrollView>
-
-      <View style={styles.stickyActions}>
-        <AppButton title="Guardar" onPress={() => void onSave()} loading={saving} />
-        {workerProfile ? (
-          <Pressable
-            onPress={() => {
-              void onDelete();
-            }}
-            style={({ pressed }) => [styles.deleteBtn, pressed && styles.pressed]}
-          >
-            <Text style={styles.deleteText}>Dar de baja (eliminar)</Text>
-          </Pressable>
-        ) : null}
       </View>
 
       <TradeSearchModal
@@ -801,19 +885,21 @@ export function WorkerABMScreen({ navigation }: Props) {
           });
         }}
       />
-      </AppKeyboardAvoidingView>
-    </SafeAreaView>
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
+  screenBody: { flex: 1 },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingTop: spacing.sm,
     paddingBottom: spacing.sm,
+    backgroundColor: colors.background,
+    zIndex: 2,
   },
   backBtn: {
     width: 44,
@@ -823,10 +909,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   topBarTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '800', color: colors.text },
-  header: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
-  subtitle: { marginTop: 6, fontSize: 14, color: colors.textSecondary, lineHeight: 20 },
+  scrollHeader: { paddingBottom: spacing.md },
+  subtitle: { fontSize: 14, color: colors.textSecondary, lineHeight: 20 },
+  scrollWrap: { flex: 1 },
   scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: spacing.lg, paddingBottom: 160 },
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: spacing.lg,
+  },
+  actionsSpacer: { flexGrow: 1, minHeight: spacing.xl * 2 },
+  formActions: {
+    paddingTop: spacing.xl,
+    gap: spacing.sm,
+  },
   errorBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1010,18 +1105,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   coverUnit: { fontSize: 16, fontWeight: '800', color: colors.textSecondary },
-  stickyActions: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.md,
-    gap: spacing.md,
-    backgroundColor: colors.background,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
   deleteBtn: {
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.xs,
   },
   deleteText: { color: '#B91C1C', fontWeight: '800' },
   pressed: { opacity: 0.92 },

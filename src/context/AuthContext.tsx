@@ -4,9 +4,11 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
+import { AppState } from 'react-native';
 import { isSupabaseConfigured } from '../config/supabase';
 import { getSupabaseClient } from '../lib/supabase';
 import type { AuthUser } from '../services/auth';
@@ -15,7 +17,16 @@ import { fetchAuthUserFromSupabase } from '../services/supabaseUser';
 import { clearSession, loadStoredSession, persistSession } from '../services/authSession';
 import { mergeAuthUserProfile } from '../utils/mergeAuthUserProfile';
 import { stableUserIdFromEmail } from '../utils/stableUserId';
-import { persistExpoPushTokenToSupabase, registerAndGetExpoPushToken } from '../services/pushNotifications';
+import {
+  clearExpoPushTokenFromSupabase,
+  persistExpoPushTokenToSupabase,
+  registerAndGetExpoPushToken,
+} from '../services/pushNotifications';
+import {
+  isDeletedOrInvalidAuthError,
+  validateAccountForAction,
+  validateRemoteAccount,
+} from '../services/sessionValidity';
 
 type AuthContextValue = {
   isAuthed: boolean;
@@ -27,6 +38,11 @@ type AuthContextValue = {
   /** Combina con el usuario en memoria (evita perder perfil si un fetch devuelve solo id/email). */
   replaceOrMergeUser: (next: AuthUser) => void;
   signOut: () => Promise<void>;
+  /**
+   * Verifica Auth+perfil. Si la cuenta ya no existe: cierra sesión,
+   * avisa y abre Registro. Devuelve false si no hay sesión válida.
+   */
+  ensureActiveAccount: (options?: { redirectTo?: string }) => Promise<boolean>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -35,24 +51,129 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isRestoring, setRestoring] = useState(true);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [flashMessage, setFlashMessage] = useState<string | null>(null);
+  const forcingOutRef = useRef(false);
+  const userRef = useRef<AuthUser | null>(null);
+  userRef.current = user;
 
-  // Push token: se registra y persiste cuando hay sesión.
+  const syncPushToken = useCallback(async () => {
+    const res = await registerAndGetExpoPushToken();
+    if (res.ok) {
+      await persistExpoPushTokenToSupabase(res.token);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
     if (isRestoring) return;
     if (!user?.id) return;
     let cancelled = false;
     void (async () => {
-      const res = await registerAndGetExpoPushToken();
+      await syncPushToken();
       if (cancelled) return;
-      if (res.ok) {
-        await persistExpoPushTokenToSupabase(res.token);
-      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [isRestoring, user?.id]);
+  }, [isRestoring, syncPushToken, user?.id]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    if (!user?.id) return;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void syncPushToken();
+    });
+    return () => sub.remove();
+  }, [syncPushToken, user?.id]);
+
+  const signIn = useCallback(async (nextUser: AuthUser, keepSignedIn: boolean) => {
+    if (!isSupabaseConfigured()) {
+      await persistSession({ user: nextUser }, keepSignedIn);
+    }
+    setUser((prev) => mergeAuthUserProfile(prev, nextUser));
+  }, []);
+
+  const replaceOrMergeUser = useCallback((next: AuthUser) => {
+    setUser((prev) => mergeAuthUserProfile(prev, next));
+  }, []);
+
+  const signOut = useCallback(async () => {
+    if (isSupabaseConfigured()) {
+      try {
+        await clearExpoPushTokenFromSupabase();
+      } catch {
+        /* ignore */
+      }
+      try {
+        await getSupabaseClient().auth.signOut({ scope: 'local' });
+      } catch {
+        try {
+          await getSupabaseClient().auth.signOut();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    await clearSession();
+    setUser(null);
+  }, []);
+
+  const forceAccountUnavailable = useCallback(
+    async (options?: { redirectTo?: string }) => {
+      if (forcingOutRef.current) return;
+      forcingOutRef.current = true;
+      try {
+        await signOut();
+        setFlashMessage('Tu cuenta ya no está disponible o ha sido desactivada.');
+        try {
+          const { openAuthModal } = await import('../navigation/openAuthModal');
+          // Como alguien sin registrarse: ir a Registro (no Login).
+          openAuthModal('Register', options?.redirectTo ? { redirectTo: options.redirectTo } : undefined);
+        } catch {
+          /* ignore */
+        }
+      } finally {
+        // Permitir otro force más adelante en la misma sesión de app.
+        setTimeout(() => {
+          forcingOutRef.current = false;
+        }, 1500);
+      }
+    },
+    [signOut],
+  );
+
+  const ensureActiveAccount = useCallback(
+    async (options?: { redirectTo?: string }): Promise<boolean> => {
+      if (!isSupabaseConfigured()) {
+        return Boolean(user?.id);
+      }
+      try {
+        const sb = getSupabaseClient();
+        const {
+          data: { session },
+        } = await sb.auth.getSession();
+        const uid = session?.user?.id ?? user?.id;
+        if (!uid) {
+          // Sin sesión ni user en memoria: tratar como invitado (abrir registro).
+          await forceAccountUnavailable(options);
+          return false;
+        }
+        const ok = await validateAccountForAction(uid);
+        if (!ok) {
+          await forceAccountUnavailable(options);
+          return false;
+        }
+        return true;
+      } catch (e) {
+        if (isDeletedOrInvalidAuthError(e)) {
+          await forceAccountUnavailable(options);
+          return false;
+        }
+        // Red / transitorio: no expulsamos.
+        return Boolean(user?.id);
+      }
+    },
+    [forceAccountUnavailable, user?.id],
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -78,6 +199,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             } = await sb.auth.getSession();
             if (!mounted) return;
             if (session?.user) {
+              const ok = await validateRemoteAccount(session.user.id);
+              if (!ok) {
+                if (mounted) await forceAccountUnavailable();
+                return;
+              }
               const minimal: AuthUser = {
                 id: session.user.id,
                 email: session.user.email ?? '',
@@ -99,7 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }),
           ]);
         } catch {
-          // Red lenta, URL incorrecta o timeout: la app debe arrancar igual (sesión se reintenta con onAuthStateChange).
+          /* timeout / red */
         } finally {
           if (mounted) setRestoring(false);
         }
@@ -107,13 +233,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       let subscription: { unsubscribe: () => void } | undefined;
       try {
-        // En web (y a veces nativo), await dentro del callback puede bloquear el lock interno de
-        // GoTrue y dejar signInWithPassword colgado. Diferimos el trabajo async (doc Supabase).
         const { data } = sb.auth.onAuthStateChange((event, session) => {
           setTimeout(() => {
             void (async () => {
               if (!mounted) return;
               if (session?.user) {
+                // Solo en sign-in inicial validamos borrado. En TOKEN_REFRESHED
+                // no hay que revalidar agresivo (en iOS dispara falsos positivos).
+                if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+                  const ok = await validateRemoteAccount(session.user.id);
+                  if (!ok) {
+                    await forceAccountUnavailable();
+                    return;
+                  }
+                }
                 const minimal: AuthUser = {
                   id: session.user.id,
                   email: session.user.email ?? '',
@@ -126,8 +259,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   if (mounted) setUser((prev) => mergeAuthUserProfile(prev, minimal));
                 }
               } else if (mounted && event === 'SIGNED_OUT') {
-                // No limpiar en otros eventos con session null (p. ej. transiciones de GoTrue),
-                // para no mandar al tab Perfil a la vista de invitado por error.
                 setUser(null);
               }
             })();
@@ -141,6 +272,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
 
+      // Al volver al foreground: solo outs definitivos (usuario borrado en Auth).
+      // Nunca expulsar solo porque getSession() venga vacío un instante (común en iOS al refrescar token).
+      const appSub = AppState.addEventListener('change', (state) => {
+        if (state !== 'active') return;
+        void (async () => {
+          try {
+            const uid = userRef.current?.id;
+            if (!uid) return;
+            const {
+              data: { session },
+            } = await sb.auth.getSession();
+            if (!session?.user) return;
+            const ok = await validateRemoteAccount(session.user.id);
+            if (!ok && mounted) await forceAccountUnavailable();
+          } catch {
+            /* ignore */
+          }
+        })();
+      });
+
       return () => {
         mounted = false;
         try {
@@ -148,6 +299,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch {
           /* ignore */
         }
+        appSub.remove();
       };
     }
 
@@ -170,30 +322,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, []);
-
-  const signIn = useCallback(async (nextUser: AuthUser, keepSignedIn: boolean) => {
-    if (!isSupabaseConfigured()) {
-      await persistSession({ user: nextUser }, keepSignedIn);
-    }
-    setUser((prev) => mergeAuthUserProfile(prev, nextUser));
-  }, []);
-
-  const replaceOrMergeUser = useCallback((next: AuthUser) => {
-    setUser((prev) => mergeAuthUserProfile(prev, next));
-  }, []);
-
-  const signOut = useCallback(async () => {
-    if (isSupabaseConfigured()) {
-      try {
-        await getSupabaseClient().auth.signOut();
-      } catch {
-        /* ignore */
-      }
-    }
-    await clearSession();
-    setUser(null);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- user se lee en revalidate vía closure fresca en interval; forceAccountUnavailable es estable
+  }, [forceAccountUnavailable]);
 
   const value = useMemo(
     () => ({
@@ -205,8 +335,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       replaceOrMergeUser,
       signOut,
+      ensureActiveAccount,
     }),
-    [isRestoring, user, flashMessage, signIn, replaceOrMergeUser, signOut],
+    [isRestoring, user, flashMessage, signIn, replaceOrMergeUser, signOut, ensureActiveAccount],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

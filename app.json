@@ -1,12 +1,13 @@
 {
   "expo": {
-    "name": "Tu Changa",
+    "name": "YaChanga",
     "slug": "tuchanga-app",
+    "scheme": "tuchanga-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/brand/app-icon-expo-go.png",
+    "icon": "./assets/brand/icon-1024.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/brand/logo-tu-changa-app-icon.png",
       "resizeMode": "contain",
@@ -17,42 +18,65 @@
       "bundleIdentifier": "com.cuervolinkedout.tuchanga",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSLocationWhenInUseUsageDescription": "Tu Changa usa tu ubicación para mostrarte profesionales cuyo radio de cobertura te alcanza.",
-        "NSCameraUsageDescription": "Tu Changa necesita acceso a la cámara para sacar fotos de perfil, oficios y publicaciones.",
-        "NSPhotoLibraryUsageDescription": "Tu Changa necesita acceso a tus fotos para elegir imágenes de perfil, oficios y publicaciones.",
-        "NSPhotoLibraryAddUsageDescription": "Tu Changa necesita permiso para guardar fotos recortadas si elegís esa opción."
+        "NSLocationWhenInUseUsageDescription": "YaChanga usa tu ubicación para mostrarte profesionales cuyo radio de cobertura te alcanza.",
+        "NSCameraUsageDescription": "YaChanga necesita acceso a la cámara para sacar fotos de perfil, oficios y publicaciones.",
+        "NSPhotoLibraryUsageDescription": "YaChanga necesita acceso a tus fotos para elegir imágenes de perfil, oficios y publicaciones.",
+        "NSPhotoLibraryAddUsageDescription": "YaChanga necesita permiso para guardar fotos recortadas si elegís esa opción."
       }
     },
     "android": {
       "package": "com.cuervolinkedout.tuchanga",
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS"
+      ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/brand/app-icon-expo-go.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/brand/adaptive-icon-foreground.png",
+        "backgroundColor": "#9A0F12",
+        "monochromeImage": "./assets/brand/adaptive-icon-foreground.png"
       },
-      "edgeToEdgeEnabled": true,
+      "edgeToEdgeEnabled": false,
       "predictiveBackGestureEnabled": false,
-      "softwareKeyboardLayoutMode": "resize"
+      "androidStatusBar": {
+        "barStyle": "dark-content",
+        "backgroundColor": "#FFFFFF",
+        "translucent": false
+      }
     },
     "web": {
-      "favicon": "./assets/brand/app-icon-expo-go.png"
+      "favicon": "./assets/brand/icon-1024.png"
+    },
+    "notification": {
+      "icon": "./assets/brand/notification-icon.png",
+      "color": "#9A0F12"
     },
     "plugins": [
+      "expo-font",
+      "@react-native-community/datetimepicker",
       [
         "expo-camera",
         {
-          "cameraPermission": "Tu Changa necesita acceso a la cámara para sacar fotos de perfil, oficios y publicaciones."
+          "cameraPermission": "YaChanga necesita acceso a la cámara para sacar fotos de perfil, oficios, publicaciones y el chat."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Tu Changa necesita acceso a tus fotos para publicar trabajos realizados."
+          "photosPermission": "YaChanga necesita acceso a tus fotos para publicar trabajos y enviar imágenes en el chat."
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Tu Changa usa tu ubicación para mostrarte profesionales cuyo radio de cobertura te alcanza."
+          "locationWhenInUsePermission": "YaChanga usa tu ubicación para mostrarte profesionales cuyo radio de cobertura te alcanza."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/brand/notification-icon.png",
+          "color": "#9A0F12",
+          "defaultChannel": "default",
+          "sounds": []
         }
       ]
     ]

@@ -55,7 +55,7 @@ export function TermsAndConditionsModal({ visible, onClose, onAccept }: Props) {
               showsVerticalScrollIndicator={false}
             >
               <Text style={styles.p}>
-                Este documento (los “Términos”) regula el acceso y uso de la aplicación Tu Changa (la
+                Este documento (los “Términos”) regula el acceso y uso de la aplicación YaChanga (la
                 “Plataforma”). Al registrarte, declarás que leíste y comprendiste estos Términos y
                 aceptás quedar vinculado/a por ellos.
               </Text>
@@ -183,7 +183,7 @@ export function TermsAndConditionsModal({ visible, onClose, onAccept }: Props) {
               </View>
 
               <Text style={styles.disclaimer}>
-                Al continuar, confirmás que aceptás estos Términos y que comprendés que Tu Changa es un
+                Al continuar, confirmás que aceptás estos Términos y que comprendés que YaChanga es un
                 intermediario tecnológico.
               </Text>
             </View>

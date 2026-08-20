@@ -50,7 +50,7 @@ export function FavoritesScreen({ navigation }: Props) {
   const empty = !isLoading && data.length === 0;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <SafeAreaView style={styles.safe} edges={['bottom']}>
       {empty ? (
         <View style={styles.empty}>
           <Ionicons name="heart-outline" size={48} color={colors.textSecondary} />

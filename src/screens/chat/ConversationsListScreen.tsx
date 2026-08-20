@@ -1,10 +1,9 @@
-import { useFocusEffect, useScrollToTop } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused, useScrollToTop } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Image,
   Modal,
   Pressable,
   RefreshControl,
@@ -16,20 +15,31 @@ import { ClickableAvatar } from '../../components/common/ClickableAvatar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
+import { useUserMode } from '../../context/UserModeContext';
 import { useUnreadMessages } from '../../context/UnreadMessagesContext';
+import type { ConversationRole } from '../../services/chatApi';
 import { isMessagingAvailable } from '../../config/api';
 import {
   buildChatHeaderSubtitle,
   deleteConversation,
+  dedupeInboxByPeer,
   loadConversations,
   type ApiConversation,
 } from '../../services/messaging';
+import { patchConversationRow, sortConversations } from '../../services/inboxState';
 import { formatConversationTime } from '../../utils/formatDate';
 import type { MessagesStackScreenProps } from '../../navigation/mainTypes';
 import { useAppToast } from '../../components/toast/toast';
 import { useRef } from 'react';
 
 type Props = MessagesStackScreenProps<'ConversationsList'>;
+
+type InboxTab = ConversationRole;
+
+const INBOX_TABS: { id: InboxTab; label: string }[] = [
+  { id: 'trabajador', label: 'Mis Clientes' },
+  { id: 'cliente', label: 'Mis Contrataciones' },
+];
 
 function initialsFromName(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -39,9 +49,9 @@ function initialsFromName(name: string): string {
 }
 
 function firstNameOnly(name: string): string {
-  const s = (name ?? '').trim();
+  const s = (name ?? '').replace(/[\r\n\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (!s) return 'Usuario';
-  const parts = s.split(/\s+/).filter(Boolean);
+  const parts = s.split(' ').filter(Boolean);
   return parts[0] ?? 'Usuario';
 }
 
@@ -59,10 +69,59 @@ function renderTicks(params: { mine: boolean; peerReadAt?: string | null; lastMe
   );
 }
 
+function InboxTabSelector({
+  activeTab,
+  onChange,
+  unreadByTab,
+}: {
+  activeTab: InboxTab;
+  onChange: (tab: InboxTab) => void;
+  unreadByTab: Record<InboxTab, number>;
+}) {
+  return (
+    <View style={styles.tabRow}>
+      {INBOX_TABS.map((tab) => {
+        const active = activeTab === tab.id;
+        const unread = unreadByTab[tab.id] ?? 0;
+        return (
+          <Pressable
+            key={tab.id}
+            onPress={() => onChange(tab.id)}
+            style={({ pressed }) => [
+              styles.tabBtn,
+              active ? styles.tabBtnActive : null,
+              pressed && styles.pressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+            accessibilityLabel={tab.label}
+          >
+            <Text style={[styles.tabBtnText, active ? styles.tabBtnTextActive : null]} numberOfLines={1}>
+              {tab.label}
+            </Text>
+            {unread > 0 ? (
+              <View style={[styles.tabBadge, active ? styles.tabBadgeActive : null]}>
+                <Text style={styles.tabBadgeText}>{unread > 9 ? '9+' : String(unread)}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 export function ConversationsListScreen({ navigation }: Props) {
   const { user } = useAuth();
+  const { isWorker } = useUserMode();
   const insets = useSafeAreaInsets();
-  const { refreshUnread } = useUnreadMessages();
+  const {
+    unreadByConversationId,
+    onInboxEvent,
+    syncInboxLight,
+    reconcileInboxFromServer,
+  } = useUnreadMessages();
+  const isFocused = useIsFocused();
   const toast = useAppToast();
   const [items, setItems] = useState<ApiConversation[]>([]);
   const listRef = useRef<FlatList<ApiConversation> | null>(null);
@@ -71,6 +130,7 @@ export function ConversationsListScreen({ navigation }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ApiConversation | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [activeTab, setActiveTab] = useState<InboxTab>(isWorker ? 'trabajador' : 'cliente');
 
   const load = useCallback(async () => {
     if (!user?.id || !isMessagingAvailable()) {
@@ -80,7 +140,9 @@ export function ConversationsListScreen({ navigation }: Props) {
     const data = await loadConversations(user.id);
     // #7: ocultar conversaciones sin mensajes (solo mostrar hilos reales).
     const filtered = data.filter((c) => Boolean(c.lastMessageAt));
-    const sorted = [...filtered].sort(
+    // Obligatorio en UI: 1 fila por peer (vieja soft-deleted / huérfana nunca compite).
+    const deduped = dedupeInboxByPeer(filtered);
+    const sorted = [...deduped].sort(
       (a, b) =>
         new Date(b.lastMessageAt ?? b.updatedAt).getTime() -
         new Date(a.lastMessageAt ?? a.updatedAt).getTime(),
@@ -103,29 +165,99 @@ export function ConversationsListScreen({ navigation }: Props) {
     };
   }, [load]);
 
+  // Sincronizar badges de fila con estado global (optimista).
+  useEffect(() => {
+    setItems((prev) =>
+      prev.map((c) => ({
+        ...c,
+        unreadCount: unreadByConversationId[c.id] ?? c.unreadCount ?? 0,
+      })),
+    );
+  }, [unreadByConversationId]);
+
+  // Realtime: parche local de preview + unread sin refetch completo.
+  useEffect(() => {
+    if (!user?.id) return;
+    return onInboxEvent((event) => {
+      if (event.type === 'read') {
+        setItems((prev) =>
+          sortConversations(
+            prev.map((c) =>
+              c.id === event.conversationId ? { ...c, unreadCount: 0 } : c,
+            ),
+          ),
+        );
+        return;
+      }
+      setItems((prev) => {
+        const idx = prev.findIndex((c) => c.id === event.conversationId);
+        if (idx < 0) {
+          void load();
+          return prev;
+        }
+        const next = [...prev];
+        next[idx] = patchConversationRow(
+          next[idx],
+          event,
+          user.id,
+          event.conversationUnread,
+        );
+        return dedupeInboxByPeer(sortConversations(next));
+      });
+    });
+  }, [user?.id, onInboxEvent, load]);
+
   useFocusEffect(
     useCallback(() => {
-      // Al volver del chat: recargar lista + contadores (badge se borra solo).
       void load();
-      void refreshUnread();
-    }, [load, refreshUnread]),
+      void syncInboxLight();
+    }, [load, syncInboxLight]),
   );
+
+  /** Respaldo si el WebSocket de Realtime no entrega (común en dev client / redes móviles). */
+  useEffect(() => {
+    if (!isFocused || !user?.id || !isMessagingAvailable()) return;
+    void syncInboxLight();
+    const id = setInterval(() => void syncInboxLight(), 4_000);
+    return () => clearInterval(id);
+  }, [isFocused, user?.id, syncInboxLight]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await load();
-      await refreshUnread();
+      await Promise.all([load(), reconcileInboxFromServer({ force: true })]);
     } finally {
       setRefreshing(false);
     }
-  }, [load, refreshUnread]);
+  }, [load, reconcileInboxFromServer]);
 
-  const emptyHint = useMemo(
-    () =>
-      'Cuando contactes a un profesional desde su perfil, el historial aparecerá aquí. Los mensajes se sincronizan en la nube.',
-    [],
-  );
+  const itemsForTab = useMemo(() => {
+    const tabItems = isWorker ? items.filter((c) => c.myRole === activeTab) : items;
+    // Re-dedupe por si realtime/patches metieron un id viejo del mismo peer.
+    return dedupeInboxByPeer(tabItems);
+  }, [items, activeTab, isWorker]);
+
+  const emptyCopy = useMemo(() => {
+    if (isWorker && activeTab === 'trabajador') {
+      return {
+        title: 'Sin chats con clientes',
+        body: 'No tenés chats activos como trabajador todavía. Cuando un cliente te contacte desde tu perfil, aparecerán aquí.',
+      };
+    }
+    return {
+      title: 'Sin contrataciones',
+      body: 'No tenés chats activos como cliente todavía. Contactá a un profesional desde su perfil para iniciar una conversación.',
+    };
+  }, [activeTab, isWorker]);
+
+  const unreadByTab = useMemo(() => {
+    const counts: Record<InboxTab, number> = { trabajador: 0, cliente: 0 };
+    for (const c of items) {
+      const n = unreadByConversationId[c.id] ?? c.unreadCount ?? 0;
+      if (n > 0) counts[c.myRole] += n;
+    }
+    return counts;
+  }, [items, unreadByConversationId]);
 
   if (!isMessagingAvailable()) {
     return (
@@ -143,7 +275,20 @@ export function ConversationsListScreen({ navigation }: Props) {
     <View style={styles.safe}>
       <View style={[styles.titleBlock, { paddingTop: insets.top + spacing.sm }]}>
         <Text style={styles.title}>Mensajes</Text>
-        <Text style={styles.titleSub}>Historial privado con clientes y profesionales</Text>
+        <Text style={styles.titleSub}>
+          {isWorker
+            ? activeTab === 'trabajador'
+              ? 'Conversaciones donde ofrecés tu servicio'
+              : 'Conversaciones donde contrataste un profesional'
+            : 'Conversaciones con profesionales'}
+        </Text>
+        {isWorker ? (
+          <InboxTabSelector
+            activeTab={activeTab}
+            onChange={setActiveTab}
+            unreadByTab={unreadByTab}
+          />
+        ) : null}
       </View>
       {loading ? (
         <View style={styles.center}>
@@ -152,16 +297,19 @@ export function ConversationsListScreen({ navigation }: Props) {
       ) : (
         <FlatList
           ref={listRef}
-          data={items}
+          data={itemsForTab}
           keyExtractor={(item) => item.id}
+          extraData={activeTab}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
             <View style={styles.emptyWrap}>
-              <Text style={styles.emptyTitle}>Todavía no hay conversaciones</Text>
-              <Text style={styles.empty}>{emptyHint}</Text>
+              <Text style={styles.emptyTitle}>{emptyCopy.title}</Text>
+              <Text style={styles.empty}>{emptyCopy.body}</Text>
             </View>
           }
-          contentContainerStyle={items.length === 0 ? styles.emptyListContent : styles.listContent}
+          contentContainerStyle={
+            itemsForTab.length === 0 ? styles.emptyListContent : styles.listContent
+          }
           renderItem={({ item }) => (
             <Pressable
               style={({ pressed }) => [
@@ -236,10 +384,10 @@ export function ConversationsListScreen({ navigation }: Props) {
       >
         <Pressable style={styles.modalBackdrop} onPress={() => setDeleteTarget(null)}>
           <Pressable style={styles.modalCard} onPress={() => {}}>
-            <Text style={styles.modalTitle}>Quitar chat</Text>
+            <Text style={styles.modalTitle}>Eliminar chat</Text>
             <Text style={styles.modalText}>
               {deleteTarget
-                ? `Se quitará de tu lista el chat con ${firstNameOnly(deleteTarget.otherDisplayName)}. La otra persona lo seguirá viendo.`
+                ? `Se archivará la conversación con ${firstNameOnly(deleteTarget.otherDisplayName)} para ambos. Si vuelven a contactarse, empezarán un chat nuevo sin el historial anterior.`
                 : ''}
             </Text>
             <View style={styles.modalActions}>
@@ -256,12 +404,12 @@ export function ConversationsListScreen({ navigation }: Props) {
                   const target = deleteTarget;
                   if (!target || !user?.id || deleting) return;
                   Alert.alert(
-                    'Quitar chat',
-                    '¿Querés quitar este chat de tu lista? La otra persona lo seguirá viendo.',
+                    'Eliminar chat',
+                    '¿Archivar esta conversación? Ambos dejarán de verla; un nuevo contacto abre un chat en blanco.',
                     [
                       { text: 'Cancelar', style: 'cancel' },
                       {
-                        text: 'Quitar',
+                        text: 'Eliminar',
                         style: 'destructive',
                         onPress: () => {
                           setDeleteTarget(null);
@@ -270,8 +418,8 @@ export function ConversationsListScreen({ navigation }: Props) {
                             try {
                               await deleteConversation(user.id, target.id);
                               setItems((prev) => prev.filter((x) => x.id !== target.id));
-                              await refreshUnread();
-                              toast.success('Chat quitado.', 'Mensajes');
+                              await reconcileInboxFromServer({ force: true });
+                              toast.success('Chat eliminado.', 'Mensajes');
                             } catch (e) {
                               console.error('[delete chat:list]', e);
                               toast.error(
@@ -289,7 +437,7 @@ export function ConversationsListScreen({ navigation }: Props) {
                 }}
                 disabled={deleting}
               >
-                <Text style={styles.modalBtnDangerText}>{deleting ? 'Quitando…' : 'Quitar'}</Text>
+                <Text style={styles.modalBtnDangerText}>{deleting ? 'Eliminando…' : 'Eliminar'}</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -320,6 +468,60 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: colors.textSecondary,
+  },
+  tabRow: {
+    flexDirection: 'row',
+    marginTop: spacing.md,
+    gap: spacing.sm,
+    backgroundColor: colors.imagePlaceholder,
+    borderRadius: 12,
+    padding: 4,
+  },
+  tabBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: spacing.sm,
+    borderRadius: 10,
+  },
+  tabBtnActive: {
+    backgroundColor: colors.surface,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  tabBtnText: {
+    flexShrink: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
+  tabBtnTextActive: {
+    color: colors.text,
+    fontWeight: '800',
+  },
+  tabBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+  },
+  tabBadgeActive: {
+    backgroundColor: colors.primaryDark,
+  },
+  tabBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#fff',
   },
   hint: {
     paddingHorizontal: spacing.lg,

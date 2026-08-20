@@ -122,6 +122,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
   const [locating, setLocating] = useState(false);
   const [locationHint, setLocationHint] = useState<string | null>(null);
   const [devicePos, setDevicePos] = useState<{ lat: number; lng: number } | null>(null);
+  const [locationDetails, setLocationDetails] = useState('');
 
   const [workerCoverageKm, setWorkerCoverageKm] = useState<number | null>(null);
 
@@ -160,6 +161,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
       setAddressQuery('');
     }
     setWorkerCoverageKm(u.worker?.coverageKm ?? null);
+    setLocationDetails(u.locationDetails?.trim() ?? '');
   }, []);
 
   useFocusEffect(
@@ -168,6 +170,13 @@ export function EditRegistrationScreen({ navigation }: Props) {
       setLoadingProfile(true);
       void (async () => {
         try {
+          // En builds Preview/Dev Client, si faltan EXPO_PUBLIC_SUPABASE_* o el proyecto está pausado,
+          // no debemos crashear/cerrar: mostramos el formulario con lo que haya en memoria.
+          if (!isSupabaseConfigured()) {
+            if (user) applyProfile(user);
+            return;
+          }
+
           const u = await fetchCurrentUserProfileFromSupabase();
           if (loadGenRef.current !== g) return;
           if (!u) {
@@ -176,6 +185,15 @@ export function EditRegistrationScreen({ navigation }: Props) {
             return;
           }
           applyProfile(u);
+        } catch (e) {
+          if (loadGenRef.current !== g) return;
+          // En release Android un error JS puede cerrar la app. Bajamos el riesgo con un fallback claro.
+          if (user) applyProfile(user);
+          toast.warning(
+            e instanceof Error ? e.message : 'No pudimos cargar tu perfil. Probá de nuevo.',
+            'Perfil',
+            { durationMs: 5200 },
+          );
         } finally {
           if (loadGenRef.current === g) setLoadingProfile(false);
         }
@@ -300,6 +318,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
           phone: phoneIntl,
           baseLocation: { address: geo.address.trim(), lat: geo.lat, lng: geo.lng },
           avatarUri,
+          locationDetails: locationDetails.trim(),
         });
         const fresh = await fetchCurrentUserProfileFromSupabase();
         if (fresh) {
@@ -601,6 +620,21 @@ export function EditRegistrationScreen({ navigation }: Props) {
               />
             ) : null}
 
+            <Text style={styles.section}>Detalles para ubicar el domicilio</Text>
+            <Text style={styles.hint}>
+              Opcional. Ayudá al profesional a encontrarte (ej. rejas negras, pared azul, timbre).
+            </Text>
+            <TextInput
+              style={styles.locationDetailsInput}
+              value={locationDetails}
+              onChangeText={setLocationDetails}
+              placeholder="Ej. Portón negro, casa con pared celeste"
+              placeholderTextColor={colors.textSecondary}
+              multiline
+              maxLength={300}
+              textAlignVertical="top"
+            />
+
             <AppButton
               title="Guardar cambios"
               onPress={() => void handleSave()}
@@ -617,16 +651,13 @@ export function EditRegistrationScreen({ navigation }: Props) {
             display="default"
             maximumDate={new Date()}
             onChange={(e, selected) => {
-              if (e.type === 'dismissed') {
-                setBirthPickerOpen(false);
-                return;
-              }
-              if (e.type === 'set' && selected) {
-                const iso = birthDateIsoFromDate(selected);
-                setBirthDate(iso);
-                setErrors((p) => ({ ...p, birthDate: undefined }));
-                setBirthPickerOpen(false);
-              }
+              // Cerrar primero: si no, Android vuelve a abrir el diálogo (doble aceptar).
+              setBirthPickerOpen(false);
+              if (e.type === 'dismissed') return;
+              if (!selected) return;
+              setBirthPickerDraft(selected);
+              setBirthDate(birthDateIsoFromDate(selected));
+              setErrors((p) => ({ ...p, birthDate: undefined }));
             }}
           />
         ) : null}
@@ -924,6 +955,18 @@ const styles = StyleSheet.create({
     borderRadius: radii.card,
   },
   geoText: { flex: 1, fontSize: 14, color: colors.text, fontWeight: '600' },
+  locationDetailsInput: {
+    marginTop: spacing.sm,
+    minHeight: 88,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.input,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    fontSize: 15,
+    color: colors.text,
+  },
   submitButton: { marginTop: spacing.xl },
   birthWrap: {
     marginBottom: spacing.md,

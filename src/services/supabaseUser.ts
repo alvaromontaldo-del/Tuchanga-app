@@ -2,6 +2,8 @@ import type { PostgrestError, User } from '@supabase/supabase-js';
 import { File as ExpoFsFile } from 'expo-file-system';
 import { getSupabaseClient } from '../lib/supabase';
 import type { AuthUser, SignUpPayload } from './auth';
+import { normalizeDisplayAddress } from '../utils/formatAddress';
+import { storageOwnerFolder, userAuthDisplayName } from '../utils/storageOwnerFolder';
 
 /**
  * Mapeo registro (app) → Supabase `public.profiles` (vía RPC `insert_profile_with_location`):
@@ -17,7 +19,7 @@ import type { AuthUser, SignUpPayload } from './auth';
  */
 
 const PROFILE_CORE =
-  'id,nombre,apellido,dni,telefono,direccion_texto,avatar_url,coverage_km,created_at,rating_average,review_count,birth_date,professional_description' as const;
+  'id,nombre,apellido,dni,telefono,direccion_texto,detalles_ubicacion,avatar_url,coverage_km,created_at,rating_average,review_count,birth_date,professional_description' as const;
 const PROFILE_WITH_LOC = `${PROFILE_CORE},location` as const;
 const PROFILE_FULL = `${PROFILE_WITH_LOC},bio` as const;
 
@@ -28,6 +30,7 @@ type ProfileRow = {
   dni?: string | null;
   telefono?: string | null;
   direccion_texto?: string | null;
+  detalles_ubicacion?: string | null;
   location?: unknown;
   avatar_url?: string | null;
   coverage_km?: number | null;
@@ -127,15 +130,69 @@ async function readUriAsArrayBuffer(uri: string): Promise<ArrayBuffer> {
     }
     return res.arrayBuffer();
   }
+  // file:// / content:// / ph:// — Expo File primero; fetch como fallback.
   try {
     const file = new ExpoFsFile(uri);
-    return file.arrayBuffer();
+    return await file.arrayBuffer();
   } catch {
+    /* continuar */
+  }
+  try {
     const res = await fetch(uri);
     if (!res.ok) {
       throw new Error('No se pudo leer la imagen (archivo local).');
     }
-    return res.arrayBuffer();
+    return await res.arrayBuffer();
+  } catch {
+    throw new Error(
+      'No se pudo leer la foto. Probá elegirla de nuevo desde Galería o Cámara.',
+    );
+  }
+}
+
+async function normalizeArPhoneE164(phone: string | null | undefined): Promise<string | null> {
+  const digits = String(phone ?? '').replace(/\D/g, '');
+  if (digits.length < 8) return null;
+  if (digits.startsWith('54')) return `+${digits}`;
+  if (digits.startsWith('549')) return `+${digits}`;
+  // Celular AR típico 10 dígitos (11…) o con 0 / 15
+  const local = digits.replace(/^0/, '').replace(/^15/, '');
+  return `+54${local}`;
+}
+
+/** Sincroniza Display name (DNI_Apellido) y teléfono a Auth Users (además de profiles). */
+async function syncAuthUserDirectory(params: {
+  dni?: string | null;
+  lastName?: string | null;
+  phone?: string | null;
+}): Promise<void> {
+  const label = userAuthDisplayName(params);
+  const phoneE164 = await normalizeArPhoneE164(params.phone);
+  if (!label && !phoneE164) return;
+
+  const supabase = getSupabaseClient();
+  const data: Record<string, string> = {};
+  if (label) {
+    data.display_name = label;
+    data.full_name = label;
+    data.name = label;
+  }
+  if (phoneE164) {
+    data.phone = phoneE164;
+  }
+
+  const { error: metaErr } = await supabase.auth.updateUser({ data });
+  if (metaErr) {
+    console.warn('[syncAuthUserDirectory] metadata:', metaErr.message);
+  }
+
+  // Columna Phone del dashboard: no usar updateUser({ phone }) (exige SMS / Phone Auth).
+  // RPC SECURITY DEFINER escribe en auth.users (y el trigger de profiles también lo hace).
+  if (phoneE164) {
+    const { error: phoneErr } = await supabase.rpc('sync_my_auth_phone', { p_phone: phoneE164 });
+    if (phoneErr) {
+      console.warn('[syncAuthUserDirectory] sync_my_auth_phone:', phoneErr.message);
+    }
   }
 }
 
@@ -147,13 +204,39 @@ async function uploadImageFromUri(
 ): Promise<string> {
   const supabase = getSupabaseClient();
   const buf = await readUriAsArrayBuffer(uri);
-  const { error } = await supabase.storage.from(bucket).upload(path, buf, {
+  // Uint8Array es el formato más fiable con supabase-js en React Native.
+  const bytes = new Uint8Array(buf);
+  if (!bytes.byteLength) {
+    throw new Error('La imagen quedó vacía. Elegí otra foto.');
+  }
+  const { error } = await supabase.storage.from(bucket).upload(path, bytes, {
     upsert: true,
     contentType,
+    cacheControl: '3600',
   });
   if (error) throw error;
   const { data } = supabase.storage.from(bucket).getPublicUrl(path);
   return data.publicUrl;
+}
+
+/** Carpeta Storage `{dni}_{apellido}` (o UUID si faltan datos). */
+async function resolveStorageOwnerFolder(
+  userId: string,
+  overrides?: { dni?: string | null; lastName?: string | null },
+): Promise<string> {
+  if (overrides?.dni != null || overrides?.lastName != null) {
+    return storageOwnerFolder({
+      userId,
+      dni: overrides.dni,
+      lastName: overrides.lastName,
+    });
+  }
+  const profile = await fetchProfileRowForUser(userId);
+  return storageOwnerFolder({
+    userId,
+    dni: profile?.dni,
+    lastName: profile?.apellido,
+  });
 }
 
 type InsertProfileRpcBase = {
@@ -173,6 +256,17 @@ function isProfileDuplicateError(err: PostgrestError): boolean {
   return (
     err.code === '23505' || /duplicate key|unique constraint/i.test(msg)
   );
+}
+
+function duplicateIdentityMessage(err: PostgrestError): string {
+  const msg = (err.message ?? '').toLowerCase();
+  if (msg.includes('dni') || msg.includes('profiles_dni')) {
+    return 'No se pudo crear la cuenta: este DNI ya está registrado.';
+  }
+  if (msg.includes('telefono') || msg.includes('phone') || msg.includes('celular')) {
+    return 'No se pudo crear la cuenta: este celular ya está registrado.';
+  }
+  return 'No se pudo crear la cuenta: este correo o DNI ya está registrado.';
 }
 
 function shouldRetryInsertProfileWithoutBio(err: PostgrestError): boolean {
@@ -198,13 +292,17 @@ async function insertProfileWithLocationRpc(
   const withBio = { ...base, p_bio: bioTrimmed };
   let { error } = await supabase.rpc('insert_profile_with_location', withBio);
   if (!error) return;
-  if (isProfileDuplicateError(error)) return;
+  if (isProfileDuplicateError(error)) {
+    throw new Error(duplicateIdentityMessage(error));
+  }
   if (!shouldRetryInsertProfileWithoutBio(error)) {
     throw error;
   }
   ({ error } = await supabase.rpc('insert_profile_with_location', base));
   if (!error) return;
-  if (isProfileDuplicateError(error)) return;
+  if (isProfileDuplicateError(error)) {
+    throw new Error(duplicateIdentityMessage(error));
+  }
   throw error;
 }
 
@@ -230,6 +328,8 @@ export type ProfileRegistrationUpdatePayload = {
   bio?: string;
   /** YYYY-MM-DD; si se omite, no modifica birth_date. Usá '' para limpiar. */
   birthDate?: string;
+  /** Referencias opcionales para ubicar el domicilio. Usá '' para limpiar. */
+  locationDetails?: string;
 };
 
 async function updateProfileRegistrationRpc(
@@ -258,46 +358,222 @@ export async function updateProfileRegistrationInSupabase(
   if (!user?.id) throw new Error('No hay sesión activa.');
 
   let avatarUrl = payload.avatarUri.trim();
-  if (avatarUrl && !/^https?:\/\//i.test(avatarUrl)) {
+  const isLocalAvatar = Boolean(avatarUrl) && !/^https?:\/\//i.test(avatarUrl);
+
+  if (isLocalAvatar) {
     const mime = guessMime(avatarUrl);
     const ext = mime.includes('png') ? 'png' : 'jpg';
-    const avatarPath = `${user.id}/avatar-${Date.now()}.${ext}`;
-    avatarUrl = await uploadImageFromUri('avatars', avatarPath, avatarUrl, mime);
+    try {
+      avatarUrl = await uploadImageFromUri(
+        'avatars',
+        `${user.id}/avatar-${Date.now()}.${ext}`,
+        avatarUrl,
+        mime,
+      );
+      const { error: avErr } = await supabase.rpc('set_my_avatar_url', { p_url: avatarUrl });
+      if (avErr) {
+        console.warn('[updateProfileRegistration] set_my_avatar_url:', avErr.message);
+      }
+    } catch (e) {
+      // No bloquear el guardado de dirección/datos por RLS de Storage.
+      const { data: existing } = await supabase
+        .from('profiles')
+        .select('avatar_url')
+        .eq('id', user.id)
+        .maybeSingle();
+      const prev = String((existing as { avatar_url?: string | null } | null)?.avatar_url ?? '').trim();
+      if (prev) {
+        console.warn('[updateProfileRegistration] avatar omitido (Storage RLS), se mantiene el actual');
+        avatarUrl = prev;
+      } else {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`No se pudo subir la foto de perfil (${msg}).`);
+      }
+    }
   }
 
   const lat = Number.isFinite(payload.baseLocation.lat) ? payload.baseLocation.lat : 0;
   const lng = Number.isFinite(payload.baseLocation.lng) ? payload.baseLocation.lng : 0;
 
-  const base: UpdateProfileRpcBase = {
+  const touchBirth = payload.birthDate !== undefined;
+  const touchDetalles = payload.locationDetails !== undefined;
+
+  // Preferir RPC full (dirección + detalles + fecha en un solo SECURITY DEFINER).
+  const { error: fullErr } = await supabase.rpc('update_profile_registration_full', {
     p_nombre: payload.firstName.trim(),
     p_apellido: payload.lastName.trim(),
     p_dni: payload.dni.trim(),
     p_telefono: payload.phone.trim(),
-    p_direccion: payload.baseLocation.address.trim(),
+    p_direccion: normalizeDisplayAddress(payload.baseLocation.address),
     p_lat: lat,
     p_lng: lng,
     p_avatar_url: avatarUrl,
-  };
+    p_detalles_ubicacion: touchDetalles ? (payload.locationDetails?.trim() ?? '') : null,
+    p_birth_date: touchBirth ? (payload.birthDate?.trim() ?? '') : null,
+    p_touch_detalles: touchDetalles,
+    p_touch_birth_date: touchBirth,
+  });
 
-  const bioToStore =
-    payload.bio !== undefined ? payload.bio.trim() : undefined;
-  if (bioToStore !== undefined) {
-    await updateProfileRegistrationRpc(supabase, base, bioToStore);
-  } else {
-    const { error } = await supabase.rpc('update_profile_registration_no_bio', base);
-    if (error) throw error;
+  const fullMissing =
+    !!fullErr &&
+    /could not find the function|pgrst202|does not exist|404/i.test(fullErr.message ?? '');
+
+  if (fullErr && !fullMissing) {
+    throw new Error(`No se pudo guardar el perfil (${fullErr.message}).`);
   }
 
-  // Campos no cubiertos por RPC legacy: birth_date.
-  if (payload.birthDate !== undefined) {
-    const birth = payload.birthDate?.trim() || null;
-    const { error: be } = await supabase
+  if (fullMissing) {
+    // Fallback: RPC legacy + extras (BD sin migración nueva).
+    const base: UpdateProfileRpcBase = {
+      p_nombre: payload.firstName.trim(),
+      p_apellido: payload.lastName.trim(),
+      p_dni: payload.dni.trim(),
+      p_telefono: payload.phone.trim(),
+      p_direccion: normalizeDisplayAddress(payload.baseLocation.address),
+      p_lat: lat,
+      p_lng: lng,
+      p_avatar_url: avatarUrl,
+    };
+
+    const bioToStore =
+      payload.bio !== undefined ? payload.bio.trim() : undefined;
+    try {
+      if (bioToStore !== undefined) {
+        await updateProfileRegistrationRpc(supabase, base, bioToStore);
+      } else {
+        const { error } = await supabase.rpc('update_profile_registration_no_bio', base);
+        if (error) throw error;
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`No se pudo guardar el perfil (${msg}).`);
+    }
+
+    if (touchBirth || touchDetalles) {
+      const { error: extrasErr } = await supabase.rpc('update_profile_extras', {
+        p_birth_date: touchBirth ? (payload.birthDate?.trim() ?? '') : null,
+        p_detalles_ubicacion: touchDetalles ? (payload.locationDetails?.trim() ?? '') : null,
+        p_touch_birth_date: touchBirth,
+        p_touch_detalles: touchDetalles,
+      });
+      if (extrasErr) {
+        throw new Error(
+          `Se guardó la dirección, pero no los detalles/fecha (${extrasErr.message}). Ejecutá el SQL de update_profile_registration_full en Supabase.`,
+        );
+      }
+    }
+  }
+
+  // Bio opcional (solo si usamos full RPC; en legacy ya se mandó si venía).
+  if (!fullMissing && !fullErr && payload.bio !== undefined) {
+    const { error: bioErr } = await supabase
       .from('profiles')
-      .update({ birth_date: birth })
+      .update({ bio: payload.bio.trim() })
       .eq('id', user.id);
-    if (be) throw be;
+    if (bioErr) {
+      console.warn('[updateProfileRegistration] bio omitida:', bioErr.message);
+    }
+  }
+
+  try {
+    await syncAuthUserDirectory({
+      dni: payload.dni,
+      lastName: payload.lastName,
+      phone: payload.phone,
+    });
+  } catch (e) {
+    console.warn('[updateProfileRegistration] sync Auth omitido:', e);
   }
   return avatarUrl;
+}
+
+/**
+ * Sube una foto local al bucket `avatars` y actualiza `profiles.avatar_url`
+ * (RPC `set_my_avatar_url`). Devuelve la URL pública.
+ */
+export async function updateMyAvatarFromUri(localUri: string): Promise<string> {
+  const supabase = getSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.id) throw new Error('No hay sesión activa.');
+
+  const uri = localUri.trim();
+  if (!uri) throw new Error('Elegí una foto de perfil.');
+
+  if (/^https?:\/\//i.test(uri)) {
+    const { error: avErr } = await supabase.rpc('set_my_avatar_url', { p_url: uri });
+    if (avErr) throw new Error(avErr.message || 'No se pudo guardar la foto.');
+    return uri;
+  }
+
+  const mime = guessMime(uri);
+  const ext = mime.includes('png') ? 'png' : 'jpg';
+  const publicUrl = await uploadImageFromUri(
+    'avatars',
+    `${user.id}/avatar-${Date.now()}.${ext}`,
+    uri,
+    mime,
+  );
+
+  const { error: avErr } = await supabase.rpc('set_my_avatar_url', { p_url: publicUrl });
+  if (avErr) {
+    const { error: upErr } = await supabase
+      .from('profiles')
+      .update({ avatar_url: publicUrl })
+      .eq('id', user.id);
+    if (upErr) {
+      throw new Error(
+        `La foto se subió pero no quedó en el perfil (${avErr.message}). Ejecutá el SQL set_my_avatar_url en Supabase.`,
+      );
+    }
+  }
+  return publicUrl;
+}
+
+/**
+ * Lat/lng del domicilio registrado en `profiles.location` (para obra / materiales).
+ * Devuelve null si no hay punto usable.
+ */
+export async function fetchProfileBaseLocation(
+  userId: string,
+): Promise<{ lat: number; lng: number } | null> {
+  const profile = await fetchProfileRowForUser(userId);
+  if (!profile?.location) return null;
+  const { lat, lng } = parseGeographyPoint(profile.location);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat === 0 && lng === 0) return null;
+  return { lat, lng };
+}
+
+/**
+ * Domicilio del cliente: texto (`direccion_texto`) + coordenadas si existen.
+ * Usado como default editable en solicitudes de materiales.
+ */
+export async function fetchProfileDeliveryAddress(userId: string): Promise<{
+  address: string;
+  lat: number | null;
+  lng: number | null;
+} | null> {
+  const profile = await fetchProfileRowForUser(userId);
+  if (!profile) return null;
+
+  const address = normalizeDisplayAddress(profile.direccion_texto ?? '').trim();
+  let lat: number | null = null;
+  let lng: number | null = null;
+  if (profile.location) {
+    const parsed = parseGeographyPoint(profile.location);
+    if (
+      Number.isFinite(parsed.lat) &&
+      Number.isFinite(parsed.lng) &&
+      !(parsed.lat === 0 && parsed.lng === 0)
+    ) {
+      lat = parsed.lat;
+      lng = parsed.lng;
+    }
+  }
+  if (!address && lat == null) return null;
+  return { address, lat, lng };
 }
 
 export async function fetchAuthUserFromSupabase(user: User): Promise<AuthUser> {
@@ -405,11 +681,15 @@ export async function fetchAuthUserFromSupabase(user: User): Promise<AuthUser> {
     avatarUri: profile.avatar_url ?? undefined,
     phone: profile.telefono?.trim() || undefined,
     baseLocation: {
-      address: (profile.direccion_texto ?? '').trim(),
+      address: normalizeDisplayAddress(profile.direccion_texto ?? ''),
       lat,
       lng,
     },
-    location: profile.direccion_texto?.trim() || undefined,
+    location: normalizeDisplayAddress(profile.direccion_texto) || undefined,
+    locationDetails:
+      typeof profile.detalles_ubicacion === 'string' && profile.detalles_ubicacion.trim()
+        ? profile.detalles_ubicacion.trim()
+        : undefined,
     profileCreatedAt:
       typeof profile.created_at === 'string' ? profile.created_at : undefined,
     bio: resolvedBio,
@@ -445,32 +725,114 @@ export async function persistSignUpToSupabase(
   userId: string,
 ): Promise<void> {
   const supabase = getSupabaseClient();
-  const mime = guessMime(payload.avatarUri);
-  const avatarPath = `${userId}/avatar`;
-
-  let avatarUrl = '';
-  try {
-    avatarUrl = await uploadImageFromUri('avatars', avatarPath, payload.avatarUri, mime);
-  } catch (e) {
-    console.warn('[persistSignUpToSupabase] avatar upload omitido:', e);
-  }
+  // Carpeta UUID: coincide con las políticas Storage estándar (avatars/{uid}/...).
+  const folder = userId;
 
   const lat = Number.isFinite(payload.baseLocation.lat) ? payload.baseLocation.lat : 0;
   const lng = Number.isFinite(payload.baseLocation.lng) ? payload.baseLocation.lng : 0;
 
+  const existing = await fetchProfileRowForUser(userId);
+
+  // Si ya hay fila (trigger / confirmación email / reintento), completar con UPDATE
+  // en lugar de insertar (evita perder birth_date/avatar al descartar el pending).
+  if (existing) {
+    await updateProfileRegistrationInSupabase({
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+      dni: payload.dni,
+      phone: payload.phone,
+      baseLocation: payload.baseLocation,
+      avatarUri: payload.avatarUri,
+      bio: payload.bio,
+      birthDate: payload.birthDate?.trim() ?? '',
+      locationDetails: payload.locationDetails?.trim() ?? '',
+    });
+
+    if ((payload.bio ?? '').trim()) {
+      await supabase
+        .from('profiles')
+        .update({ professional_description: (payload.bio ?? '').trim() })
+        .eq('id', userId);
+    }
+
+    if (payload.offerServices && payload.trades?.length) {
+      await persistSignUpTrades(supabase, folder, userId, payload);
+    }
+    return;
+  }
+
+  // Perfil primero (sin avatar); después subimos la foto y actualizamos la URL.
   const rpcBase: InsertProfileRpcBase = {
     p_nombre: payload.firstName.trim(),
     p_apellido: payload.lastName.trim(),
     p_dni: payload.dni.trim(),
     p_telefono: payload.phone.trim(),
-    p_direccion: payload.baseLocation.address.trim(),
+    p_direccion: normalizeDisplayAddress(payload.baseLocation.address),
     p_lat: lat,
     p_lng: lng,
-    p_avatar_url: avatarUrl,
+    p_avatar_url: '',
     p_coverage_km: payload.offerServices ? Math.floor(Number(payload.coverageKm) || 0) : null,
   };
 
-  await insertProfileWithLocationRpc(supabase, rpcBase, (payload.bio ?? '').trim());
+  try {
+    await insertProfileWithLocationRpc(supabase, rpcBase, (payload.bio ?? '').trim());
+  } catch (e) {
+    // Carrera con trigger: el perfil apareció entre el SELECT y el INSERT.
+    if (await fetchProfileRowForUser(userId)) {
+      await updateProfileRegistrationInSupabase({
+        firstName: payload.firstName,
+        lastName: payload.lastName,
+        dni: payload.dni,
+        phone: payload.phone,
+        baseLocation: payload.baseLocation,
+        avatarUri: payload.avatarUri,
+        bio: payload.bio,
+        birthDate: payload.birthDate?.trim() ?? '',
+        locationDetails: payload.locationDetails?.trim() ?? '',
+      });
+      if (payload.offerServices && payload.trades?.length) {
+        await persistSignUpTrades(supabase, folder, userId, payload);
+      }
+      return;
+    }
+    throw e;
+  }
+
+  try {
+    await syncAuthUserDirectory({
+      dni: payload.dni,
+      lastName: payload.lastName,
+      phone: payload.phone,
+    });
+  } catch {
+    /* no bloquear el alta */
+  }
+
+  let avatarUrl = '';
+  try {
+    const mime = guessMime(payload.avatarUri);
+    const avatarPath = `${folder}/avatar-${Date.now()}.jpg`;
+    avatarUrl = await uploadImageFromUri('avatars', avatarPath, payload.avatarUri, mime);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`No se pudo subir la foto de perfil (${msg}). Revisá permisos de Storage.`);
+  }
+
+  // Actualizar avatar vía RPC SECURITY DEFINER (evita RLS en UPDATE directo).
+  {
+    const { error: avErr } = await supabase.rpc('set_my_avatar_url', { p_url: avatarUrl });
+    if (avErr) {
+      const { error: upErr } = await supabase
+        .from('profiles')
+        .update({ avatar_url: avatarUrl })
+        .eq('id', userId);
+      if (upErr) {
+        throw new Error(
+          `La foto se subió pero no quedó en el perfil (${upErr.message}). Ejecutá el SQL set_my_avatar_url en Supabase.`,
+        );
+      }
+    }
+  }
 
   // Profesional: persistimos descripción profesional separada.
   if ((payload.bio ?? '').trim()) {
@@ -480,78 +842,119 @@ export async function persistSignUpToSupabase(
       .eq('id', userId);
   }
 
-  // Fecha de nacimiento.
-  if (payload.birthDate?.trim()) {
-    await supabase.from('profiles').update({ birth_date: payload.birthDate.trim() }).eq('id', userId);
+  // Fecha / detalles: preferir RPC extras (SECURITY DEFINER).
+  const birth = payload.birthDate?.trim() ?? '';
+  const detalles = payload.locationDetails?.trim() ?? '';
+  if (birth || detalles) {
+    const { error: exErr } = await supabase.rpc('update_profile_extras', {
+      p_birth_date: birth || null,
+      p_detalles_ubicacion: detalles || null,
+      p_touch_birth_date: Boolean(birth),
+      p_touch_detalles: Boolean(detalles),
+    });
+    if (exErr) {
+      if (birth) {
+        const { error: bdErr } = await supabase
+          .from('profiles')
+          .update({ birth_date: birth })
+          .eq('id', userId);
+        if (bdErr) {
+          throw new Error(
+            `No se pudo guardar la fecha de nacimiento (${bdErr.message}). Ejecutá update_profile_extras en Supabase.`,
+          );
+        }
+      }
+      if (detalles) {
+        const { error: detErr } = await supabase
+          .from('profiles')
+          .update({ detalles_ubicacion: detalles })
+          .eq('id', userId);
+        if (detErr) {
+          console.warn('[persistSignUpToSupabase] detalles_ubicacion:', detErr.message);
+        }
+      }
+    }
   }
 
   if (payload.offerServices && payload.trades?.length) {
-    // Versionado por guardado: evita cache de URLs cuando se reemplazan imágenes.
-    const version = `v_${Date.now()}`;
-    const rows: Array<{
-      user_id: string;
-      nombre_oficio: string;
-      descripcion: string;
-      foto_url: string | null;
-      es_principal: boolean;
-      photo_urls: string[];
-    }> = [];
+    await persistSignUpTrades(supabase, folder, userId, payload);
+  }
+}
 
-    for (const t of payload.trades) {
-      const uploads: string[] = [];
-      const sources = [
-        ...((t.proofImageUris ?? []).map((u) => (u ?? '').trim()).filter(Boolean).slice(0, 5)),
-        ...((t.proofImageUri ?? '').trim() ? [(t.proofImageUri ?? '').trim()] : []),
-      ]
-        .filter(Boolean)
-        // evitamos duplicados triviales
-        .filter((u, i, arr) => arr.indexOf(u) === i)
-        .slice(0, 5);
+async function persistSignUpTrades(
+  supabase: ReturnType<typeof getSupabaseClient>,
+  folder: string,
+  userId: string,
+  payload: Omit<SignUpPayload, 'password' | 'email'>,
+): Promise<void> {
+  if (!payload.trades?.length) return;
 
-      for (let p = 0; p < sources.length; p++) {
-        const uri = sources[p]!;
-        try {
-          if (/^https?:\/\//i.test(uri)) {
-            uploads.push(uri);
-          } else {
-            const ext = uri.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
-            const path = `${userId}/jobs/${t.id}/${version}/${p}.${ext}`;
-            uploads.push(await uploadImageFromUri('job-photos', path, uri, guessMime(uri)));
-          }
-        } catch (e) {
-          console.warn('[persistSignUpToSupabase] foto oficio omitida:', t.name, e);
+  // Versionado por guardado: evita cache de URLs cuando se reemplazan imágenes.
+  const version = `v_${Date.now()}`;
+  const storageFolder = folder;
+  const rows: Array<{
+    user_id: string;
+    nombre_oficio: string;
+    descripcion: string;
+    foto_url: string | null;
+    es_principal: boolean;
+    photo_urls: string[];
+  }> = [];
+
+  for (const t of payload.trades) {
+    const uploads: string[] = [];
+    const sources = [
+      ...((t.proofImageUris ?? []).map((u) => (u ?? '').trim()).filter(Boolean).slice(0, 5)),
+      ...((t.proofImageUri ?? '').trim() ? [(t.proofImageUri ?? '').trim()] : []),
+    ]
+      .filter(Boolean)
+      // evitamos duplicados triviales
+      .filter((u, i, arr) => arr.indexOf(u) === i)
+      .slice(0, 5);
+
+    for (let p = 0; p < sources.length; p++) {
+      const uri = sources[p]!;
+      try {
+        if (/^https?:\/\//i.test(uri)) {
+          uploads.push(uri);
+        } else {
+          const ext = uri.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+          const path = `${storageFolder}/jobs/${t.id}/${version}/${p}.${ext}`;
+          uploads.push(await uploadImageFromUri('job-photos', path, uri, guessMime(uri)));
         }
+      } catch (e) {
+        console.warn('[persistSignUpToSupabase] foto oficio omitida:', t.name, e);
       }
-
-      const fotoUrl = uploads[0] ?? null;
-      rows.push({
-        user_id: userId,
-        nombre_oficio: t.name.trim(),
-        descripcion: t.details.trim(),
-        foto_url: fotoUrl,
-        es_principal: t.id === payload.primaryTradeId,
-        photo_urls: uploads.slice(0, 5),
-      });
     }
 
-    // Intento moderno (photo_urls). Si el schema no lo tiene aún, caemos a legacy.
-    const { error: je } = await supabase.from('jobs').insert(rows);
-    if (!je) return;
-
-    const msg = `${je.message ?? ''} ${(je as { hint?: string }).hint ?? ''}`.toLowerCase();
-    const missingPhotos = msg.includes('photo_urls') && msg.includes('column');
-    if (!missingPhotos) throw je;
-
-    const legacyRows = rows.map((r) => ({
-      user_id: r.user_id,
-      nombre_oficio: r.nombre_oficio,
-      descripcion: r.descripcion,
-      foto_url: r.foto_url,
-      es_principal: r.es_principal,
-    }));
-    const { error: je2 } = await supabase.from('jobs').insert(legacyRows);
-    if (je2) throw je2;
+    const fotoUrl = uploads[0] ?? null;
+    rows.push({
+      user_id: userId,
+      nombre_oficio: t.name.trim(),
+      descripcion: t.details.trim(),
+      foto_url: fotoUrl,
+      es_principal: t.id === payload.primaryTradeId,
+      photo_urls: uploads.slice(0, 5),
+    });
   }
+
+  // Intento moderno (photo_urls). Si el schema no lo tiene aún, caemos a legacy.
+  const { error: je } = await supabase.from('jobs').insert(rows);
+  if (!je) return;
+
+  const msg = `${je.message ?? ''} ${(je as { hint?: string }).hint ?? ''}`.toLowerCase();
+  const missingPhotos = msg.includes('photo_urls') && msg.includes('column');
+  if (!missingPhotos) throw je;
+
+  const legacyRows = rows.map((r) => ({
+    user_id: r.user_id,
+    nombre_oficio: r.nombre_oficio,
+    descripcion: r.descripcion,
+    foto_url: r.foto_url,
+    es_principal: r.es_principal,
+  }));
+  const { error: je2 } = await supabase.from('jobs').insert(legacyRows);
+  if (je2) throw je2;
 }
 
 export async function deactivateProfessionalProfileInSupabase(): Promise<void> {
@@ -582,7 +985,7 @@ export async function persistWorkerGeoToSupabase(
   const supabase = getSupabaseClient();
   const km = Math.max(1, Math.min(300, Math.floor(Number(coverageKm) || 0)));
   const { error } = await supabase.rpc('update_profile_geo_coverage', {
-    p_direccion: baseLocation.address.trim(),
+    p_direccion: normalizeDisplayAddress(baseLocation.address),
     p_lat: baseLocation.lat,
     p_lng: baseLocation.lng,
     p_coverage_km: km,
@@ -603,6 +1006,7 @@ export async function persistWorkerJobsToSupabase(params: {
   }>;
 }): Promise<void> {
   const supabase = getSupabaseClient();
+  const storageFolder = await resolveStorageOwnerFolder(params.userId);
 
   const trimmed = (params.trades ?? [])
     .map((t) => ({
@@ -666,7 +1070,7 @@ export async function persistWorkerJobsToSupabase(params: {
             uploads.push(uri);
           } else {
             const ext = uri.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
-            const path = `${params.userId}/jobs/${t.id || `job_${idx}`}/${version}/${p}.${ext}`;
+            const path = `${storageFolder}/jobs/${t.id || `job_${idx}`}/${version}/${p}.${ext}`;
             uploads.push(await uploadImageFromUri('job-photos', path, uri, guessMime(uri)));
           }
         } catch (e) {

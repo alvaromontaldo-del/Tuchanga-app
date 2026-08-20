@@ -1,0 +1,25 @@
+# Supabase local / deploy — configuración Edge Functions
+
+[functions.mp_webhook]
+verify_jwt = false
+
+[functions.mp_crear_preferencia]
+verify_jwt = false
+
+[functions.mp_confirmar_sena]
+verify_jwt = false
+
+[functions.mp_retorno]
+verify_jwt = false
+
+[functions.push_on_message]
+verify_jwt = false
+
+[functions.push_on_review]
+verify_jwt = false
+
+[functions.push_on_store_board]
+verify_jwt = false
+
+[functions.cleanup_chat_images]
+verify_jwt = false

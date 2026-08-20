@@ -11,7 +11,7 @@ import { INITIAL_FEED_POSTS } from '../data/mockFeed';
 import type { FeedPost } from '../types/feed';
 import { normalizePostImageUrls } from '../types/feed';
 import { isSupabaseConfigured } from '../config/supabase';
-import { fetchFeedPostsFromSupabase } from '../services/supabasePosts';
+import { fetchFeedPostsFromSupabase, togglePostLikeInSupabase } from '../services/supabasePosts';
 
 type FeedContextValue = {
   posts: FeedPost[];
@@ -19,6 +19,12 @@ type FeedContextValue = {
   addPost: (post: FeedPost) => void;
   removePostLocal: (postId: string) => void;
   refresh: () => Promise<void>;
+  /** Actualiza estrellas en todas las publicaciones de un profesional (p. ej. tras una reseña). */
+  updateWorkerRatings: (
+    workerId: string,
+    ratingAverage: number,
+    reviewCount: number,
+  ) => void;
 };
 
 const FeedContext = createContext<FeedContextValue | null>(null);
@@ -31,27 +37,22 @@ export function FeedProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     if (!isSupabaseConfigured()) return;
     const rows = await fetchFeedPostsFromSupabase({ limit: 60 });
-    setPosts((prev) => {
-      // conservar likedByMe/likeCount local si ya existían
-      const byId = new Map(prev.map((p) => [p.id, p]));
-      return rows.map((r) => {
-        const existing = byId.get(r.id);
-        return {
-          id: r.id,
-          workerId: r.workerId,
-          workerFirstName: r.workerFirstName,
-          workerAvatarUrl: r.workerAvatarUrl,
-          workerRatingAverage: r.workerRatingAverage ?? existing?.workerRatingAverage,
-          workerReviewCount: r.workerReviewCount ?? existing?.workerReviewCount,
-          trade: r.trade,
-          workImageUrls: normalizePostImageUrls(r.workImageUrls),
-          description: r.description,
-          createdAt: r.createdAt,
-          likeCount: existing?.likeCount ?? 0,
-          likedByMe: existing?.likedByMe ?? false,
-        };
-      });
-    });
+    setPosts(
+      rows.map((r) => ({
+        id: r.id,
+        workerId: r.workerId,
+        workerFirstName: r.workerFirstName,
+        workerAvatarUrl: r.workerAvatarUrl,
+        workerRatingAverage: r.workerRatingAverage,
+        workerReviewCount: r.workerReviewCount,
+        trade: r.trade,
+        workImageUrls: normalizePostImageUrls(r.workImageUrls),
+        description: r.description,
+        createdAt: r.createdAt,
+        likeCount: r.likeCount,
+        likedByMe: r.likedByMe,
+      })),
+    );
   }, []);
 
   useEffect(() => {
@@ -59,17 +60,35 @@ export function FeedProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const toggleLike = useCallback((postId: string) => {
-    setPosts((prev) =>
-      prev.map((p) => {
-        if (p.id !== postId) return p;
-        const liked = !p.likedByMe;
-        return {
-          ...p,
-          likedByMe: liked,
-          likeCount: Math.max(0, p.likeCount + (liked ? 1 : -1)),
-        };
-      }),
-    );
+    let snapshot: FeedPost | undefined;
+    setPosts((prev) => {
+      const current = prev.find((p) => p.id === postId);
+      if (!current) return prev;
+      snapshot = current;
+      const liked = !current.likedByMe;
+      return prev.map((p) =>
+        p.id === postId
+          ? {
+              ...p,
+              likedByMe: liked,
+              likeCount: Math.max(0, p.likeCount + (liked ? 1 : -1)),
+            }
+          : p,
+      );
+    });
+
+    if (!isSupabaseConfigured()) return;
+
+    void togglePostLikeInSupabase(postId)
+      .then(({ liked, likeCount }) => {
+        setPosts((prev) =>
+          prev.map((p) => (p.id === postId ? { ...p, likedByMe: liked, likeCount } : p)),
+        );
+      })
+      .catch(() => {
+        if (!snapshot) return;
+        setPosts((prev) => prev.map((p) => (p.id === postId ? { ...snapshot as FeedPost } : p)));
+      });
   }, []);
 
   const addPost = useCallback((post: FeedPost) => {
@@ -84,9 +103,24 @@ export function FeedProvider({ children }: { children: ReactNode }) {
     setPosts((prev) => prev.filter((p) => p.id !== postId));
   }, []);
 
+  const updateWorkerRatings = useCallback(
+    (workerId: string, ratingAverage: number, reviewCount: number) => {
+      const avg = Math.max(0, Math.min(5, Number(ratingAverage) || 0));
+      const count = Math.max(0, Math.floor(Number(reviewCount) || 0));
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.workerId === workerId
+            ? { ...p, workerRatingAverage: avg, workerReviewCount: count }
+            : p,
+        ),
+      );
+    },
+    [],
+  );
+
   const value = useMemo(
-    () => ({ posts, toggleLike, addPost, removePostLocal, refresh }),
-    [posts, toggleLike, addPost, removePostLocal, refresh],
+    () => ({ posts, toggleLike, addPost, removePostLocal, refresh, updateWorkerRatings }),
+    [posts, toggleLike, addPost, removePostLocal, refresh, updateWorkerRatings],
   );
 
   return <FeedContext.Provider value={value}>{children}</FeedContext.Provider>;

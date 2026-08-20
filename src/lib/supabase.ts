@@ -73,6 +73,9 @@ export function getSupabaseClient(): SupabaseClient {
       global: {
         fetch: supabaseFetch,
       },
+      realtime: {
+        params: { eventsPerSecond: 20 },
+      },
       auth: {
         storage: Platform.OS === 'web' ? webStorage : AsyncStorage,
         autoRefreshToken: true,

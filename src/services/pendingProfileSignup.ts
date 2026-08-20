@@ -31,17 +31,10 @@ async function loadPending(): Promise<Stored | null> {
   }
 }
 
-async function profileRowExists(userId: string): Promise<boolean> {
-  const sb = getSupabaseClient();
-  const { data, error } = await sb.from('profiles').select('id').eq('id', userId).maybeSingle();
-  if (error) return false;
-  return Boolean(data);
-}
-
 let applyChain: Promise<void> = Promise.resolve();
 
 /**
- * Si el registro quedó guardado (p. ej. confirmación por email sin sesión), crea el perfil al tener sesión.
+ * Si el registro quedó guardado (p. ej. confirmación por email sin sesión), crea/completa el perfil al tener sesión.
  */
 export function tryApplyPendingProfileSignup(userId: string): Promise<void> {
   applyChain = applyChain.then(() => applyPendingInternal(userId)).catch(() => undefined);
@@ -54,17 +47,15 @@ async function applyPendingInternal(userId: string): Promise<void> {
   const pending = await loadPending();
   if (!pending || pending.userId !== userId) return;
 
-  if (await profileRowExists(userId)) {
-    await clearPendingProfileSignup();
-    return;
-  }
-
   try {
+    // persistSignUpToSupabase ya maneja perfil existente (trigger / alta parcial)
+    // y completa birth_date + avatar en vez de descartar el pending.
     await persistSignUpToSupabase(pending.profile, userId);
     await clearPendingProfileSignup();
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (/duplicate|unique|23505|already exists/i.test(msg)) {
+    // Solo limpiar si el conflicto es de identidad de OTRO usuario; si falla red/Storage, reintentar luego.
+    if (/no se pudo crear la cuenta|ya está registrado|correo o dni/i.test(msg)) {
       await clearPendingProfileSignup();
     }
   }

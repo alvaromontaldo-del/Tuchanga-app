@@ -64,7 +64,7 @@ export function WorkerResultCard({
             ),
           )}
         </Text>
-        <Text style={styles.resultSummary} numberOfLines={2}>
+        <Text style={styles.resultSummary} numberOfLines={1}>
           {summaryParts.map((p, i) =>
             p.h ? (
               <Text key={`s-${i}`} style={styles.hl}>

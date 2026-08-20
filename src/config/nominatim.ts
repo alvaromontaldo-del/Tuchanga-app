@@ -1,3 +1,9 @@
+import {
+  buildShortAddressFromParts,
+  formatShortAddress,
+  type NominatimAddressParts,
+} from '../utils/formatAddress';
+
 export type NominatimSuggestion = {
   id: string;
   address: string;
@@ -57,7 +63,7 @@ export async function fetchNominatimSuggestions(
     headers: {
       // Nominatim recomienda identificar la app; en mobile el header puede ignorarse,
       // pero no rompe y ayuda cuando está disponible.
-      'User-Agent': 'TuChanga/1.0',
+      'User-Agent': 'YaChanga/1.0',
     },
   });
   if (!res.ok) return [];
@@ -66,6 +72,7 @@ export async function fetchNominatimSuggestions(
     display_name?: string;
     lat?: string;
     lon?: string;
+    address?: NominatimAddressParts;
   }>;
 
   return (data ?? [])
@@ -73,9 +80,11 @@ export async function fetchNominatimSuggestions(
       const lat = numOrNull(x.lat);
       const lng = numOrNull(x.lon);
       if (!x.display_name || lat === null || lng === null) return null;
+      const short =
+        buildShortAddressFromParts(x.address ?? {}) || formatShortAddress(x.display_name);
       return {
         id: String(x.place_id ?? `${lat},${lng}`),
-        address: x.display_name,
+        address: short,
         lat,
         lng,
       } satisfies NominatimSuggestion;
@@ -92,12 +101,18 @@ export async function reverseNominatim(lat: number, lng: number): Promise<string
 
   const res = await fetch(url, {
     headers: {
-      'User-Agent': 'TuChanga/1.0',
+      'User-Agent': 'YaChanga/1.0',
     },
   });
   if (!res.ok) return null;
-  const data = (await res.json()) as { display_name?: string };
-  return data.display_name?.trim() ? data.display_name.trim() : null;
+  const data = (await res.json()) as {
+    address?: NominatimAddressParts;
+    display_name?: string;
+  };
+  const short =
+    buildShortAddressFromParts(data.address ?? {}) ||
+    (data.display_name?.trim() ? formatShortAddress(data.display_name.trim()) : null);
+  return short;
 }
 
 export async function reverseNominatimStreet(lat: number, lng: number): Promise<string | null> {
@@ -109,7 +124,7 @@ export async function reverseNominatimStreet(lat: number, lng: number): Promise<
 
   const res = await fetch(url, {
     headers: {
-      'User-Agent': 'TuChanga/1.0',
+      'User-Agent': 'YaChanga/1.0',
     },
   });
   if (!res.ok) return null;
@@ -129,11 +144,9 @@ export async function reverseNominatimStreet(lat: number, lng: number): Promise<
   };
 
   const a = data.address;
-  const road = a?.road ?? a?.pedestrian;
-  const num = a?.house_number;
-  const street = road ? (num ? `${road} ${num}` : road) : null;
-  if (street?.trim()) return street.trim();
-  return data.display_name?.trim() ? data.display_name.trim() : null;
+  const short = buildShortAddressFromParts(a ?? {});
+  if (short) return short;
+  return data.display_name?.trim() ? formatShortAddress(data.display_name.trim()) : null;
 }
 
 export function osmTileUrlTemplate() {

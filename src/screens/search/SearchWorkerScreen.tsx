@@ -13,7 +13,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { AppScreen } from '../../components/layout/AppScreen';
 import { RubroMultiSelectModal } from '../../components/search/RubroMultiSelectModal';
 // Punto de referencia: siempre domicilio del perfil (sin selector).
 import { WorkerResultCard } from '../../components/search/WorkerResultCard';
@@ -31,6 +31,7 @@ import {
   type SearchWorkerHit,
 } from '../../data/mockSearchWorkers';
 import type { FeedStackScreenProps } from '../../navigation/mainTypes';
+import { openAuthModal } from '../../navigation/openAuthModal';
 // Sin GPS en Buscar: usamos domicilio del perfil.
 
 function summaryMulti(selected: string[], emptyLabel: string): string {
@@ -66,6 +67,13 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
   const [categoryModal, setCategoryModal] = useState(false);
   const [allowedTrades, setAllowedTrades] = useState<string[]>([]);
   const [allowedLoading, setAllowedLoading] = useState(false);
+
+  // Sin sesión: ir a Login (no toast de “falta domicilio”).
+  useEffect(() => {
+    if (isRestoring) return;
+    if (user) return;
+    openAuthModal('Login');
+  }, [isRestoring, user]);
 
   const effectiveClientPos = useMemo(() => {
     if (hasValidBaseLocation(user)) {
@@ -276,6 +284,12 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
     showSettings?: boolean;
     showPickAddress?: boolean;
   } {
+    if (!user && !isRestoring) {
+      return {
+        title: 'Iniciá sesión',
+        text: 'Para buscar profesionales necesitás una cuenta con domicilio cargado.',
+      };
+    }
     if (!hasSearchPoint) {
       return {
         title: 'Falta tu domicilio',
@@ -311,7 +325,7 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
   const showEmpty = !hasSearchPoint || hits.length === 0;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <AppScreen style={styles.safe} edges={['top', 'bottom', 'left', 'right']}>
       <SearchHeaderBar
         value={query}
         onChangeText={(t) => {
@@ -415,7 +429,7 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
           triggerSearch();
         }}
       />
-    </SafeAreaView>
+    </AppScreen>
   );
 }
 
