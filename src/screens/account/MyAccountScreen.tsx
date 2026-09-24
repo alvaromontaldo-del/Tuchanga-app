@@ -186,6 +186,12 @@ export function MyAccountScreen({ navigation }: Props) {
             onPress={() => navigation.navigate('ContractedWorkOrders')}
           />
           <Row
+            icon="cube-outline"
+            title="Solicitudes de materiales"
+            subtitle="Para retirar e historial"
+            onPress={() => navigation.navigate('ClientMaterialPickups')}
+          />
+          <Row
             icon="heart-outline"
             title="Mis favoritos"
             subtitle="Profesionales guardados"
