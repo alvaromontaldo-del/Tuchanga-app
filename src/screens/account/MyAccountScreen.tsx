@@ -68,7 +68,7 @@ function Row({
 
 export function MyAccountScreen({ navigation }: Props) {
   const { signOut, user } = useAuth();
-  const { clearSessionRole, clearCommerceIntent, chooseSessionRole, hasCommerceStore } =
+  const { clearSessionRole, clearCommerceIntent, chooseSessionRole, hasCommerceStore, hasPendingCommerceStore } =
     useCommerceShell();
   const { isWorker } = useUserMode();
   const { isWorkerRegistered } = useWorkerProfile();
@@ -160,16 +160,23 @@ export function MyAccountScreen({ navigation }: Props) {
           )}
         </View>
 
-        {hasCommerceStore ? (
+        {hasCommerceStore || hasPendingCommerceStore ? (
           <>
             <Text style={accountUi.sectionLabel}>MÓDULOS</Text>
             <View style={accountUi.card}>
               <Row
                 icon="storefront-outline"
-                title="Ir a módulo comercio"
+                title={hasCommerceStore ? 'Ir a módulo comercio' : 'Estado del comercio'}
                 subtitle="Pedidos de materiales y cotizaciones"
                 onPress={() => {
-                  void chooseSessionRole('commerce');
+                  if (hasPendingCommerceStore && !hasCommerceStore) {
+              Alert.alert(
+                'Comercio en validación',
+                'Su comercio está siendo validado por un administrador. Aguarde entre 24 y 48 hs para poder ingresar.',
+              );
+              return;
+            }
+            void chooseSessionRole('commerce');
                 }}
                 isLast
               />

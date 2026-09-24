@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, radii, spacing } from '../../constants/theme';
 import type { DisponibilidadOpcion } from '../../types/contrataciones';
@@ -35,11 +35,26 @@ export function AgendaOpcionesCliente({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const readonly = mode === 'readonly';
 
-  useEffect(() => {
-    setSelectedId(opciones.length === 1 ? (opciones[0]?.id ?? null) : null);
+  const sortedOpciones = useMemo(() => {
+    return [...opciones].sort((a, b) => {
+      const da = String(a.fecha_trabajo ?? '');
+      const db = String(b.fecha_trabajo ?? '');
+      if (da !== db) return da.localeCompare(db);
+      const ha = String(a.hora_inicio ?? '').slice(0, 5);
+      const hb = String(b.hora_inicio ?? '').slice(0, 5);
+      if (ha !== hb) return ha.localeCompare(hb);
+      const fa = String(a.hora_fin ?? '').slice(0, 5);
+      const fb = String(b.hora_fin ?? '').slice(0, 5);
+      return fa.localeCompare(fb);
+    });
   }, [opciones]);
 
-  if (opciones.length === 0) return null;
+
+  useEffect(() => {
+    setSelectedId(sortedOpciones.length === 1 ? (sortedOpciones[0]?.id ?? null) : null);
+  }, [sortedOpciones]);
+
+  if (sortedOpciones.length === 0) return null;
 
   return (
     <View style={[styles.card, embedded && styles.cardEmbedded]}>
@@ -53,7 +68,7 @@ export function AgendaOpcionesCliente({
       </Text>
 
       <View style={styles.optionsList}>
-        {opciones.map((op, index) => {
+        {sortedOpciones.map((op, index) => {
           if (readonly) {
             return (
               <View key={op.id} style={styles.optionRow}>

@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
+import { ensureGalleryPermission, ensureCameraPermission, openAppSettings } from '../../utils/mediaPermissions';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Image,
@@ -89,13 +90,8 @@ export function ImagePickerComponent({
   const canAddMore = mode === 'single' ? true : uris.length < maxCount;
 
   const ensureGalleryPerm = useCallback(async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      toast.warning('Necesitamos acceso a tu galería para elegir fotos.', 'Permisos');
-      return false;
-    }
-    return true;
-  }, [toast]);
+    return ensureGalleryPermission();
+  }, []);
 
   const openGallery = useCallback(async () => {
     if (!canAddMore || busy) return;
@@ -296,6 +292,14 @@ export function ImagePickerComponent({
                 accessibilityLabel="Pedir permiso de cámara"
               >
                 <Text style={styles.permBtnText}>Dar permiso</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void openAppSettings()}
+                style={({ pressed }) => [styles.permBtn, pressed && styles.pressed, { marginTop: 10, backgroundColor: 'transparent', borderWidth: 1, borderColor: '#fff' }]}
+                accessibilityRole="button"
+                accessibilityLabel="Abrir ajustes del sistema"
+              >
+                <Text style={styles.permBtnText}>Abrir Ajustes</Text>
               </Pressable>
             </View>
           )}

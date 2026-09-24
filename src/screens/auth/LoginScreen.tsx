@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import {
+import { Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -94,11 +94,19 @@ export function LoginScreen({ navigation, route }: Props) {
       await setSession(result.user, true);
       const stores = await refreshCommerce();
       const hasStore = stores.some((s) => COMMERCE_SHELL_STATUSES.has(s.status));
+      const hasPendingOnly =
+        !hasStore && stores.some((s) => s.status === 'pending_approval');
 
       if (hasStore) {
-        // Provisional: mismo email con comercio → elegir rol (o ir directo si marcó Soy comercio).
+        // Provisional: mismo email con comercio -> elegir rol (o ir directo si marco Soy comercio).
         if (asCommerce) await chooseSessionRole('commerce');
         else await clearSessionRole();
+      } else if (asCommerce && hasPendingOnly) {
+        Alert.alert(
+          'Comercio en validacion',
+          'Su comercio esta siendo validado por un administrador. Aguarde entre 24 y 48 hs para poder ingresar.',
+        );
+        await chooseSessionRole('client');
       } else if (asCommerce) {
         await chooseSessionRole('commerce');
       } else {

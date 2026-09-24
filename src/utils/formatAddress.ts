@@ -17,11 +17,16 @@ const COUNTRY_NAMES = new Set([
   'republica argentina',
 ]);
 
-const POSTAL_CODE_RE = /^[A-Z]?\d{4}[A-Z]{0,3}$/i;
+/**
+ * CPA argentino tipico: C1414DHI (letra + 4 digitos + 3 letras).
+ * NO tratar "1140" / "1414" sueltos como CP: en display_name de Nominatim
+ * la altura suele venir como pieza separada ("Volta, 1140, Villa...").
+ */
+const CPA_RE = /^[A-Z]\d{4}[A-Z]{3}$/i;
 
 function isPostalCode(part: string): boolean {
   const compact = part.replace(/\s/g, '');
-  return POSTAL_CODE_RE.test(compact) || /^\d{4,8}$/.test(compact);
+  return CPA_RE.test(compact);
 }
 
 function isCountry(part: string): boolean {
@@ -39,7 +44,7 @@ function isProvinceOrPartido(part: string): boolean {
   return false;
 }
 
-/** Arma calle + barrio/localidad sin partido, provincia, CP ni país. */
+/** Arma calle + barrio/localidad sin partido, provincia, CP ni pais. */
 export function buildShortAddressFromParts(parts: NominatimAddressParts): string | null {
   const road = parts.road ?? parts.pedestrian;
   const num = parts.house_number;
@@ -55,7 +60,7 @@ export function buildShortAddressFromParts(parts: NominatimAddressParts): string
   return joined.length ? joined.join(', ') : null;
 }
 
-/** Recorta un display_name de Nominatim eliminando partido, provincia, CP y país. */
+/** Recorta un display_name de Nominatim eliminando partido, provincia, CP y pais. */
 export function formatShortAddress(full: string): string {
   const raw = (full ?? '').trim();
   if (!raw) return '';
@@ -71,7 +76,7 @@ export function formatShortAddress(full: string): string {
   return kept.join(', ') || raw;
 }
 
-/** Normaliza cualquier dirección guardada o mostrada en la app. */
+/** Normaliza cualquier direccion guardada o mostrada en la app. */
 export function normalizeDisplayAddress(address: string | null | undefined): string {
   const raw = (address ?? '').trim();
   if (!raw) return '';

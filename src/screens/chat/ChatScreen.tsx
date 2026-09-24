@@ -17,6 +17,7 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { ensureGalleryPermission, ensureCameraPermission } from '../../utils/mediaPermissions';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
 import { ExpandableText } from '../../components/common/ExpandableText';
@@ -428,7 +429,6 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState('');
   const [reviewSending, setReviewSending] = useState(false);
-  const [reviewFocused, setReviewFocused] = useState(false);
   const [reviewSubmitted, setReviewSubmitted] = useState(false);
   const [agendaOpciones, setAgendaOpciones] = useState<DisponibilidadOpcion[]>([]);
   const [agendaBusy, setAgendaBusy] = useState(false);
@@ -1412,11 +1412,10 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
       if (attachingImage || sending || chatBlocked || chatClosedByClaim) return;
       try {
         if (source === 'gallery') {
-          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-          if (status !== 'granted') {
-            toast.warning('Necesitamos acceso a tu galería para enviar fotos.', 'Permisos');
-            return;
-          }
+          const okGallery = await ensureGalleryPermission();
+    if (!okGallery) {
+      return;
+    }
           const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ['images'],
             allowsMultipleSelection: false,
@@ -1435,11 +1434,10 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
           return;
         }
 
-        const cam = await ImagePicker.requestCameraPermissionsAsync();
-        if (cam.status !== 'granted') {
-          toast.warning('Necesitamos acceso a la cámara para sacar la foto.', 'Permisos');
-          return;
-        }
+        const okCamera = await ensureCameraPermission();
+    if (!okCamera) {
+      return;
+    }
         const result = await ImagePicker.launchCameraAsync({
           mediaTypes: ['images'],
           allowsEditing: false,
@@ -2148,8 +2146,6 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
               style={styles.reviewInput}
               multiline
               maxLength={800}
-              onFocus={() => setReviewFocused(true)}
-              onBlur={() => setReviewFocused(false)}
             />
             <Pressable
               style={({ pressed }) => [
@@ -2814,10 +2810,7 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
             </View>
           ) : (
             <View style={styles.chatBody}>
-              {reviewFocused ? (
-                <View style={styles.reviewFocusSpacer} />
-              ) : (
-                <FlatList
+              <FlatList
                   ref={listRef}
                   inverted
                   data={visibleMessages}
@@ -2843,7 +2836,6 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                   keyboardShouldPersistTaps="handled"
                   keyboardDismissMode="interactive"
                 />
-              )}
               {chatActionBars}
               {inputContainer}
             </View>
@@ -3412,5 +3404,4 @@ const styles = StyleSheet.create({
   },
   reviewSendText: { color: '#fff', fontWeight: '900' },
 
-  reviewFocusSpacer: { flex: 1, minHeight: 10 },
 });
