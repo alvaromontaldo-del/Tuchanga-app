@@ -208,6 +208,11 @@ export type ClientQuoteCard = {
    */
   orderId: string | null;
   orderStatus: string | null;
+  /**
+   * null: todavía no hay orden; el cliente elige el flete en la pantalla.
+   * true/false: la orden ya definió si el flete entra en el total (retiro en local = false).
+   */
+  orderIncludeFreight: boolean | null;
   /** Código de retiro; solo post-pago. */
   orderCode: string | null;
   /** PIN de retiro; solo post-pago y solo para el cliente. */
