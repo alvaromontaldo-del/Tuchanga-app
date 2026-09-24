@@ -102,6 +102,7 @@ export type AccountStackParamList = {
   MyJobs: undefined;
   MyWorkOrders: undefined;
   ContractedWorkOrders: undefined;
+  ClientMaterialPickups: undefined;
   Favorites: undefined;
   ChangePassword: undefined;
 };
