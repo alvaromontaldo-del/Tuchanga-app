@@ -29,6 +29,7 @@ import {
 } from '../../hooks/useSubmitStoreQuote';
 import type { CommerceStackParamList } from '../../navigation/mainTypes';
 import { formatMoneyAr } from '../../services/clientQuotesSupabase';
+import { listKey } from '../../utils/safeAsync';
 import { sanitizePriceText } from '../../services/storeQuotesSupabase';
 import type {
   ExistingStoreQuoteItem,
@@ -219,7 +220,7 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
     <AppKeyboardAvoidingView style={styles.flex}>
       <FlatList
         data={listData}
-        keyExtractor={(row) => row.key}
+        keyExtractor={(row, index) => listKey(row?.key, index, 'linea')}
         extraData={draftTick}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"

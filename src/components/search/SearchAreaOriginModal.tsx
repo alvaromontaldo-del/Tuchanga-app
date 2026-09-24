@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchNominatimSuggestions, type NominatimSuggestion } from '../../config/nominatim';
 import { colors, radii, spacing } from '../../constants/theme';
+import { listKey } from '../../utils/safeAsync';
 
 export type PickedSearchOrigin = { lat: number; lng: number; label: string };
 
@@ -56,6 +57,8 @@ export function SearchAreaOriginModal({ visible, onClose, near, onPick }: Props)
           });
           if (reqId !== reqIdRef.current) return;
           setResults(suggestions);
+        } catch {
+          if (reqId === reqIdRef.current) setResults([]);
         } finally {
           if (reqId === reqIdRef.current) setSearching(false);
         }
@@ -98,7 +101,7 @@ export function SearchAreaOriginModal({ visible, onClose, near, onPick }: Props)
         ) : (
           <FlatList
             data={results}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item, index) => listKey(item?.id, index, 'lugar')}
             keyboardShouldPersistTaps="handled"
             style={styles.list}
             ListEmptyComponent={

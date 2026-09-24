@@ -89,32 +89,40 @@ async function openStoreBoardFromPush(data: Record<string, unknown>): Promise<vo
 async function handleNotificationResponse(
   response: Notifications.NotificationResponse | null,
 ): Promise<void> {
-  if (!response) return;
-  const data = (response.notification.request.content.data ?? {}) as Record<string, unknown>;
-  const conversationId =
-    typeof data.conversationId === 'string'
-      ? data.conversationId
-      : typeof data.conversation_id === 'string'
-        ? data.conversation_id
-        : null;
+  try {
+    if (!response) return;
+    const data = (response.notification?.request?.content?.data ?? {}) as Record<string, unknown>;
+    const conversationId =
+      typeof data.conversationId === 'string'
+        ? data.conversationId
+        : typeof data.conversation_id === 'string'
+          ? data.conversation_id
+          : null;
 
-  if (conversationId) {
-    await openChatFromPush(conversationId);
-    return;
-  }
+    if (conversationId) {
+      await openChatFromPush(conversationId);
+      return;
+    }
 
-  if (data.type === 'store_board' || data.eventType === 'nueva_solicitud') {
-    await openStoreBoardFromPush(data);
+    if (data.type === 'store_board' || data.eventType === 'nueva_solicitud') {
+      await openStoreBoardFromPush(data);
+    }
+  } catch (e) {
+    console.warn('[push routing]', e);
   }
 }
+
+let routingInstalled = false;
 
 /**
  * Abre chat / tablero comercio al tocar un push (cold start + background).
  */
 export function initNotificationRoutingOnce(): void {
-  void Notifications.getLastNotificationResponseAsync().then((response) => {
-    void handleNotificationResponse(response);
-  });
+  if (routingInstalled) return;
+  routingInstalled = true;
+  void Notifications.getLastNotificationResponseAsync()
+    .then((response) => handleNotificationResponse(response))
+    .catch(() => undefined);
   Notifications.addNotificationResponseReceivedListener((response) => {
     void handleNotificationResponse(response);
   });

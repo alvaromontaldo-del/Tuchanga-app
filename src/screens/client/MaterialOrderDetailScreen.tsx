@@ -36,7 +36,7 @@ type Props = NativeStackScreenProps<ParamList, 'MaterialOrderDetail'>;
  * El fee es tarifa de plataforma; el cliente sigue debiendo el total a cada comercio.
  */
 export function MaterialOrderDetailScreen({ navigation, route }: Props) {
-  const { orderId } = route.params;
+  const orderId = route.params?.orderId ?? '';
   const toast = useAppToast();
   const [reveals, setReveals] = useState<MaterialOrderReveal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,6 +44,12 @@ export function MaterialOrderDetailScreen({ navigation, route }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
+    if (!orderId) {
+      setLoading(false);
+      setError('No se encontró la orden.');
+      setReveals([]);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -153,7 +159,7 @@ export function MaterialOrderDetailScreen({ navigation, route }: Props) {
           ? reveals.map((r, i) => (
               <Text key={r.orderId} style={styles.meta}>
                 ·{' '}
-                {paid && !r.storeName.includes('oculto')
+                {paid && r.storeName && !r.storeName.includes('oculto')
                   ? r.storeName
                   : `Comercio ${i + 1}`}
                 : {formatMoneyAr(r.acceptedTotal ?? 0)}
@@ -182,7 +188,7 @@ export function MaterialOrderDetailScreen({ navigation, route }: Props) {
               {reveals.length > 1 ? 'Comercio' : 'Comercio revelado'}
             </Text>
             <Text style={styles.storeName}>
-              {r.storeName.includes('oculto') ? 'Comercio' : r.storeName}
+              {!r.storeName || r.storeName.includes('oculto') ? 'Comercio' : r.storeName}
             </Text>
             <Text style={styles.line}>
               Dir:{' '}

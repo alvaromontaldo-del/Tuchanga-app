@@ -306,9 +306,13 @@ export function subscribeContratacionById(
         filter: `id=eq.${contratacionId}`,
       },
       (payload) => {
-        const row = (payload.new ?? payload.old) as Record<string, unknown> | null;
-        if (!row?.id) return;
-        onUpsert(mapContratacionRow(row));
+        try {
+          const row = (payload?.new ?? payload?.old) as Record<string, unknown> | null;
+          if (!row?.id) return;
+          onUpsert(mapContratacionRow(row));
+        } catch (e) {
+          console.warn('[realtime contratacion]', e);
+        }
       },
     )
     .subscribe();
@@ -336,9 +340,13 @@ export function subscribeContratacionesByConversation(
         filter: `conversation_id=eq.${conversationId}`,
       },
       (payload) => {
-        const row = (payload.new ?? payload.old) as Record<string, unknown> | null;
-        if (!row?.id) return;
-        onUpsert(mapContratacionRow(row));
+        try {
+          const row = (payload?.new ?? payload?.old) as Record<string, unknown> | null;
+          if (!row?.id) return;
+          onUpsert(mapContratacionRow(row));
+        } catch (e) {
+          console.warn('[realtime contrataciones]', e);
+        }
       },
     )
     .subscribe();
@@ -367,9 +375,13 @@ export function subscribeContratacionesByWorker(
         filter: `worker_id=eq.${workerId}`,
       },
       (payload) => {
-        const row = (payload.new ?? payload.old) as Record<string, unknown> | null;
-        if (!row?.id) return;
-        onUpsert(mapContratacionRow(row));
+        try {
+          const row = (payload?.new ?? payload?.old) as Record<string, unknown> | null;
+          if (!row?.id) return;
+          onUpsert(mapContratacionRow(row));
+        } catch (e) {
+          console.warn('[realtime contrataciones worker]', e);
+        }
       },
     )
     .subscribe();

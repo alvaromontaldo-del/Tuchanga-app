@@ -409,25 +409,30 @@ export function subscribeToConversationMessages(
         filter: `conversation_id=eq.${conversationId}`,
       },
       (payload) => {
-        const row = payload.new as {
-          id: string;
-          conversation_id: string;
-          sender_id: string;
-          body: string;
-          type?: ApiMessage['type'];
-          metadata?: Record<string, unknown>;
-          created_at: string;
-        };
-        onInsert({
-          id: row.id,
-          conversation_id: row.conversation_id,
-          sender_id: row.sender_id,
-          text: row.body,
-          status: 'sent',
-          created_at: row.created_at,
-          type: row.type ?? 'text',
-          metadata: row.metadata ?? {},
-        });
+        try {
+          const row = payload?.new as {
+            id?: string;
+            conversation_id?: string;
+            sender_id?: string;
+            body?: string;
+            type?: ApiMessage['type'];
+            metadata?: Record<string, unknown>;
+            created_at?: string;
+          } | null;
+          if (!row?.id || !row.conversation_id || !row.sender_id || !row.created_at) return;
+          onInsert({
+            id: row.id,
+            conversation_id: row.conversation_id,
+            sender_id: row.sender_id,
+            text: String(row.body ?? ''),
+            status: 'sent',
+            created_at: row.created_at,
+            type: row.type ?? 'text',
+            metadata: row.metadata ?? {},
+          });
+        } catch (e) {
+          console.warn('[realtime messages insert]', e);
+        }
       },
     )
     .on(
@@ -440,25 +445,30 @@ export function subscribeToConversationMessages(
       },
       (payload) => {
         if (!onUpdate) return;
-        const row = payload.new as {
-          id: string;
-          conversation_id: string;
-          sender_id: string;
-          body: string;
-          type?: ApiMessage['type'];
-          metadata?: Record<string, unknown>;
-          created_at: string;
-        };
-        onUpdate({
-          id: row.id,
-          conversation_id: row.conversation_id,
-          sender_id: row.sender_id,
-          text: row.body,
-          status: 'sent',
-          created_at: row.created_at,
-          type: row.type ?? 'text',
-          metadata: row.metadata ?? {},
-        });
+        try {
+          const row = payload?.new as {
+            id?: string;
+            conversation_id?: string;
+            sender_id?: string;
+            body?: string;
+            type?: ApiMessage['type'];
+            metadata?: Record<string, unknown>;
+            created_at?: string;
+          } | null;
+          if (!row?.id || !row.conversation_id || !row.sender_id || !row.created_at) return;
+          onUpdate({
+            id: row.id,
+            conversation_id: row.conversation_id,
+            sender_id: row.sender_id,
+            text: String(row.body ?? ''),
+            status: 'sent',
+            created_at: row.created_at,
+            type: row.type ?? 'text',
+            metadata: row.metadata ?? {},
+          });
+        } catch (e) {
+          console.warn('[realtime messages update]', e);
+        }
       },
     )
     .subscribe();
@@ -499,92 +509,113 @@ export function subscribeToUserInboxEvents(
     }, 1200);
   };
 
+  const emit = (fn: () => void) => {
+    try {
+      fn();
+    } catch (e) {
+      console.warn('[realtime inbox]', e);
+    }
+  };
+
   const attach = async () => {
-    clearReconnectTimer();
-    await removeSupabaseRealtimeTopicAsync(sb, channelName);
-    if (cancelled) return;
+    try {
+      clearReconnectTimer();
+      await removeSupabaseRealtimeTopicAsync(sb, channelName);
+      if (cancelled) return;
 
-    channel = sb
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'conversations',
-          filter: `cliente_id=eq.${userId}`,
-        },
-        (payload) => {
-          const row = payload.new as { id?: string };
-          if (!row?.id) return;
-          onEvent({ type: 'conversation_activity', conversationId: row.id });
-        },
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'conversations',
-          filter: `trabajador_id=eq.${userId}`,
-        },
-        (payload) => {
-          const row = payload.new as { id?: string };
-          if (!row?.id) return;
-          onEvent({ type: 'conversation_activity', conversationId: row.id });
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' },
-        (payload) => {
-          const row = payload.new as {
-            id?: string;
-            conversation_id?: string;
-            sender_id?: string;
-            body?: string;
-            created_at?: string;
-          };
-          if (!row?.conversation_id || !row.sender_id || !row.created_at) return;
-          onEvent({
-            type: 'message',
-            conversationId: row.conversation_id,
-            senderId: row.sender_id,
-            body: String(row.body ?? ''),
-            createdAt: row.created_at,
-            messageId: row.id,
-          });
-        },
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'conversation_reads',
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          const row = (payload.new ?? payload.old) as {
-            conversation_id?: string;
-            user_id?: string;
-            read_at?: string;
-          };
-          if (!row?.conversation_id || !row.read_at) return;
-          onEvent({
-            type: 'read',
-            conversationId: row.conversation_id,
-            userId: row.user_id ?? userId,
-            readAt: row.read_at,
-          });
-        },
-      );
+      channel = sb
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'conversations',
+            filter: `cliente_id=eq.${userId}`,
+          },
+          (payload) => {
+            emit(() => {
+              const row = payload?.new as { id?: string } | null;
+              if (!row?.id) return;
+              onEvent({ type: 'conversation_activity', conversationId: row.id });
+            });
+          },
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'conversations',
+            filter: `trabajador_id=eq.${userId}`,
+          },
+          (payload) => {
+            emit(() => {
+              const row = payload?.new as { id?: string } | null;
+              if (!row?.id) return;
+              onEvent({ type: 'conversation_activity', conversationId: row.id });
+            });
+          },
+        )
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'messages' },
+          (payload) => {
+            emit(() => {
+              const row = payload?.new as {
+                id?: string;
+                conversation_id?: string;
+                sender_id?: string;
+                body?: string;
+                created_at?: string;
+              } | null;
+              if (!row?.conversation_id || !row.sender_id || !row.created_at) return;
+              onEvent({
+                type: 'message',
+                conversationId: row.conversation_id,
+                senderId: row.sender_id,
+                body: String(row.body ?? ''),
+                createdAt: row.created_at,
+                messageId: row.id,
+              });
+            });
+          },
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'conversation_reads',
+            filter: `user_id=eq.${userId}`,
+          },
+          (payload) => {
+            emit(() => {
+              const row = (payload?.new ?? payload?.old) as {
+                conversation_id?: string;
+                user_id?: string;
+                read_at?: string;
+              } | null;
+              if (!row?.conversation_id || !row.read_at) return;
+              onEvent({
+                type: 'read',
+                conversationId: row.conversation_id,
+                userId: row.user_id ?? userId,
+                readAt: row.read_at,
+              });
+            });
+          },
+        );
 
-    channel.subscribe((status) => {
-      if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
-        scheduleReconnect();
-      }
-    });
+      channel.subscribe((status) => {
+        if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
+          scheduleReconnect();
+        }
+      });
+    } catch (e) {
+      console.warn('[realtime inbox attach]', e);
+      scheduleReconnect();
+    }
   };
 
   void attach();

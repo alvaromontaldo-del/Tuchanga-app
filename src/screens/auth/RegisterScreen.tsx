@@ -507,6 +507,8 @@ export function RegisterScreen({ navigation, route }: Props) {
         lng: s.lng,
       }));
       setAddressResults(mapped);
+    } catch {
+      if (reqId === requestIdRef.current) setAddressResults([]);
     } finally {
       if (reqId === requestIdRef.current) setSearching(false);
     }

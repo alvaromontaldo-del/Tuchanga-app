@@ -149,14 +149,20 @@ export function subscribeToPasswordRecoveryDeepLinks(
     else onError?.(result.message);
   }
 
-  void Linking.getInitialURL().then((url) => {
-    if (handledInitial) return;
-    handledInitial = true;
-    void handleUrl(url);
-  });
+  void Linking.getInitialURL()
+    .then((url) => {
+      if (handledInitial) return;
+      handledInitial = true;
+      return handleUrl(url);
+    })
+    .catch((e) => {
+      onError?.(e instanceof Error ? e.message : 'No se pudo abrir el enlace.');
+    });
 
   const sub = Linking.addEventListener('url', ({ url }) => {
-    void handleUrl(url);
+    void handleUrl(url).catch((e) => {
+      onError?.(e instanceof Error ? e.message : 'No se pudo abrir el enlace.');
+    });
   });
 
   return () => sub.remove();

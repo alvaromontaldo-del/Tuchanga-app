@@ -15,6 +15,7 @@ import { colors, radii, spacing } from '../../constants/theme';
 import { useClientMaterialRequests } from '../../hooks/useClientQuotes';
 import type { ClientMaterialRequestSummary } from '../../types/materials';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { listKey } from '../../utils/safeAsync';
 
 type LegacyClientQuotesParamList = {
   ClientMaterialQuotesList: undefined;
@@ -54,7 +55,7 @@ export function ClientMaterialQuotesListScreen({ navigation }: Props) {
       {!error ? (
         <FlatList
           data={requests}
-          keyExtractor={(item) => item.requestId}
+          keyExtractor={(item, index) => listKey(item?.requestId, index, 'solicitud')}
           contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={colors.primary} />

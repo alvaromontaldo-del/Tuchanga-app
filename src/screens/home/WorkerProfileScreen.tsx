@@ -136,12 +136,16 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
 
     setRemoteStatus('loading');
     let cancelled = false;
-    void fetchWorkerPublicProfileFromSupabase(workerId).then((w) => {
-      if (!cancelled) {
-        setRemoteWorker(w);
-        setRemoteStatus('done');
-      }
-    });
+    void fetchWorkerPublicProfileFromSupabase(workerId)
+      .then((w) => {
+        if (!cancelled) {
+          setRemoteWorker(w);
+          setRemoteStatus('done');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRemoteStatus('done');
+      });
     return () => {
       cancelled = true;
     };
@@ -154,9 +158,11 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
       if (isRestoring || !user) return;
       if (getWorkerById(workerId)) return;
       let cancelled = false;
-      void fetchWorkerPublicProfileFromSupabase(workerId).then((w) => {
-        if (!cancelled && w) setRemoteWorker(w);
-      });
+      void fetchWorkerPublicProfileFromSupabase(workerId)
+        .then((w) => {
+          if (!cancelled && w) setRemoteWorker(w);
+        })
+        .catch(() => undefined);
       return () => {
         cancelled = true;
       };

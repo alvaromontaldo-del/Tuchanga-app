@@ -65,6 +65,7 @@ import {
   WARRANTY_DAYS_MIN,
   warrantyDaysError,
 } from '../../utils/warrantyDays';
+import { listKey } from '../../utils/safeAsync';
 import {
   completeJob,
   fetchLatestJobByConversation,
@@ -618,12 +619,14 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
           .catch(() => {});
       }
       if (job?.id && job.payment_status === 'PENDING') {
-        void sincronizarSeñaSiPendiente(job.id).then((ok) => {
-          if (!ok) return;
-          void fetchLatestJobByConversation(conversationId).then((j) => {
-            if (j) setJob(j);
-          });
-        });
+        void sincronizarSeñaSiPendiente(job.id)
+          .then((ok) => {
+            if (!ok) return;
+            return fetchLatestJobByConversation(conversationId).then((j) => {
+              if (j) setJob(j);
+            });
+          })
+          .catch(() => undefined);
       }
       return () => setActiveConversationForNotifications(null);
     }, [conversationId, job?.id, job?.payment_status]),
@@ -726,9 +729,11 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
         }
         return [...prev, q].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
       });
-      void fetchLatestJobByConversation(conversationId).then((j) => {
-        if (j) setJob(j);
-      });
+      void fetchLatestJobByConversation(conversationId)
+        .then((j) => {
+          if (j) setJob(j);
+        })
+        .catch(() => undefined);
     });
     return () => {
       cancelled = true;
@@ -740,13 +745,17 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
     if (!showPay || !job?.id || !conversationId) return;
     const contratacionId = job.id;
     const sync = () => {
-      void sincronizarSeñaSiPendiente(contratacionId).then((ok) => {
-        if (!ok) return;
-        void fetchLatestJobByConversation(conversationId).then((j) => {
-          if (j) setJob(j);
-        });
-        void refreshMessages();
-      });
+      void sincronizarSeñaSiPendiente(contratacionId)
+        .then((ok) => {
+          if (!ok) return;
+          return Promise.all([
+            fetchLatestJobByConversation(conversationId).then((j) => {
+              if (j) setJob(j);
+            }),
+            refreshMessages(),
+          ]);
+        })
+        .catch(() => undefined);
     };
     sync();
     const timer = setInterval(sync, 3000);
@@ -1102,9 +1111,11 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
     let cancelled = false;
     setReview(null);
     setReviewSubmitted(false);
-    void fetchReviewForJob(jobId).then((r) => {
-      if (!cancelled) setReview(r);
-    });
+    void fetchReviewForJob(jobId)
+      .then((r) => {
+        if (!cancelled) setReview(r);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -1157,17 +1168,21 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
               event === 'precio_aceptado_cliente' ||
               event === 'precio_aceptado_trabajador'
             ) {
-              void fetchLatestJobByConversation(conversationId).then((next) => {
-                if (next) setJob(next);
-              });
+              void fetchLatestJobByConversation(conversationId)
+                .then((next) => {
+                  if (next) setJob(next);
+                })
+                .catch(() => undefined);
               void refreshMessages();
               void refreshQuotes();
             }
           } else if (msg.type === 'budget' || msg.type === 'quotation') {
             void refreshQuotes();
-            void fetchLatestJobByConversation(conversationId).then((next) => {
-              if (next) setJob(next);
-            });
+            void fetchLatestJobByConversation(conversationId)
+              .then((next) => {
+                if (next) setJob(next);
+              })
+              .catch(() => undefined);
           } else if (
             p?.myRole === 'cliente' &&
             j?.estado_trabajo === 'precio_aceptado' &&
@@ -1220,12 +1235,14 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
     }
     markConversationRead(conversationId, maxIso);
     if (isSupabaseConfigured()) {
-      void fetchConversationReads(conversationId).then((rows) => {
-        const peer = rows
-          .filter((r) => r.user_id !== myId)
-          .sort((a, b) => new Date(b.read_at).getTime() - new Date(a.read_at).getTime())[0];
-        setPeerReadAt(peer?.read_at ?? null);
-      });
+      void fetchConversationReads(conversationId)
+        .then((rows) => {
+          const peer = (rows ?? [])
+            .filter((r) => r?.user_id !== myId)
+            .sort((a, b) => new Date(b.read_at).getTime() - new Date(a.read_at).getTime())[0];
+          setPeerReadAt(peer?.read_at ?? null);
+        })
+        .catch(() => undefined);
     }
   }, [myId, conversationId, loading, messages, markConversationRead]);
 
@@ -2804,7 +2821,7 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                   ref={listRef}
                   inverted
                   data={visibleMessages}
-                  keyExtractor={(item) => item.id}
+                  keyExtractor={(item, index) => listKey(item?.id ?? item?.clientMessageId, index, 'msg')}
                   renderItem={renderItem}
                   style={styles.list}
                   initialNumToRender={20}

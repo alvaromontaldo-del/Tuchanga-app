@@ -24,8 +24,12 @@ export type FeedPost = {
 
 export const MAX_POST_IMAGES = 3;
 
-export function normalizePostImageUrls(urls: string[]): string[] {
-  return urls.filter(Boolean).slice(0, MAX_POST_IMAGES);
+export function normalizePostImageUrls(urls: unknown): string[] {
+  if (!Array.isArray(urls)) return [];
+  return urls
+    .map((u) => (typeof u === 'string' ? u.trim() : ''))
+    .filter(Boolean)
+    .slice(0, MAX_POST_IMAGES);
 }
 
 /** Reseña de un cliente (solo nombre, sin apellido) */

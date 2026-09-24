@@ -32,6 +32,7 @@ import {
 } from '../../data/mockSearchWorkers';
 import type { FeedStackScreenProps } from '../../navigation/mainTypes';
 import { openAuthModal } from '../../navigation/openAuthModal';
+import { listKey } from '../../utils/safeAsync';
 // Sin GPS en Buscar: usamos domicilio del perfil.
 
 function summaryMulti(selected: string[], emptyLabel: string): string {
@@ -100,9 +101,13 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
     if (route.params?.initialCategories) {
       setSelectedCategories(route.params.initialCategories);
     }
+    let openTimer: ReturnType<typeof setTimeout> | undefined;
     if (route.params?.openFilters) {
-      setTimeout(() => setCategoryModal(true), 50);
+      openTimer = setTimeout(() => setCategoryModal(true), 50);
     }
+    return () => {
+      if (openTimer) clearTimeout(openTimer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.params?.initialQuery, route.params?.initialCategories?.join('|'), route.params?.openFilters]);
 
@@ -346,7 +351,7 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
       <FlatList
         ref={listRef}
         data={showEmpty ? [] : hits}
-        keyExtractor={(item) => item.worker.id}
+        keyExtractor={(item, index) => listKey(item?.worker?.id, index, 'worker')}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <View style={styles.empty}>

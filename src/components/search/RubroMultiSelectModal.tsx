@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radii, spacing } from '../../constants/theme';
+import { listKey } from '../../utils/safeAsync';
 import {
   getCategoriasSortedByPopularidad,
   type RubroServicio,
@@ -128,7 +129,7 @@ export function RubroMultiSelectModal({
 
         <SectionList
           sections={sections}
-          keyExtractor={(item: RubroServicio) => item.slug}
+          keyExtractor={(item: RubroServicio, index) => listKey(item?.slug, index, 'rubro')}
           style={styles.list}
           contentContainerStyle={[
             styles.listContent,

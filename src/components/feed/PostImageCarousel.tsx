@@ -10,6 +10,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { colors, spacing } from '../../constants/theme';
+import { isRenderableUri, listKey } from '../../utils/safeAsync';
 
 export type PostImageCarouselProps =
   | {
@@ -30,7 +31,8 @@ export type PostImageCarouselProps =
  * Carrusel horizontal con paging. Variante `feed`: ancho pantalla, puntos flotantes.
  */
 export function PostImageCarousel(props: PostImageCarouselProps) {
-  const { urls, onPressImage } = props;
+  const { onPressImage } = props;
+  const urls = (Array.isArray(props.urls) ? props.urls : []).filter((u) => isRenderableUri(u));
   const { width: screenWidth } = useWindowDimensions();
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -106,7 +108,7 @@ export function PostImageCarousel(props: PostImageCarouselProps) {
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         decelerationRate="fast"
-        keyExtractor={(item, index) => `${index}-${item}`}
+        keyExtractor={(item, index) => listKey(`${index}:${item.slice(0, 48)}`, index, 'img')}
         onScroll={onScroll}
         scrollEventThrottle={16}
         onMomentumScrollEnd={onScrollEnd}

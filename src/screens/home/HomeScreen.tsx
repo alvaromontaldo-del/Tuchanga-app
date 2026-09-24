@@ -53,6 +53,7 @@ export function HomeScreen() {
   const [query, setQuery] = useState('');
   const isFocusedScreen = useIsFocused();
   const navLockRef = useRef(false);
+  const navUnlockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [allowedTrades, setAllowedTrades] = useState<string[]>([]);
@@ -141,6 +142,8 @@ export function HomeScreen() {
     setRefreshing(true);
     try {
       await refresh();
+    } catch {
+      /* el feed ya loguea el fallo; el pull-to-refresh no debe rechazar */
     } finally {
       setRefreshing(false);
     }
@@ -160,6 +163,12 @@ export function HomeScreen() {
     scrollToTopAndRefresh();
     navigation.setParams({ scrollToTopToken: undefined });
   }, [route.params?.scrollToTopToken, navigation, scrollToTopAndRefresh]);
+
+  useEffect(() => {
+    return () => {
+      if (navUnlockTimer.current) clearTimeout(navUnlockTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!flashMessage) return;
@@ -195,8 +204,10 @@ export function HomeScreen() {
               initialCategories: selectedCategories,
               openFilters: false,
             });
-            setTimeout(() => {
+            if (navUnlockTimer.current) clearTimeout(navUnlockTimer.current);
+            navUnlockTimer.current = setTimeout(() => {
               navLockRef.current = false;
+              navUnlockTimer.current = null;
             }, 500);
           }}
           onSubmit={() => {

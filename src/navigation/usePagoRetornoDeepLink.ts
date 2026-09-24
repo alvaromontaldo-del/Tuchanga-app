@@ -37,10 +37,19 @@ export function usePagoRetornoDeepLink(contratacionIdHint?: string, materialOrde
       });
     };
 
-    const sub = Linking.addEventListener('url', ({ url }) => handle(url));
-    void Linking.getInitialURL().then((url) => {
-      if (url) handle(url);
-    });
+    const safeHandle = (url: string) => {
+      try {
+        handle(url);
+      } catch (e) {
+        console.warn('[pago retorno]', e);
+      }
+    };
+    const sub = Linking.addEventListener('url', ({ url }) => safeHandle(url));
+    void Linking.getInitialURL()
+      .then((url) => {
+        if (url) safeHandle(url);
+      })
+      .catch(() => undefined);
     return () => sub.remove();
   }, [contratacionIdHint, materialOrderIdHint]);
 }

@@ -18,6 +18,7 @@ import { useCommerceShell } from '../../context/CommerceShellContext';
 import { useStoreBoardCards } from '../../hooks/useStoreQuotes';
 import type { CommerceStackParamList } from '../../navigation/mainTypes';
 import { completarOrdenMaterialConPin, formatMoneyAr } from '../../services/clientQuotesSupabase';
+import { listKey } from '../../utils/safeAsync';
 import { storeCanReceiveQuotes, storeStatusLabel } from '../../services/storeRegistrationSupabase';
 import type { StoreBoardCard, StoreBoardColumn } from '../../types/materials';
 import { normalizeOrderCodeInput } from '../../utils/orderCode';
@@ -308,7 +309,7 @@ export function StoreMaterialRequestsScreen({ navigation, route }: Props) {
         <FlatList
           ref={listRef}
           data={list}
-          keyExtractor={(item) => item.targetId}
+          keyExtractor={(item, index) => listKey(item?.targetId || item?.requestId, index, 'pedido')}
           contentContainerStyle={styles.listContent}
           refreshControl={
             <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={colors.primary} />

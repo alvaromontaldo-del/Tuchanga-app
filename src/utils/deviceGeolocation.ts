@@ -11,6 +11,14 @@ export type GetPositionResult =
   | { ok: false; reason: 'denied' | 'timeout' | 'unavailable' | 'error' };
 
 export async function getHighAccuracyPosition(): Promise<GetPositionResult> {
+  try {
+    return await readHighAccuracyPosition();
+  } catch {
+    return { ok: false, reason: 'error' };
+  }
+}
+
+async function readHighAccuracyPosition(): Promise<GetPositionResult> {
   if (Platform.OS === 'web') {
     const geolocation = typeof navigator !== 'undefined' ? navigator.geolocation : undefined;
     if (!geolocation) return { ok: false, reason: 'unavailable' };

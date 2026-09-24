@@ -4,6 +4,7 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 import { ChangaCard } from '../feed/ChangaCard';
 import { StarRating } from '../profile/StarRating';
 import { colors, radii, spacing, typography } from '../../constants/theme';
+import { asText, isRenderableUri } from '../../utils/safeAsync';
 
 export type WorkerResultCardModel = {
   id: string;
@@ -20,11 +21,12 @@ function escapeRegExp(s: string) {
 }
 
 function highlightParts(text: string, needleRaw: string): Array<{ t: string; h: boolean }> {
-  const needle = needleRaw.trim();
-  if (!needle) return [{ t: text, h: false }];
+  const safe = typeof text === 'string' ? text : '';
+  const needle = (needleRaw ?? '').trim();
+  if (!needle) return [{ t: safe, h: false }];
   const re = new RegExp(`(${escapeRegExp(needle)})`, 'ig');
-  const parts = text.split(re);
-  if (parts.length === 1) return [{ t: text, h: false }];
+  const parts = safe.split(re);
+  if (parts.length === 1) return [{ t: safe, h: false }];
   return parts
     .filter((p) => p.length > 0)
     .map((p) => ({ t: p, h: p.toLowerCase() === needle.toLowerCase() }));
@@ -43,13 +45,17 @@ export function WorkerResultCard({
   showChevron?: boolean;
   highlightQuery?: string;
 }) {
-  const nameParts = highlightParts(worker.firstName, highlightQuery ?? '');
-  const summaryParts = highlightParts(worker.summary, highlightQuery ?? '');
+  const nameParts = highlightParts(asText(worker?.firstName, 'Profesional'), highlightQuery ?? '');
+  const summaryParts = highlightParts(asText(worker?.summary, ''), highlightQuery ?? '');
+  const rawAvatar = worker?.avatarUrl;
+  const avatarUrl = isRenderableUri(rawAvatar) ? rawAvatar.trim() : '';
 
   return (
     <ChangaCard onPress={onPress} style={styles.cardMargin}>
       <View style={styles.thumbBox}>
-        <Image source={{ uri: worker.avatarUrl }} style={styles.thumbImg} resizeMode="contain" />
+        {avatarUrl ? (
+          <Image source={{ uri: avatarUrl }} style={styles.thumbImg} resizeMode="contain" />
+        ) : null}
       </View>
 
       <View style={styles.resultBody}>

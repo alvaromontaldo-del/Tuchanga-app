@@ -9,6 +9,30 @@ import { fetchContratacionById } from './contratacionesSupabase';
 
 export { isMercadoPagoEnabled };
 
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === 'object' && error && 'message' in error) {
+    const msg = String((error as { message?: unknown }).message ?? '').trim();
+    if (msg) return msg;
+  }
+  return fallback;
+}
+
+async function invokeEdge(
+  name: string,
+  body: Record<string, unknown>,
+): Promise<{ data: unknown; error: unknown }> {
+  try {
+    const sb = getSupabaseClient();
+    return await sb.functions.invoke(name, { body });
+  } catch (e) {
+    return {
+      data: null,
+      error: e instanceof Error ? e : new Error('Error de red al contactar el pago.'),
+    };
+  }
+}
+
 async function readInvokePayload(error: unknown): Promise<unknown> {
   const ctx = (error as { context?: Response }).context;
   if (ctx && typeof ctx.json === 'function') {
@@ -28,9 +52,8 @@ export async function crearPreferenciaSeña(
     return { ok: false, code: 'mp_not_configured', message: 'MercadoPago no está habilitado en la app.' };
   }
 
-  const sb = getSupabaseClient();
-  const { data, error } = await sb.functions.invoke('mp_crear_preferencia', {
-    body: { contratacion_id: contratacionId },
+  const { data, error } = await invokeEdge('mp_crear_preferencia', {
+    contratacion_id: contratacionId,
   });
 
   if (error) {
@@ -38,8 +61,8 @@ export async function crearPreferenciaSeña(
     const code = mapMpCheckoutError(payload);
     const msg =
       typeof payload === 'object' && payload && 'detail' in payload
-        ? String((payload as { detail?: string }).detail ?? error.message)
-        : error.message;
+        ? String((payload as { detail?: string }).detail ?? errorMessage(error, ''))
+        : errorMessage(error, '');
     return { ok: false, code, message: msg || 'No se pudo iniciar el pago.' };
   }
 
@@ -58,9 +81,8 @@ export async function crearPreferenciaCostoServicioMateriales(
     return { ok: false, code: 'mp_not_configured', message: 'MercadoPago no está habilitado en la app.' };
   }
 
-  const sb = getSupabaseClient();
-  const { data, error } = await sb.functions.invoke('mp_crear_preferencia', {
-    body: { order_id: orderId },
+  const { data, error } = await invokeEdge('mp_crear_preferencia', {
+    order_id: orderId,
   });
 
   if (error) {
@@ -68,8 +90,8 @@ export async function crearPreferenciaCostoServicioMateriales(
     const code = mapMpCheckoutError(payload);
     const msg =
       typeof payload === 'object' && payload && 'detail' in payload
-        ? String((payload as { detail?: string }).detail ?? error.message)
-        : error.message;
+        ? String((payload as { detail?: string }).detail ?? errorMessage(error, ''))
+        : errorMessage(error, '');
     return { ok: false, code, message: msg || 'No se pudo iniciar el pago.' };
   }
 
@@ -99,7 +121,12 @@ export async function confirmarSeñaMercadoPago(
     return { ok: false, message: 'MercadoPago no está habilitado.' };
   }
 
-  const existing = await fetchContratacionById(contratacionId);
+  let existing: Awaited<ReturnType<typeof fetchContratacionById>> = null;
+  try {
+    existing = await fetchContratacionById(contratacionId);
+  } catch {
+    return { ok: false, message: 'No se pudo consultar el estado del pago.' };
+  }
   if (
     existing?.estado_pago === 'seña_pagada' ||
     existing?.estado_pago === 'totalmente_pagado'
@@ -107,12 +134,9 @@ export async function confirmarSeñaMercadoPago(
     return { ok: true, estado_pago: existing.estado_pago, already_paid: true };
   }
 
-  const sb = getSupabaseClient();
-  const { data, error } = await sb.functions.invoke('mp_confirmar_sena', {
-    body: {
-      contratacion_id: contratacionId,
-      ...(mpPaymentId ? { mp_payment_id: mpPaymentId } : {}),
-    },
+  const { data, error } = await invokeEdge('mp_confirmar_sena', {
+    contratacion_id: contratacionId,
+    ...(mpPaymentId ? { mp_payment_id: mpPaymentId } : {}),
   });
 
   if (error) {
@@ -123,9 +147,9 @@ export async function confirmarSeñaMercadoPago(
             (payload as { detail?: string; error?: string; message?: string }).detail ??
               (payload as { message?: string }).message ??
               (payload as { error?: string }).error ??
-              error.message,
+              errorMessage(error, ''),
           )
-        : error.message;
+        : errorMessage(error, '');
     return { ok: false, message: msg || 'No se pudo confirmar el pago.' };
   }
 
@@ -146,12 +170,9 @@ export async function confirmarCostoServicioMaterialesMp(
     return { ok: false, message: 'MercadoPago no está habilitado.' };
   }
 
-  const sb = getSupabaseClient();
-  const { data, error } = await sb.functions.invoke('mp_confirmar_sena', {
-    body: {
-      order_id: orderId,
-      ...(mpPaymentId ? { mp_payment_id: mpPaymentId } : {}),
-    },
+  const { data, error } = await invokeEdge('mp_confirmar_sena', {
+    order_id: orderId,
+    ...(mpPaymentId ? { mp_payment_id: mpPaymentId } : {}),
   });
 
   if (error) {
@@ -162,9 +183,9 @@ export async function confirmarCostoServicioMaterialesMp(
             (payload as { detail?: string; error?: string; message?: string }).detail ??
               (payload as { message?: string }).message ??
               (payload as { error?: string }).error ??
-              error.message,
+              errorMessage(error, ''),
           )
-        : error.message;
+        : errorMessage(error, '');
     return { ok: false, message: msg || 'No se pudo confirmar el pago.' };
   }
 
@@ -182,14 +203,18 @@ export const confirmarSeñaMaterialesMercadoPago = confirmarCostoServicioMateria
 
 /** Sincroniza seña con MP si el cliente ya pagó pero el estado local sigue pendiente. */
 export async function sincronizarSeñaSiPendiente(contratacionId: string): Promise<boolean> {
-  const row = await fetchContratacionById(contratacionId);
-  if (!row) return false;
-  if (row.estado_pago === 'seña_pagada' || row.estado_pago === 'totalmente_pagado') {
-    return true;
+  try {
+    const row = await fetchContratacionById(contratacionId);
+    if (!row) return false;
+    if (row.estado_pago === 'seña_pagada' || row.estado_pago === 'totalmente_pagado') {
+      return true;
+    }
+    if (row.estado_pago !== 'pendiente_seña') return false;
+    const result = await confirmarSeñaMercadoPago(contratacionId);
+    return result.ok;
+  } catch {
+    return false;
   }
-  if (row.estado_pago !== 'pendiente_seña') return false;
-  const result = await confirmarSeñaMercadoPago(contratacionId);
-  return result.ok;
 }
 
 export function parsePagoRetornoUrl(url: string): {

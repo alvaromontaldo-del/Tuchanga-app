@@ -18,6 +18,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useUserMode } from '../../context/UserModeContext';
 import { useUnreadMessages } from '../../context/UnreadMessagesContext';
 import type { ConversationRole } from '../../services/chatApi';
+import { listKey } from '../../utils/safeAsync';
 import { isMessagingAvailable } from '../../config/api';
 import {
   buildChatHeaderSubtitle,
@@ -298,7 +299,7 @@ export function ConversationsListScreen({ navigation }: Props) {
         <FlatList
           ref={listRef}
           data={itemsForTab}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item, index) => listKey(item?.id, index, 'chat')}
           extraData={activeTab}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={

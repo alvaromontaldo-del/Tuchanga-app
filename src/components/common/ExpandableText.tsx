@@ -65,7 +65,8 @@ export function ExpandableText({
     [expanded, numberOfLinesCollapsed],
   );
 
-  if (!text.trim()) return null;
+  const safeText = typeof text === 'string' ? text : '';
+  if (!safeText.trim()) return null;
 
   return (
     <View style={style} onLayout={onContainerLayout}>
@@ -76,12 +77,12 @@ export function ExpandableText({
           accessible={false}
           importantForAccessibility="no"
         >
-          {text}
+          {safeText}
         </Text>
       ) : null}
 
       <Text style={textStyle} numberOfLines={clamped}>
-        {text}
+        {safeText}
       </Text>
       {canExpand ? (
         <View style={moreAlign === 'right' ? styles.moreRowRight : styles.moreRowLeft}>

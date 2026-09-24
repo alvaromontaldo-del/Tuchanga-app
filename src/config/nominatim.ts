@@ -59,21 +59,31 @@ export async function fetchNominatimSuggestions(
 
   const url = `https://nominatim.openstreetmap.org/search?${params.toString()}`;
 
-  const res = await fetch(url, {
-    headers: {
-      // Nominatim recomienda identificar la app; en mobile el header puede ignorarse,
-      // pero no rompe y ayuda cuando está disponible.
-      'User-Agent': 'YaChanga/1.0',
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: {
+        // Nominatim recomienda identificar la app; en mobile el header puede ignorarse,
+        // pero no rompe y ayuda cuando está disponible.
+        'User-Agent': 'YaChanga/1.0',
+      },
+    });
+  } catch {
+    return [];
+  }
   if (!res.ok) return [];
-  const data = (await res.json()) as Array<{
+  let data: Array<{
     place_id?: number | string;
     display_name?: string;
     lat?: string;
     lon?: string;
     address?: NominatimAddressParts;
-  }>;
+  }> = [];
+  try {
+    data = (await res.json()) as typeof data;
+  } catch {
+    return [];
+  }
 
   return (data ?? [])
     .map((x) => {
@@ -99,20 +109,24 @@ export async function reverseNominatim(lat: number, lng: number): Promise<string
     `lon=${encodeURIComponent(String(lng))}` +
     `&format=json&zoom=18&addressdetails=1&accept-language=es`;
 
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'YaChanga/1.0',
-    },
-  });
-  if (!res.ok) return null;
-  const data = (await res.json()) as {
-    address?: NominatimAddressParts;
-    display_name?: string;
-  };
-  const short =
-    buildShortAddressFromParts(data.address ?? {}) ||
-    (data.display_name?.trim() ? formatShortAddress(data.display_name.trim()) : null);
-  return short;
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'YaChanga/1.0',
+      },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      address?: NominatimAddressParts;
+      display_name?: string;
+    };
+    const short =
+      buildShortAddressFromParts(data.address ?? {}) ||
+      (data.display_name?.trim() ? formatShortAddress(data.display_name.trim()) : null);
+    return short;
+  } catch {
+    return null;
+  }
 }
 
 export async function reverseNominatimStreet(lat: number, lng: number): Promise<string | null> {
@@ -122,31 +136,35 @@ export async function reverseNominatimStreet(lat: number, lng: number): Promise<
     `&lon=${encodeURIComponent(String(lng))}` +
     `&addressdetails=1&zoom=18&accept-language=es`;
 
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'YaChanga/1.0',
-    },
-  });
-  if (!res.ok) return null;
-  const data = (await res.json()) as {
-    address?: {
-      road?: string;
-      house_number?: string;
-      pedestrian?: string;
-      neighbourhood?: string;
-      suburb?: string;
-      city?: string;
-      town?: string;
-      village?: string;
-      state?: string;
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'YaChanga/1.0',
+      },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      address?: {
+        road?: string;
+        house_number?: string;
+        pedestrian?: string;
+        neighbourhood?: string;
+        suburb?: string;
+        city?: string;
+        town?: string;
+        village?: string;
+        state?: string;
+      };
+      display_name?: string;
     };
-    display_name?: string;
-  };
 
-  const a = data.address;
-  const short = buildShortAddressFromParts(a ?? {});
-  if (short) return short;
-  return data.display_name?.trim() ? formatShortAddress(data.display_name.trim()) : null;
+    const a = data.address;
+    const short = buildShortAddressFromParts(a ?? {});
+    if (short) return short;
+    return data.display_name?.trim() ? formatShortAddress(data.display_name.trim()) : null;
+  } catch {
+    return null;
+  }
 }
 
 export function osmTileUrlTemplate() {
