@@ -35,6 +35,29 @@ function buildViewBoxAround(lat: number, lng: number, deltaDeg: number) {
   return `${left},${top},${right},${bottom}`;
 }
 
+
+/** Si el usuario escribio "Volta 1140" y Nominatim no trae house_number, recuperar la altura del query. */
+function extractStreetNumberFromQuery(query: string): string | null {
+  const m = query.trim().match(/^(.*?)\s+(\d{1,6}[A-Za-z]?)\s*$/);
+  if (!m) return null;
+  const street = m[1].trim();
+  const num = m[2].trim();
+  if (street.length < 2) return null;
+  return num;
+}
+
+function ensureHouseNumberInAddress(address: string, query: string): string {
+  const num = extractStreetNumberFromQuery(query);
+  if (!num) return address;
+  const escaped = num.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (new RegExp(`\\b${escaped}\\b`).test(address)) return address;
+  const parts = address.split(',').map((x) => x.trim()).filter(Boolean);
+  if (!parts.length) return address;
+  if (new RegExp(`\\b${escaped}\\b`).test(parts[0])) return address;
+  parts[0] = `${parts[0]} ${num}`;
+  return parts.join(', ');
+}
+
 export async function fetchNominatimSuggestions(
   query: string,
   opts?: NominatimSearchOptions,
@@ -90,11 +113,17 @@ export async function fetchNominatimSuggestions(
       const lat = numOrNull(x.lat);
       const lng = numOrNull(x.lon);
       if (!x.display_name || lat === null || lng === null) return null;
+      const parts: NominatimAddressParts = { ...(x.address ?? {}) };
+      if (!parts.house_number) {
+        const fromQuery = extractStreetNumberFromQuery(q);
+        if (fromQuery) parts.house_number = fromQuery;
+      }
       const short =
-        buildShortAddressFromParts(x.address ?? {}) || formatShortAddress(x.display_name);
+        buildShortAddressFromParts(parts) || formatShortAddress(x.display_name);
+      const shortWithNum = ensureHouseNumberInAddress(short, q);
       return {
         id: String(x.place_id ?? `${lat},${lng}`),
-        address: short,
+        address: shortWithNum,
         lat,
         lng,
       } satisfies NominatimSuggestion;

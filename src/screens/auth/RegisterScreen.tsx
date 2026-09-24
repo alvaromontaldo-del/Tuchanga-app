@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { ensureGalleryPermission, ensureCameraPermission } from '../../utils/mediaPermissions';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -376,9 +377,8 @@ export function RegisterScreen({ navigation, route }: Props) {
   }
 
   async function pickAvatarFromGallery() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      toast.warning('Necesitamos acceso a tu galería para subir tu foto de perfil.', 'Permisos');
+    const okGallery = await ensureGalleryPermission();
+    if (!okGallery) {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -393,9 +393,8 @@ export function RegisterScreen({ navigation, route }: Props) {
   }
 
   async function pickAvatarFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      toast.warning('Necesitamos acceso a la cámara para sacar tu foto de perfil.', 'Permisos');
+    const okCamera = await ensureCameraPermission();
+    if (!okCamera) {
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -420,9 +419,8 @@ export function RegisterScreen({ navigation, route }: Props) {
   }
 
   async function pickTradePhoto(tradeId: string) {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      toast.warning('Necesitamos acceso a tu galería para subir fotos del oficio.', 'Permisos');
+    const okGallery = await ensureGalleryPermission();
+    if (!okGallery) {
       return;
     }
     const current =

@@ -441,6 +441,19 @@ function mapDisponibilidadOpcion(r: Record<string, unknown>): DisponibilidadOpci
   };
 }
 
+
+function sortDisponibilidadChronological(rows: DisponibilidadOpcion[]): DisponibilidadOpcion[] {
+  return [...rows].sort((a, b) => {
+    const da = String(a.fecha_trabajo ?? '');
+    const db = String(b.fecha_trabajo ?? '');
+    if (da !== db) return da.localeCompare(db);
+    const ha = String(a.hora_inicio ?? '').slice(0, 5);
+    const hb = String(b.hora_inicio ?? '').slice(0, 5);
+    if (ha !== hb) return ha.localeCompare(hb);
+    return String(a.hora_fin ?? '').slice(0, 5).localeCompare(String(b.hora_fin ?? '').slice(0, 5));
+  });
+}
+
 export async function fetchDisponibilidadOpciones(
   contratacionId: string,
   soloPropuestas = true,
@@ -454,7 +467,7 @@ export async function fetchDisponibilidadOpciones(
   if (soloPropuestas) query = query.eq('estado', 'propuesta');
   const { data, error } = await query;
   if (error || !data) return [];
-  return (data as Record<string, unknown>[]).map(mapDisponibilidadOpcion);
+  return sortDisponibilidadChronological((data as Record<string, unknown>[]).map(mapDisponibilidadOpcion));
 }
 
 export type DisponibilidadSlotInput = {

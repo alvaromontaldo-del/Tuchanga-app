@@ -19,13 +19,17 @@ const SESSION_ROLE_KEY = '@yachanga/session_role';
 export type SessionRole = 'client' | 'commerce';
 
 /** Statuses that allow choosing the commerce shell. */
+/** Estados que habilitan el shell comercio (NO incluye pending_approval). */
 export const COMMERCE_SHELL_STATUSES = new Set([
-  'pending_approval',
   'trial',
   'active',
   'unpaid',
   'paused',
 ]);
+
+/** Comercio creado pero aun no aceptado por admin. */
+export const COMMERCE_PENDING_STATUS = 'pending_approval';
+
 
 type CommerceShellContextValue = {
   stores: MyStoreSummary[];
@@ -38,6 +42,8 @@ type CommerceShellContextValue = {
   needsRoleChoice: boolean;
   primaryStore: MyStoreSummary | null;
   hasCommerceStore: boolean;
+  /** True si hay local en pending_approval (aun no aprobado). */
+  hasPendingCommerceStore: boolean;
   refresh: () => Promise<MyStoreSummary[]>;
   enterCommerceIntent: () => Promise<void>;
   clearCommerceIntent: () => Promise<void>;
@@ -152,6 +158,15 @@ export function CommerceShellProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const chooseSessionRole = useCallback(async (role: SessionRole) => {
+    if (role === 'commerce') {
+      const approved = stores.some((st) => COMMERCE_SHELL_STATUSES.has(st.status));
+      const pendingOnly = !approved && stores.some((st) => st.status === COMMERCE_PENDING_STATUS);
+      if (pendingOnly) {
+        // El caller debe mostrar el Alert; acá no elevamos a shell comercio.
+        return;
+      }
+    }
+
     setSessionRole(role);
     try {
       await AsyncStorage.setItem(SESSION_ROLE_KEY, role);
@@ -165,7 +180,7 @@ export function CommerceShellProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [stores]);
 
   const clearSessionRole = useCallback(async () => {
     setSessionRole(null);
@@ -177,6 +192,7 @@ export function CommerceShellProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const hasCommerceStore = stores.some((s) => COMMERCE_SHELL_STATUSES.has(s.status));
+  const hasPendingCommerceStore = stores.some((s) => s.status === COMMERCE_PENDING_STATUS);
 
   /**
    * Provisional: si tiene comercio y aún no eligió rol en esta sesión hidratada,
@@ -194,7 +210,7 @@ export function CommerceShellProvider({ children }: { children: ReactNode }) {
     isAuthed &&
       roleHydrated &&
       (sessionRole === 'commerce' ||
-        (sessionRole == null && commerceIntent && !hasCommerceStore)),
+        (sessionRole == null && commerceIntent && !hasCommerceStore && !hasPendingCommerceStore)),
   );
 
   const primaryStore = useMemo(() => {
@@ -212,6 +228,7 @@ export function CommerceShellProvider({ children }: { children: ReactNode }) {
       needsRoleChoice,
       primaryStore,
       hasCommerceStore,
+      hasPendingCommerceStore,
       refresh,
       enterCommerceIntent,
       clearCommerceIntent,
@@ -228,6 +245,7 @@ export function CommerceShellProvider({ children }: { children: ReactNode }) {
       needsRoleChoice,
       primaryStore,
       hasCommerceStore,
+      hasPendingCommerceStore,
       refresh,
       enterCommerceIntent,
       clearCommerceIntent,

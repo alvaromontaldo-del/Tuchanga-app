@@ -1,3 +1,4 @@
+import { ensureLocationPermission } from './mediaPermissions';
 import { Platform } from 'react-native';
 import * as Location from 'expo-location';
 
@@ -41,8 +42,8 @@ async function readHighAccuracyPosition(): Promise<GetPositionResult> {
     });
   }
 
-  const { status } = await Location.requestForegroundPermissionsAsync();
-  if (status !== 'granted') return { ok: false, reason: 'denied' };
+  const okLoc = await ensureLocationPermission();
+  if (!okLoc) return { ok: false, reason: 'denied' };
 
   try {
     const pos = await Location.getCurrentPositionAsync({
