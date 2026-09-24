@@ -1,4 +1,4 @@
-﻿import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -134,7 +134,7 @@ export function PagoCheckoutScreen() {
 
   const handleCancel = useCallback(() => {
     // Si capturamos payment_id, asumir pending y forzar sync/RPC.
-    // Si solo cancelÃ³ sin pagar, status failure â†’ NO acredita por RPC.
+    // Si solo canceló sin pagar, status failure → NO acredita por RPC.
     const status = mpPaymentIdRef.current ? 'pending' : 'failure';
     navigation.replace('PagoRetorno', {
       contratacionId,
@@ -167,8 +167,8 @@ export function PagoCheckoutScreen() {
           <Text style={styles.headerTitle}>Mercado Pago</Text>
           <Text style={styles.headerSubtitle}>
             {isMaterialServiceFee
-              ? 'Costo de servicio YaChanga Â· checkout seguro'
-              : 'Costo de servicio YaChanga Â· checkout seguro'}
+              ? 'Costo de servicio YaChanga · checkout seguro'
+              : 'Costo de servicio YaChanga · checkout seguro'}
           </Text>
         </View>
         <View style={styles.backBtn} />
@@ -178,12 +178,12 @@ export function PagoCheckoutScreen() {
         <View style={styles.sandboxBanner}>
           <Text style={styles.sandboxTitle}>Modo de prueba (sandbox)</Text>
           <Text style={styles.sandboxText}>
-            La cinta &quot;Como usuario&quot; en MP es normal en sandbox (no significa que estÃ©s
+            La cinta &quot;Como usuario&quot; en MP es normal en sandbox (no significa que estés
             logueado).{'\n\n'}
-            OpciÃ³n A (recomendada): Ingresar con cuenta de prueba comprador (TESTUSER + contraseÃ±a de
+            Opción A (recomendada): Ingresar con cuenta de prueba comprador (TESTUSER + contraseña de
             Developers).{'\n\n'}
-            OpciÃ³n B: Sin cuenta â†’ Tarjeta â†’ 4509 9535 6623 3704 Â· CVV 123 Â· titular exacto APRO Â· DNI
-            12345678 Â· 1 cuota.
+            Opción B: Sin cuenta → Tarjeta → 4509 9535 6623 3704 · CVV 123 · titular exacto APRO · DNI
+            12345678 · 1 cuota.
           </Text>
           <View style={styles.sandboxActions}>
             <Pressable style={styles.sandboxBtn} onPress={openExternalBrowser}>
@@ -202,7 +202,7 @@ export function PagoCheckoutScreen() {
         </View>
       ) : !checkoutReady ? (
         <View style={styles.center}>
-          <Text style={styles.sandboxText}>No se pudo abrir el checkout. VolvÃ© a intentar el pago.</Text>
+          <Text style={styles.sandboxText}>No se pudo abrir el checkout. Volvé a intentar el pago.</Text>
           <Pressable style={styles.sandboxBtn} onPress={() => navigation.goBack()}>
             <Text style={styles.sandboxBtnText}>Volver</Text>
           </Pressable>
@@ -285,4 +285,3 @@ const styles = StyleSheet.create({
   sandboxBtnGhostText: { color: '#92400E', fontWeight: '800', fontSize: 12 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
-
