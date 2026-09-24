@@ -609,7 +609,7 @@ export async function fetchClientQuotesForRequest(
       items.push({
         quoteItemId: String((qi as { id?: string }).id ?? `${ri.id}-${qi.variant_index ?? 1}`),
         requestItemId: ri.id,
-        description: ri.description,
+        description: String(ri.description ?? 'Material'),
         variantLabel:
           (typeof qi.variant_label === 'string' && qi.variant_label.trim()
             ? qi.variant_label.trim()
@@ -627,7 +627,7 @@ export async function fetchClientQuotesForRequest(
       });
     }
     items.sort((a, b) => {
-      const d = a.description.localeCompare(b.description, 'es');
+      const d = String(a.description ?? '').localeCompare(String(b.description ?? ''), 'es');
       if (d !== 0) return d;
       return a.variantIndex - b.variantIndex;
     });

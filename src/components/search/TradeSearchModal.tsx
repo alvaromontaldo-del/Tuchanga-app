@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radii, spacing } from '../../constants/theme';
+import { listKey } from '../../utils/safeAsync';
 import {
   findRubroByNombre,
   getCategoriasSortedByPopularidad,
@@ -140,7 +141,7 @@ export function TradeSearchModal({
 
         <SectionList
           sections={sections}
-          keyExtractor={(item) => item.slug}
+          keyExtractor={(item, index) => listKey(item?.slug || item?.nombre, index, 'oficio')}
           style={styles.list}
           contentContainerStyle={[
             styles.listContent,

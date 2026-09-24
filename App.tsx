@@ -1,6 +1,7 @@
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import { AppErrorBoundary } from './src/components/common/AppErrorBoundary';
 import { configureAndroidSystemBars } from './src/navigation/configureAndroidSystemBars';
 import {
   initialWindowMetrics,
@@ -31,26 +32,28 @@ export default function App() {
 
   return (
     <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-      <ToastProvider>
-        <AuthProvider>
-          <CommerceShellProvider>
-            <WorkerProfileProvider>
-              <FavoritesProvider>
-                <UserModeProvider>
-                  <UnreadMessagesProvider>
-                    <NavigationContainer ref={navigationRef}>
-                      <SocketProvider>
-                        <RootNavigator />
-                      </SocketProvider>
-                    </NavigationContainer>
-                  </UnreadMessagesProvider>
-                  <StatusBar style="dark" />
-                </UserModeProvider>
-              </FavoritesProvider>
-            </WorkerProfileProvider>
-          </CommerceShellProvider>
-        </AuthProvider>
-      </ToastProvider>
+      <AppErrorBoundary>
+        <ToastProvider>
+          <AuthProvider>
+            <CommerceShellProvider>
+              <WorkerProfileProvider>
+                <FavoritesProvider>
+                  <UserModeProvider>
+                    <UnreadMessagesProvider>
+                      <NavigationContainer ref={navigationRef}>
+                        <SocketProvider>
+                          <RootNavigator />
+                        </SocketProvider>
+                      </NavigationContainer>
+                    </UnreadMessagesProvider>
+                    <StatusBar style="dark" />
+                  </UserModeProvider>
+                </FavoritesProvider>
+              </WorkerProfileProvider>
+            </CommerceShellProvider>
+          </AuthProvider>
+        </ToastProvider>
+      </AppErrorBoundary>
     </SafeAreaProvider>
   );
 }

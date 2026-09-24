@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing } from '../../constants/theme';
+import { isRenderableUri, listKey } from '../../utils/safeAsync';
 
 type Props = {
   photos: string[];
@@ -26,7 +27,8 @@ type Props = {
  * Cierre: tap (fondo o imagen), botón y swipe vertical.
  */
 export function ImageLightboxModal({ photos, initialIndex = 0, onClose }: Props) {
-  const visible = photos.length > 0;
+  const safePhotos = (Array.isArray(photos) ? photos : []).filter((u) => isRenderableUri(u));
+  const visible = safePhotos.length > 0;
   const listRef = useRef<FlatList<string> | null>(null);
   const { width: winW, height: winH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -34,8 +36,8 @@ export function ImageLightboxModal({ photos, initialIndex = 0, onClose }: Props)
 
   const safeIndex = useMemo(() => {
     if (!Number.isFinite(initialIndex)) return 0;
-    return Math.max(0, Math.min(photos.length - 1, Math.floor(initialIndex)));
-  }, [initialIndex, photos.length]);
+    return Math.max(0, Math.min(safePhotos.length - 1, Math.floor(initialIndex)));
+  }, [initialIndex, safePhotos.length]);
 
   useEffect(() => {
     if (!visible) return;
@@ -119,8 +121,8 @@ export function ImageLightboxModal({ photos, initialIndex = 0, onClose }: Props)
             ref={(r) => {
               listRef.current = r;
             }}
-            data={photos}
-            keyExtractor={(u, i) => `${u}-${i}`}
+            data={safePhotos}
+            keyExtractor={(u, i) => listKey(`${i}:${u}`, i, 'photo')}
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}

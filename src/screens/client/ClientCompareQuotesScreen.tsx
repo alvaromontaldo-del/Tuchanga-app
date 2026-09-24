@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { AppButton } from '../../components/common/AppButton';
 import { useAppToast } from '../../components/toast/toast';
 import { colors, radii, spacing } from '../../constants/theme';
+import { listKey } from '../../utils/safeAsync';
 import {
   useAcceptClientQuote,
   useClientCompareQuotes,
@@ -394,7 +395,7 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
     <View style={styles.flex}>
       <SectionList
         sections={sections}
-        keyExtractor={(item) => item.quoteId}
+        keyExtractor={(item, index) => listKey(item?.quoteId, index, 'cotizacion')}
         stickySectionHeadersEnabled
         contentContainerStyle={[
           styles.list,
@@ -633,7 +634,7 @@ const QuoteCard = memo(function QuoteCard({
         <View style={styles.contactBlock}>
           <Text style={styles.revealedLabel}>Comercio revelado</Text>
           <Text style={styles.storeName} numberOfLines={2}>
-            {card.storeName.trim() || 'Comercio'}
+            {(card.storeName ?? '').trim() || 'Comercio'}
           </Text>
           <Text style={styles.rubroLine} numberOfLines={1}>
             {rubroLine}

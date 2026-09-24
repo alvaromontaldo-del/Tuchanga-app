@@ -73,6 +73,8 @@ export function AddressDeliveryField({
         });
         if (reqId !== requestIdRef.current) return;
         setResults(suggestions.map((s) => ({ address: s.address, lat: s.lat, lng: s.lng })));
+      } catch {
+        if (reqId === requestIdRef.current) setResults([]);
       } finally {
         if (reqId === requestIdRef.current) setSearching(false);
       }

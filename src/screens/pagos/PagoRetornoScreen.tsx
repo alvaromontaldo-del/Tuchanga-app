@@ -30,13 +30,11 @@ function isMaterialFeePaid(status: string, depositStatus: string, contactReveale
 export function PagoRetornoScreen() {
   const navigation = useNavigation<RootStackScreenProps<'PagoRetorno'>['navigation']>();
   const route = useRoute<Route>();
-  const {
-    contratacionId,
-    materialOrderId,
-    status: initialStatus,
-    mpPaymentId,
-    conversationId,
-  } = route.params;
+  const contratacionId = route.params?.contratacionId;
+  const materialOrderId = route.params?.materialOrderId;
+  const initialStatus = route.params?.status;
+  const mpPaymentId = route.params?.mpPaymentId;
+  const conversationId = route.params?.conversationId;
 
   const [syncError, setSyncError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -114,6 +112,20 @@ export function PagoRetornoScreen() {
   }, [confirmed, materialConfirmed, goNext]);
 
   const done = confirmed || materialConfirmed;
+
+  if (!contratacionId && !materialOrderId) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <View style={styles.card}>
+          <Text style={styles.title}>No encontramos el pago</Text>
+          <Text style={styles.subtitle}>Volvé al chat o a la orden e intentá de nuevo.</Text>
+          <Pressable onPress={() => navigation.goBack()} style={styles.btn}>
+            <Text style={styles.btnText}>Volver</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
   const showFailureHint = initialStatus === 'failure' && !done && !waiting && !retrying;
 
   const title = done

@@ -36,23 +36,27 @@ export function FeedProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     if (!isSupabaseConfigured()) return;
-    const rows = await fetchFeedPostsFromSupabase({ limit: 60 });
-    setPosts(
-      rows.map((r) => ({
-        id: r.id,
-        workerId: r.workerId,
-        workerFirstName: r.workerFirstName,
-        workerAvatarUrl: r.workerAvatarUrl,
-        workerRatingAverage: r.workerRatingAverage,
-        workerReviewCount: r.workerReviewCount,
-        trade: r.trade,
-        workImageUrls: normalizePostImageUrls(r.workImageUrls),
-        description: r.description,
-        createdAt: r.createdAt,
-        likeCount: r.likeCount,
-        likedByMe: r.likedByMe,
-      })),
-    );
+    try {
+      const rows = await fetchFeedPostsFromSupabase({ limit: 60 });
+      setPosts(
+        (rows ?? []).map((r) => ({
+          id: r.id,
+          workerId: r.workerId,
+          workerFirstName: r.workerFirstName,
+          workerAvatarUrl: r.workerAvatarUrl,
+          workerRatingAverage: r.workerRatingAverage,
+          workerReviewCount: r.workerReviewCount,
+          trade: r.trade,
+          workImageUrls: normalizePostImageUrls(r.workImageUrls),
+          description: r.description ?? '',
+          createdAt: r.createdAt,
+          likeCount: r.likeCount,
+          likedByMe: r.likedByMe,
+        })),
+      );
+    } catch (e) {
+      console.warn('[feed] no se pudo refrescar', e);
+    }
   }, []);
 
   useEffect(() => {

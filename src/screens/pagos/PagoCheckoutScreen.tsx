@@ -17,6 +17,7 @@ import {
   shouldBlockMpExternalNavigation,
 } from '../../config/mercadoPago';
 import { colors, radii, spacing, typography } from '../../constants/theme';
+import { isRenderableUri } from '../../utils/safeAsync';
 import { usePagoRetornoDeepLink } from '../../navigation/usePagoRetornoDeepLink';
 import type { RootStackParamList, RootStackScreenProps } from '../../navigation/rootTypes';
 
@@ -25,13 +26,12 @@ type Route = RouteProp<RootStackParamList, 'PagoCheckout'>;
 export function PagoCheckoutScreen() {
   const navigation = useNavigation<RootStackScreenProps<'PagoCheckout'>['navigation']>();
   const route = useRoute<Route>();
-  const {
-    contratacionId,
-    materialOrderId,
-    checkoutUrl,
-    sandbox = false,
-    conversationId,
-  } = route.params;
+  const contratacionId = route.params?.contratacionId;
+  const materialOrderId = route.params?.materialOrderId;
+  const checkoutUrl = route.params?.checkoutUrl ?? '';
+  const sandbox = route.params?.sandbox ?? false;
+  const conversationId = route.params?.conversationId;
+  const checkoutReady = isRenderableUri(checkoutUrl);
   const isMaterialServiceFee = Boolean(materialOrderId);
 
   const [closing, setClosing] = useState(false);
@@ -138,7 +138,8 @@ export function PagoCheckoutScreen() {
   }, [contratacionId, conversationId, materialOrderId, navigation]);
 
   const openExternalBrowser = useCallback(() => {
-    void Linking.openURL(checkoutUrl);
+    if (!isRenderableUri(checkoutUrl)) return;
+    void Linking.openURL(checkoutUrl).catch(() => undefined);
   }, [checkoutUrl]);
 
   const restartCheckout = useCallback(() => {
@@ -190,6 +191,13 @@ export function PagoCheckoutScreen() {
       {closing ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : !checkoutReady ? (
+        <View style={styles.center}>
+          <Text style={styles.sandboxText}>No se pudo abrir el checkout. Volvé a intentar el pago.</Text>
+          <Pressable style={styles.sandboxBtn} onPress={() => navigation.goBack()}>
+            <Text style={styles.sandboxBtnText}>Volver</Text>
+          </Pressable>
         </View>
       ) : (
         <WebView

@@ -95,22 +95,30 @@ function parseTimeParts(time: string): { hours: number; minutes: number } {
 }
 
 function opcionesToSlotDrafts(opciones: DisponibilidadOpcion[]): SlotDraft[] {
-  return opciones.map((op) => {
-    const [y, mo, d] = op.fecha_trabajo.split('-').map(Number);
+  const drafts: SlotDraft[] = [];
+  for (const op of opciones ?? []) {
+    const fechaRaw = String(op?.fecha_trabajo ?? '');
+    const parts = fechaRaw.split('-').map(Number);
+    if (parts.length < 3 || parts.some((n) => !Number.isFinite(n))) continue;
+    if (!op?.hora_inicio || !op?.hora_fin) continue;
+    const [y, mo, d] = parts;
     const fecha = new Date(y, mo - 1, d);
+    if (Number.isNaN(fecha.getTime())) continue;
     const ini = parseTimeParts(op.hora_inicio);
     const fin = parseTimeParts(op.hora_fin);
+    if (!Number.isFinite(ini.hours) || !Number.isFinite(fin.hours)) continue;
     const horaInicio = new Date(fecha);
     horaInicio.setHours(ini.hours, ini.minutes, 0, 0);
     const horaFin = new Date(fecha);
     horaFin.setHours(fin.hours, fin.minutes, 0, 0);
-    return {
-      id: op.id,
+    drafts.push({
+      id: op.id || `${y}-${mo}-${d}-${ini.hours}`,
       fecha,
       horaInicio,
       horaFin,
-    };
-  });
+    });
+  }
+  return drafts;
 }
 
 function formatDateDisplay(d: Date): string {
@@ -237,16 +245,20 @@ export function DetalleServicioScreen() {
   }, [myRole, row]);
 
   const reload = useCallback(async () => {
-    const data = await fetchContratacionById(contratacionId);
-    setRow(data);
-    if (data?.estado_trabajo === 'precio_aceptado') {
-      const ops = await fetchDisponibilidadOpciones(contratacionId);
-      setOpcionesAgenda(ops);
-      if (data.worker_id === user?.id) {
-        setSlots(ops.length > 0 ? opcionesToSlotDrafts(ops) : [newSlotDraft()]);
+    try {
+      const data = await fetchContratacionById(contratacionId);
+      setRow(data);
+      if (data?.estado_trabajo === 'precio_aceptado') {
+        const ops = await fetchDisponibilidadOpciones(contratacionId);
+        setOpcionesAgenda(ops);
+        if (data.worker_id === user?.id) {
+          setSlots(ops.length > 0 ? opcionesToSlotDrafts(ops) : [newSlotDraft()]);
+        }
+      } else {
+        setOpcionesAgenda([]);
       }
-    } else {
-      setOpcionesAgenda([]);
+    } catch {
+      /* red o fila incompleta: se mantiene lo ya cargado */
     }
   }, [contratacionId, user?.id]);
 

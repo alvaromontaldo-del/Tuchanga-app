@@ -56,9 +56,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   userRef.current = user;
 
   const syncPushToken = useCallback(async () => {
-    const res = await registerAndGetExpoPushToken();
-    if (res.ok) {
-      await persistExpoPushTokenToSupabase(res.token);
+    try {
+      const res = await registerAndGetExpoPushToken();
+      if (res.ok) {
+        await persistExpoPushTokenToSupabase(res.token);
+      }
+    } catch {
+      /* un fallo de push no debe tumbar la sesión */
     }
   }, []);
 

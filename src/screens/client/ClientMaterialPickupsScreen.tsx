@@ -15,6 +15,7 @@ import { AppButton } from '../../components/common/AppButton';
 import { colors, radii, spacing } from '../../constants/theme';
 import { useClientMaterialPickups } from '../../hooks/useClientMaterialPickups';
 import { formatMoneyAr } from '../../services/clientQuotesSupabase';
+import { listKey } from '../../utils/safeAsync';
 import {
   buildClientPickupCardContent,
   type ClientPickupCardModel,
@@ -117,7 +118,7 @@ export function ClientMaterialPickupsScreen() {
       {!error ? (
         <FlatList
           data={list}
-          keyExtractor={(item) => item.orderId}
+          keyExtractor={(item, index) => listKey(item?.orderId, index, 'orden')}
           contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={colors.primary} />

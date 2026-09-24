@@ -14,6 +14,7 @@ import type {
 } from '../../navigation/mainTypes';
 import type { WorkerReview } from '../../types/feed';
 import { formatPostDate } from '../../utils/formatDate';
+import { listKey } from '../../utils/safeAsync';
 
 type Props =
   | FeedStackScreenProps<'WorkerReviews'>
@@ -164,7 +165,7 @@ export function WorkerReviewsScreen({ route }: Props) {
     <FlatList
       style={styles.list}
       data={reviews}
-      keyExtractor={(r) => r.id}
+      keyExtractor={(r, index) => listKey(r?.id, index, 'review')}
       contentContainerStyle={styles.listContent}
       renderItem={({ item }) => <ReviewRow item={item} />}
       ListHeaderComponent={

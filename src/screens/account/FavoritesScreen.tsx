@@ -7,6 +7,7 @@ import { WorkerResultCard } from '../../components/search/WorkerResultCard';
 import { colors, spacing } from '../../constants/theme';
 import { useFavorites } from '../../context/FavoritesContext';
 import type { AccountStackScreenProps } from '../../navigation/accountTypes';
+import { listKey } from '../../utils/safeAsync';
 
 type Props = AccountStackScreenProps<'Favorites'>;
 
@@ -69,7 +70,7 @@ export function FavoritesScreen({ navigation }: Props) {
         <FlatList
           ref={listRef}
           data={data}
-          keyExtractor={(id) => id}
+          keyExtractor={(id, index) => listKey(id, index, 'fav')}
           contentContainerStyle={styles.listContent}
           onRefresh={() => void refresh()}
           refreshing={isLoading}
