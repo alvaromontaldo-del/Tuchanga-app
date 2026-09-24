@@ -43,6 +43,10 @@ export type Contratacion = {
   offline_pago_notificado_at: string | null;
   offline_pago_confirmado_at: string | null;
   disputa_motivo: string;
+  /** Días de garantía pactados en la cotización. null = sin garantía. */
+  warranty_days: number | null;
+  /** Inicio de la cuenta regresiva: primer finalizado. null hasta que el trabajo termina. */
+  warranty_anchor_at: string | null;
   created_at: string;
   updated_at: string;
 };

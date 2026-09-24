@@ -28,6 +28,8 @@ export type ChatQuote = {
   created_at: string;
   updated_at: string;
   replaces_quote_id: string | null;
+  /** null = sin garantía. */
+  warranty_days: number | null;
 };
 
 export type WorkerReview = {
@@ -88,7 +90,14 @@ export function chatQuoteFromMessageMetadata(
     created_at: item.created_at ?? new Date().toISOString(),
     updated_at: item.created_at ?? new Date().toISOString(),
     replaces_quote_id: null,
+    warranty_days: readWarrantyDays(meta.warranty_days ?? meta.warrantyDays),
   };
+}
+
+function readWarrantyDays(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const n = Math.floor(toNum(v));
+  return n > 0 ? n : null;
 }
 
 export function contratacionToChatQuote(c: Contratacion): ChatQuote {
@@ -118,6 +127,7 @@ export function contratacionToChatQuote(c: Contratacion): ChatQuote {
     created_at: c.created_at,
     updated_at: c.updated_at,
     replaces_quote_id: null,
+    warranty_days: c.warranty_days,
   };
 }
 
@@ -170,6 +180,8 @@ export async function createQuote(params: {
   feeRate?: number;
   serviceDetail?: string;
   replacesQuoteId?: string | null;
+  /** null = sin garantía. Entre 1 y 60 si incluye garantía. */
+  warrantyDays?: number | null;
 }): Promise<ChatQuote> {
   void params.workerId;
   void params.clientId;
@@ -185,6 +197,7 @@ export async function createQuote(params: {
     conversationId: params.conversationId,
     precioTrabajador: net,
     serviceDetail: detail,
+    warrantyDays: params.warrantyDays ?? null,
   });
 
   const row = await fetchContratacionById(id);

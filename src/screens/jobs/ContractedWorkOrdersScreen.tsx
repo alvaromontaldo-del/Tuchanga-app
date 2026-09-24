@@ -10,6 +10,11 @@ import { formatPostDate } from '../../utils/formatDate';
 import { fetchContratacionesByUser } from '../../services/contratacionesSupabase';
 import type { Contratacion, ContratacionEstadoPago, ContratacionEstadoTrabajo } from '../../types/contrataciones';
 import { professionalPayoutAmount, workerGivenName } from '../../utils/contractedWorkDisplay';
+import {
+  warrantyAnchorIso,
+  warrantyCountdown,
+  warrantyCountdownLabel,
+} from '../../utils/warrantyDays';
 
 type OrderRow = {
   conversation_id: string;
@@ -22,6 +27,10 @@ type OrderRow = {
   estado_pago: ContratacionEstadoPago;
   updated_at: string;
   created_at: string;
+  warranty_days: number | null;
+  warranty_anchor_at: string | null;
+  finalizado_at: string | null;
+  completed_by_worker_at: string | null;
 };
 
 function statusBadge(row: OrderRow): { label: string; tone: 'pending' | 'paid' | 'done' } {
@@ -48,6 +57,10 @@ function mapContratacion(c: Contratacion): OrderRow {
     estado_pago: c.estado_pago,
     updated_at: c.updated_at,
     created_at: c.created_at,
+    warranty_days: c.warranty_days,
+    warranty_anchor_at: c.warranty_anchor_at,
+    finalizado_at: c.finalizado_at,
+    completed_by_worker_at: c.completed_by_worker_at,
   };
 }
 
@@ -55,6 +68,7 @@ export function ContractedWorkOrdersScreen() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<OrderRow[]>([]);
   const [workerNameById, setWorkerNameById] = useState<Record<string, string>>({});
+  const [now, setNow] = useState(() => new Date());
 
   const currency = useMemo(
     () =>
@@ -65,6 +79,11 @@ export function ContractedWorkOrdersScreen() {
     [],
   );
   const fmtMoney = (n: number) => `$${currency.format(Math.round((Number(n) || 0) * 100) / 100)}`;
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,6 +150,17 @@ export function ContractedWorkOrdersScreen() {
           rows.map((q) => {
             const badge = statusBadge(q);
             const workerName = workerNameById[q.worker_id] ?? 'Profesional';
+            const warranty = warrantyCountdown({
+              warrantyDays: q.warranty_days,
+              anchorAt: warrantyAnchorIso({
+                estadoTrabajo: q.estado_trabajo,
+                warrantyAnchorAt: q.warranty_anchor_at,
+                finalizadoAt: q.finalizado_at,
+                completedByWorkerAt: q.completed_by_worker_at,
+              }),
+              now,
+            });
+            const warrantyLabel = warrantyCountdownLabel(warranty);
             return (
               <View key={q.id} style={styles.card}>
                 <View
@@ -151,6 +181,13 @@ export function ContractedWorkOrdersScreen() {
                   numberOfLinesCollapsed={3}
                   textStyle={styles.detail}
                 />
+                {warrantyLabel ? (
+                  <Text
+                    style={[styles.warranty, warranty.status === 'expired' && styles.warrantyExpired]}
+                  >
+                    {warrantyLabel}
+                  </Text>
+                ) : null}
                 <Text style={styles.date}>{formatPostDate(q.created_at)}</Text>
               </View>
             );
@@ -200,6 +237,8 @@ const styles = StyleSheet.create({
   workerNameStrong: { color: colors.text, fontWeight: '900' },
   amount: { marginTop: spacing.sm, fontSize: 20, fontWeight: '900', color: colors.text },
   detail: { marginTop: spacing.sm, ...typography.body, color: colors.textSecondary },
+  warranty: { marginTop: spacing.sm, fontSize: 14, fontWeight: '800', color: colors.text },
+  warrantyExpired: { color: colors.textSecondary },
   date: { marginTop: spacing.sm, fontSize: 12, fontWeight: '700', color: colors.textSecondary },
 });
 

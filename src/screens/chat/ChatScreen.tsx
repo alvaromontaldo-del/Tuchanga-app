@@ -60,6 +60,12 @@ import {
   type QuoteStatus,
 } from '../../services/quotesSupabase';
 import {
+  quoteWarrantyLabel,
+  WARRANTY_DAYS_MAX,
+  WARRANTY_DAYS_MIN,
+  warrantyDaysError,
+} from '../../utils/warrantyDays';
+import {
   completeJob,
   fetchLatestJobByConversation,
   subscribeJobsByConversation,
@@ -364,7 +370,19 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
   const [quoteNetAmount, setQuoteNetAmount] = useState(0);
   const [quoteNetText, setQuoteNetText] = useState('');
   const [quoteDetail, setQuoteDetail] = useState('');
+  const [incluyeGarantia, setIncluyeGarantia] = useState(false);
+  const [warrantyDaysText, setWarrantyDaysText] = useState('');
   const quoteDetailModeration = useMemo(() => validateContactInfo(quoteDetail), [quoteDetail]);
+  const warrantyDaysNum = useMemo(() => {
+    const digits = warrantyDaysText.replace(/\D/g, '');
+    if (!digits) return null;
+    const n = Number(digits);
+    return Number.isInteger(n) ? n : null;
+  }, [warrantyDaysText]);
+  const warrantyError = useMemo(
+    () => warrantyDaysError(incluyeGarantia, warrantyDaysNum),
+    [incluyeGarantia, warrantyDaysNum],
+  );
   const [replacesQuoteId, setReplacesQuoteId] = useState<string | null>(null);
   const [job, setJob] = useState<ServiceJob | null>(null);
   const [clientPin, setClientPin] = useState<string | null>(null);
@@ -1574,6 +1592,8 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                     />
                   ) : null}
 
+                  <Text style={styles.quoteLine}>{quoteWarrantyLabel(q.warranty_days)}</Text>
+
                   {myRole === 'trabajador' ? (
                     <Text style={styles.quoteLine}>
                       Neto (lo que cobrás): <Text style={styles.quoteStrong}>{formatMoney(q.net_amount)}</Text>
@@ -1699,6 +1719,17 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                         setQuoteNetAmount(Math.max(0, Math.floor(Number(q.net_amount) || 0)));
                         setQuoteNetText(String(Math.max(0, Math.floor(Number(q.net_amount) || 0))));
                         setQuoteDetail(q.service_detail ?? '');
+                        if (
+                          q.warranty_days != null &&
+                          q.warranty_days >= WARRANTY_DAYS_MIN &&
+                          q.warranty_days <= WARRANTY_DAYS_MAX
+                        ) {
+                          setIncluyeGarantia(true);
+                          setWarrantyDaysText(String(q.warranty_days));
+                        } else {
+                          setIncluyeGarantia(false);
+                          setWarrantyDaysText('');
+                        }
                         setReplacesQuoteId(q.id);
                       }}
                     >
@@ -2387,6 +2418,43 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                       </Text>
                     ) : null}
 
+                    <Pressable
+                      onPress={() => setIncluyeGarantia((on) => !on)}
+                      style={styles.warrantyRow}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: incluyeGarantia }}
+                      accessibilityLabel="Incluye garantía"
+                    >
+                      <Ionicons
+                        name={incluyeGarantia ? 'checkbox' : 'square-outline'}
+                        size={22}
+                        color={incluyeGarantia ? colors.primary : colors.textSecondary}
+                      />
+                      <Text style={styles.warrantyRowText}>Incluye garantía</Text>
+                    </Pressable>
+
+                    {incluyeGarantia ? (
+                      <>
+                        <Text style={styles.fieldLabel}>Días de garantía</Text>
+                        <TextInput
+                          value={warrantyDaysText}
+                          onChangeText={(t) => setWarrantyDaysText(t.replace(/\D/g, '').slice(0, 2))}
+                          placeholder="1 a 60"
+                          keyboardType="number-pad"
+                          inputMode="numeric"
+                          returnKeyType="done"
+                          maxLength={2}
+                          style={styles.quoteInput}
+                          placeholderTextColor={colors.textSecondary}
+                          accessibilityLabel="Días de garantía"
+                        />
+                        <Text style={styles.warrantyHint}>Puede ir de 1 a 60 días.</Text>
+                        {warrantyError ? (
+                          <Text style={styles.quoteModerationWarning}>{warrantyError}</Text>
+                        ) : null}
+                      </>
+                    ) : null}
+
                     <View style={styles.modalActions}>
                       <Pressable
                         style={({ pressed }) => [
@@ -2406,6 +2474,7 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                             !quoteDetail.trim() ||
                             quoteSubmitting ||
                             quoteDetailModeration.blocked ||
+                            Boolean(warrantyError) ||
                             !participants ||
                             participants.myRole !== 'trabajador') &&
                             styles.modalBtnDisabled,
@@ -2416,6 +2485,10 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                           if (quoteNetNum <= 0) return;
                           if (!quoteDetail.trim()) {
                             toast.error('El detalle del servicio es obligatorio.', 'Presupuesto');
+                            return;
+                          }
+                          if (warrantyError) {
+                            toast.error(warrantyError, 'Presupuesto');
                             return;
                           }
                           if (quoteSubmitting) return;
@@ -2430,11 +2503,14 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                                 feeRate,
                                 serviceDetail: quoteDetail,
                                 replacesQuoteId,
+                                warrantyDays: incluyeGarantia ? warrantyDaysNum : null,
                               });
                               setQuoteModalOpen(false);
                               setQuoteNetAmount(0);
                               setQuoteNetText('');
                               setQuoteDetail('');
+                              setIncluyeGarantia(false);
+                              setWarrantyDaysText('');
                               setReplacesQuoteId(null);
                               await refreshQuotes();
                               await refreshMessages();
@@ -2453,6 +2529,7 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                           !quoteDetail.trim() ||
                           quoteSubmitting ||
                           quoteDetailModeration.blocked ||
+                          Boolean(warrantyError) ||
                           !participants ||
                           participants.myRole !== 'trabajador'
                         }
@@ -2594,6 +2671,8 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                           setQuoteNetAmount(0);
                           setQuoteNetText('');
                           setQuoteDetail('');
+                          setIncluyeGarantia(false);
+                          setWarrantyDaysText('');
                         }}
                         accessibilityRole="button"
                         accessibilityLabel="Cotizar"
@@ -3033,6 +3112,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.error,
   },
+  warrantyRow: {
+    marginTop: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  warrantyRowText: { flex: 1, fontSize: 15, fontWeight: '800', color: colors.text },
+  warrantyHint: { marginTop: spacing.xs, fontSize: 12, fontWeight: '700', color: colors.textSecondary },
   quoteDetailInput: {
     marginTop: spacing.sm,
     borderWidth: 1,

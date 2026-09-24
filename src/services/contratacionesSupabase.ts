@@ -9,6 +9,7 @@ import {
   type DisponibilidadOpcionEstado,
 } from '../types/contrataciones';
 import { normalizeDisplayAddress } from '../utils/formatAddress';
+import { assertWarrantyDays } from '../utils/warrantyDays';
 
 const CONTRATACION_SELECT = '*';
 
@@ -90,9 +91,17 @@ function mapContratacionRow(r: Record<string, unknown>): Contratacion {
     offline_pago_notificado_at: (r.offline_pago_notificado_at as string | null) ?? null,
     offline_pago_confirmado_at: (r.offline_pago_confirmado_at as string | null) ?? null,
     disputa_motivo: String(r.disputa_motivo ?? ''),
+    warranty_days: readWarrantyDays(r.warranty_days),
+    warranty_anchor_at: (r.warranty_anchor_at as string | null) ?? null,
     created_at: String(r.created_at),
     updated_at: String(r.updated_at),
   };
+}
+
+function readWarrantyDays(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const n = Math.floor(toNum(v));
+  return n > 0 ? n : null;
 }
 
 /**
@@ -369,14 +378,18 @@ export async function crearCotizacion(params: {
   conversationId: string;
   precioTrabajador: number;
   serviceDetail?: string;
+  /** null = sin garantía. Si viene un número, tiene que estar entre 1 y 60. */
+  warrantyDays?: number | null;
 }): Promise<string> {
   const sb = getSupabaseClient();
   const detail = (params.serviceDetail ?? '').trim();
   if (!detail) throw new Error('El detalle del servicio es obligatorio.');
+  const warrantyDays = assertWarrantyDays(params.warrantyDays);
   const { data, error } = await sb.rpc('crear_cotizacion', {
     p_conversation_id: params.conversationId,
     p_precio_trabajador: params.precioTrabajador,
     p_service_detail: detail,
+    p_warranty_days: warrantyDays,
   });
   if (error) throw error;
   return String(data);
