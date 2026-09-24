@@ -9,6 +9,7 @@ import { formatPostDate } from '../../utils/formatDate';
 
 import { fetchContratacionesByUser } from '../../services/contratacionesSupabase';
 import type { Contratacion, ContratacionEstadoPago, ContratacionEstadoTrabajo } from '../../types/contrataciones';
+import { professionalPayoutAmount, workerGivenName } from '../../utils/contractedWorkDisplay';
 
 type OrderRow = {
   conversation_id: string;
@@ -41,23 +42,13 @@ function mapContratacion(c: Contratacion): OrderRow {
     conversation_id: c.conversation_id,
     worker_id: c.worker_id,
     client_id: c.client_id,
-    amount: c.precio_final,
+    amount: professionalPayoutAmount(c),
     description: c.service_detail,
     estado_trabajo: c.estado_trabajo,
     estado_pago: c.estado_pago,
     updated_at: c.updated_at,
     created_at: c.created_at,
   };
-}
-
-function formatWorkerLabel(full: string): string {
-  const s = (full ?? '').trim();
-  if (!s) return 'Profesional';
-  const parts = s.split(/\s+/).filter(Boolean);
-  const first = parts[0] ?? 'Profesional';
-  const last = parts.length > 1 ? parts[parts.length - 1] : '';
-  const initial = last ? `${last[0]?.toUpperCase() ?? ''}.` : '';
-  return initial ? `${first} ${initial}` : first;
 }
 
 export function ContractedWorkOrdersScreen() {
@@ -106,12 +97,11 @@ export function ContractedWorkOrdersScreen() {
     void (async () => {
       try {
         const sb = getSupabaseClient();
-        const { data, error } = await sb.from('profiles').select('id,nombre,apellido').in('id', ids);
+        const { data, error } = await sb.from('profiles').select('id,nombre').in('id', ids);
         if (error) return;
         const map: Record<string, string> = {};
-        for (const p of (data ?? []) as any[]) {
-          const full = `${String(p.nombre ?? '').trim()} ${String(p.apellido ?? '').trim()}`.trim();
-          map[String(p.id)] = full || 'Profesional';
+        for (const p of (data ?? []) as { id: string; nombre?: string | null }[]) {
+          map[String(p.id)] = workerGivenName(p.nombre);
         }
         if (!cancelled) setWorkerNameById(map);
       } catch {
@@ -140,7 +130,7 @@ export function ContractedWorkOrdersScreen() {
         ) : (
           rows.map((q) => {
             const badge = statusBadge(q);
-            const workerName = formatWorkerLabel(workerNameById[q.worker_id] ?? '');
+            const workerName = workerNameById[q.worker_id] ?? 'Profesional';
             return (
               <View key={q.id} style={styles.card}>
                 <View
