@@ -11,6 +11,7 @@ import { MyAccountScreen } from '../screens/account/MyAccountScreen';
 import { MyJobsScreen } from '../screens/jobs/MyJobsScreen';
 import { MyWorkOrdersScreen } from '../screens/jobs/MyWorkOrdersScreen';
 import { ContractedWorkOrdersScreen } from '../screens/jobs/ContractedWorkOrdersScreen';
+import { ClientMaterialPickupsScreen } from '../screens/client/ClientMaterialPickupsScreen';
 import { EditRegistrationScreen } from '../screens/account/EditRegistrationScreen';
 import { UserProfileScreen } from '../screens/account/UserProfileScreen';
 import { WorkerABMScreen } from '../screens/account/WorkerABMScreen';
@@ -88,6 +89,14 @@ export function AccountStack() {
         options={{
           ...profileChildHeader,
           title: 'Trabajos contratados',
+        }}
+      />
+      <Stack.Screen
+        name="ClientMaterialPickups"
+        component={ClientMaterialPickupsScreen}
+        options={{
+          ...profileChildHeader,
+          title: 'Solicitudes de materiales',
         }}
       />
       <Stack.Screen
