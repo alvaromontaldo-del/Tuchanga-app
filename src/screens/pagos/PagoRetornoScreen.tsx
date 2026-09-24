@@ -13,6 +13,7 @@ import {
   confirmarSeñaMaterialesMercadoPago,
   confirmarSeñaMercadoPago,
 } from '../../services/pagosMercadoPago';
+import { beginPaymentSessionGuard, endPaymentSessionGuard } from '../../services/paymentSessionGuard';
 import type { RootStackParamList, RootStackScreenProps } from '../../navigation/rootTypes';
 
 type Route = RouteProp<RootStackParamList, 'PagoRetorno'>;
@@ -40,6 +41,13 @@ export function PagoRetornoScreen() {
   const [retrying, setRetrying] = useState(false);
   const [materialConfirmed, setMaterialConfirmed] = useState(false);
   const redirectedRef = useRef(false);
+
+  useEffect(() => {
+    beginPaymentSessionGuard();
+    return () => {
+      endPaymentSessionGuard();
+    };
+  }, []);
 
   const isMaterial = Boolean(materialOrderId);
 

@@ -1,5 +1,5 @@
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -19,6 +19,7 @@ import {
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { isRenderableUri } from '../../utils/safeAsync';
 import { usePagoRetornoDeepLink } from '../../navigation/usePagoRetornoDeepLink';
+import { beginPaymentSessionGuard, endPaymentSessionGuard } from '../../services/paymentSessionGuard';
 import type { RootStackParamList, RootStackScreenProps } from '../../navigation/rootTypes';
 
 type Route = RouteProp<RootStackParamList, 'PagoCheckout'>;
@@ -41,6 +42,13 @@ export function PagoCheckoutScreen() {
   const webRef = useRef<WebView>(null);
 
   usePagoRetornoDeepLink(contratacionId, materialOrderId);
+
+  useEffect(() => {
+    beginPaymentSessionGuard();
+    return () => {
+      endPaymentSessionGuard();
+    };
+  }, []);
 
   const finish = useCallback(
     (status: 'approved' | 'pending' | 'failure') => {

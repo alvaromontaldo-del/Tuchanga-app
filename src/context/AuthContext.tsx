@@ -27,6 +27,7 @@ import {
   validateAccountForAction,
   validateRemoteAccount,
 } from '../services/sessionValidity';
+import { isPaymentSessionGuarded } from '../services/paymentSessionGuard';
 
 type AuthContextValue = {
   isAuthed: boolean;
@@ -124,6 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const forceAccountUnavailable = useCallback(
     async (options?: { redirectTo?: string }) => {
       if (forcingOutRef.current) return;
+      if (isPaymentSessionGuarded()) return;
       forcingOutRef.current = true;
       try {
         await signOut();
@@ -282,6 +284,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (state !== 'active') return;
         void (async () => {
           try {
+            if (isPaymentSessionGuarded()) return;
             const uid = userRef.current?.id;
             if (!uid) return;
             const {

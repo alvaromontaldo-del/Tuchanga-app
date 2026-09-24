@@ -1,4 +1,4 @@
-import { getSupabaseClient } from '../lib/supabase';
+﻿import { getSupabaseClient } from '../lib/supabase';
 
 /**
  * Solo errores que indican usuario borrado / token definitivamente inválido.
@@ -31,7 +31,8 @@ export function isDeletedOrInvalidAuthError(err: unknown): boolean {
 /**
  * Chequeo liviano para background / restore.
  * Solo expulsa si Auth confirma que el usuario ya no existe.
- * No hace refreshSession ni exige fila en profiles (evita falsos positivos en iOS).
+ * No hace refreshSession ni exige fila en profiles (evita falsos positivos en iOS
+ * y al volver del WebView / deep link de Mercado Pago).
  */
 export async function validateRemoteAccount(sessionUserId: string): Promise<boolean> {
   const sb = getSupabaseClient();
@@ -46,8 +47,22 @@ export async function validateRemoteAccount(sessionUserId: string): Promise<bool
       if (isDeletedOrInvalidAuthError(error)) return false;
       return true;
     }
-    if (!authUser) return false;
-    if (authUser.id !== sessionUserId) return false;
+
+    if (authUser) {
+      return authUser.id === sessionUserId;
+    }
+
+    // getUser() sin user ni error: carrera típica al volver de WebView/MP o
+    // al refrescar token. Si la sesión local sigue siendo la misma, no expulsar.
+    try {
+      const {
+        data: { session },
+      } = await sb.auth.getSession();
+      if (session?.user?.id === sessionUserId) return true;
+    } catch {
+      /* ignore */
+    }
+    // Sin evidencia de borrado: no forzar cierre de sesión.
     return true;
   } catch (e) {
     if (isDeletedOrInvalidAuthError(e)) return false;
