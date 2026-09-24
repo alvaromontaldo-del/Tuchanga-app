@@ -8,6 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { AppButton } from '../../components/common/AppButton';
@@ -68,7 +69,7 @@ export function ClientMaterialPickupsScreen() {
   }, []);
 
   return (
-    <View style={styles.flex}>
+    <SafeAreaView style={styles.flex} edges={['bottom']}>
       <View style={styles.tabRow}>
         {TABS.map((tab) => {
           const active = section === tab.id;
@@ -139,7 +140,7 @@ export function ClientMaterialPickupsScreen() {
           )}
         />
       ) : null}
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -155,7 +156,7 @@ function PickupCard({
   const content = buildClientPickupCardContent(card);
   const fields = [
     ...content.fields,
-    { label: 'A abonar', value: formatMoneyAr(card.amountDue) },
+    { label: 'A abonar en el comercio', value: formatMoneyAr(card.amountDue) },
   ];
 
   return (

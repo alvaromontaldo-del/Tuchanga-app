@@ -5,7 +5,7 @@ import {
   type ClientPickupOrderRow,
 } from '../utils/clientMaterialPickups';
 
-const ORDER_SELECT = `
+const ORDER_COLUMNS = `
   id,
   order_code,
   status,
@@ -15,20 +15,24 @@ const ORDER_SELECT = `
   created_at,
   completed_at,
   include_freight,
-  contact_revealed_at,
-  quotes (
-    freight_type,
-    stores ( name, address, opening_hours ),
-    quote_items (
-      id,
-      client_decision,
-      variant_label,
-      alternative_description,
-      in_stock,
-      request_items ( description, quantity, unit )
-    )
+  contact_revealed_at
+`;
+
+const QUOTE_EMBED = `
+  freight_type,
+  stores ( name, address, opening_hours ),
+  quote_items (
+    id,
+    client_decision,
+    variant_label,
+    alternative_description,
+    in_stock,
+    request_items ( description, quantity, unit )
   )
 `;
+
+const SELECT_OWN = `${ORDER_COLUMNS}, quotes ( ${QUOTE_EMBED} )`;
+const SELECT_BY_QUOTE_CLIENT = `${ORDER_COLUMNS}, quotes!inner ( ${QUOTE_EMBED} )`;
 
 /**
  * Pedidos de materiales del cliente ya pagos: listos para retirar o ya retirados.
@@ -42,21 +46,18 @@ export async function fetchClientMaterialPickups(): Promise<ClientPickupCardMode
   } = await sb.auth.getUser();
   if (!user) return [];
 
+  const paidFilter = 'status.eq.deposit_paid,status.eq.completed,deposit_status.eq.paid';
   const [ownRes, viaQuoteRes] = await Promise.all([
+    sb.from('orders').select(SELECT_OWN).eq('client_id', user.id).or(paidFilter),
     sb
       .from('orders')
-      .select(ORDER_SELECT)
-      .eq('client_id', user.id)
-      .or('status.eq.deposit_paid,status.eq.completed,deposit_status.eq.paid'),
-    sb
-      .from('orders')
-      .select(ORDER_SELECT.replace('quotes (', 'quotes!inner ('))
+      .select(SELECT_BY_QUOTE_CLIENT)
       .eq('quotes.client_id', user.id)
-      .or('status.eq.deposit_paid,status.eq.completed,deposit_status.eq.paid'),
+      .or(paidFilter),
   ]);
 
   if (ownRes.error && viaQuoteRes.error) {
-    throw ownRes.error;
+    throw new Error(ownRes.error.message || 'No se pudieron cargar las solicitudes.');
   }
 
   const byId = new Map<string, ClientPickupOrderRow>();
