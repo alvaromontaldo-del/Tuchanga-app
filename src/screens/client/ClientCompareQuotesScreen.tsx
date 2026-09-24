@@ -20,10 +20,8 @@ import {
   useAcceptClientQuote,
   useClientCompareQuotes,
 } from '../../hooks/useClientQuotes';
-import {
-  formatMoneyAr,
-  freightLabel,
-} from '../../services/clientQuotesSupabase';
+import { formatMoneyAr } from '../../services/clientQuotesSupabase';
+import { quoteFreightDisplay } from '../../utils/quoteFreightTotal';
 import { formatOrderCodeDisplay } from '../../utils/orderCode';
 import { normalizeDisplayAddress } from '../../utils/formatAddress';
 import {
@@ -584,6 +582,14 @@ const QuoteCard = memo(function QuoteCard({
     card.items.every((it) => it.inStock && Number.isFinite(it.unitPrice) && it.unitPrice >= 0);
   const hasFreight =
     card.freightType === 'free' || (card.freightType === 'cost' && card.freightCost > 0);
+  const freightDisplay = quoteFreightDisplay({
+    materialsSubtotal: card.materialsSubtotal,
+    freightType: card.freightType,
+    quotedFreightCost: card.freightCost,
+    orderIncludeFreight: card.orderIncludeFreight,
+    uiIncludeFreight: includeFreight,
+    canChooseFreight: showFreightToggle,
+  });
 
   return (
     <View style={[styles.card, isBest && styles.cardBest, isFeePaid && styles.cardAccepted]}>
@@ -672,11 +678,11 @@ const QuoteCard = memo(function QuoteCard({
       <View style={styles.totalsBox}>
         <RowLine label="Materiales" value={formatMoneyAr(card.materialsSubtotal)} />
         <RowLine
-          label={freightLabel(card.freightType, card.freightCost)}
-          value={formatMoneyAr(card.freightCost)}
+          label={freightDisplay.freightRowLabel}
+          value={formatMoneyAr(freightDisplay.freightAmount)}
         />
         <View style={styles.totalDivider} />
-        <RowLine label="TOTAL" value={formatMoneyAr(card.total)} strong />
+        <RowLine label="TOTAL" value={formatMoneyAr(freightDisplay.total)} strong />
       </View>
 
       {showFreightToggle ? (
