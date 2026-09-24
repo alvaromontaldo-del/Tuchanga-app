@@ -37,7 +37,6 @@ import {
   rechazarRecotizacion,
   subscribeContratacionById,
   trabajadorConfirmarRecepcionOffline,
-  trabajadorFinalizarTrabajo,
   verificarPin,
 } from '../../services/contratacionesSupabase';
 import {
@@ -622,33 +621,6 @@ export function DetalleServicioScreen() {
             ) : (
               <Text style={styles.hint}>Cargando dirección…</Text>
             )}
-          </View>
-        ) : null}
-
-        {myRole === 'trabajador' && row.estado_trabajo === 'en_curso' ? (
-          <View style={styles.section}>
-            <Pressable
-              style={[styles.btnPrimary, busy && styles.btnDisabled]}
-              disabled={busy}
-              onPress={() => {
-                const finalize = () =>
-                  void runAction(() => trabajadorFinalizarTrabajo(row.id), 'Trabajo finalizado');
-                if (row.offline_pago_notificado_at) {
-                  Alert.alert(
-                    '¿Marcar trabajo finalizado?',
-                    'El cliente ya indicó que pagó el saldo. ¿Confirmás que el trabajo está terminado?',
-                    [
-                      { text: 'Cancelar', style: 'cancel' },
-                      { text: 'Sí, finalizar', onPress: finalize },
-                    ],
-                  );
-                  return;
-                }
-                finalize();
-              }}
-            >
-              <Text style={styles.btnPrimaryText}>Marcar trabajo finalizado</Text>
-            </Pressable>
           </View>
         ) : null}
 

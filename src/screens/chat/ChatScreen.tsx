@@ -2004,17 +2004,11 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
         {isSupabaseConfigured() && showWorkerJobBar && job ? (
           <View style={styles.completeBar}>
             <View style={styles.payBarText}>
-              <Text style={styles.payTitle}>
-                {workerJobPaid ? 'Costo de servicio pagado' : 'Cotización aceptada'}
-              </Text>
+              <Text style={styles.payTitle}>Trabajo en curso</Text>
               <Text style={styles.paySubtitle}>
-                {workerJobPaid
-                  ? showWorkerSaldoRecibidoBar
-                    ? 'Cuando termines el trabajo, marcá como realizado. El cliente ya indicó el pago del saldo.'
-                    : 'Cuando termines el trabajo, marcá como realizado.'
-                  : job.estado_trabajo === 'precio_aceptado'
-                    ? 'Coordiná la agenda con el cliente.'
-                    : `Esperá a que el cliente pague el costo de servicio de YaChanga (${formatMoney(job.seña)}).`}
+                {showWorkerSaldoRecibidoBar
+                  ? 'Cuando termines el trabajo, marcá como realizado. El cliente ya indicó el pago del saldo.'
+                  : 'Cuando termines el trabajo, marcá como realizado.'}
               </Text>
             </View>
             {workerJobPaid ? (
