@@ -40,6 +40,15 @@ export type Contratacion = {
   conformidad_solicitada_at: string | null;
   conformidad_respondida_at: string | null;
   conformidad_aceptada: boolean | null;
+  /** Reclamo de garantía abierto. */
+  is_claim_open: boolean;
+  /** none | open | pending_approval | closed */
+  claim_status: string;
+  claim_opened_at: string | null;
+  /** El profesional marcó el arreglo como terminado. */
+  claim_marked_done_at: string | null;
+  /** El cliente confirmó el arreglo, o se autoaprobó a las 72 h. */
+  claim_resolved_at: string | null;
   offline_pago_notificado_at: string | null;
   offline_pago_confirmado_at: string | null;
   disputa_motivo: string;
