@@ -1,6 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../lib/supabase';
 import { removeSupabaseRealtimeTopic, removeSupabaseRealtimeTopicAsync } from '../lib/supabaseRealtime';
+import { fetchClosedClaimChatIds } from './claimChatSupabase';
+import { CHAT_CERRADO_POR_RECLAMO } from '../utils/claimChatVisibility';
 import { mapChatSendError } from '../utils/chatErrors';
 import type { ApiConversation, ApiMessage, ConversationRole } from './chatApi';
 import type { InboxRealtimeEvent } from './inboxState';
@@ -123,6 +125,8 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
 
   if (!activeConvs.length) return [];
 
+  const closedClaimIds = await fetchClosedClaimChatIds(activeConvs.map((c) => c.id));
+
   const results: ApiConversation[] = [];
 
   // Conteo exacto de no leídos (1 RPC para todas las conversaciones)
@@ -205,20 +209,22 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
       primaryTrade = job?.nombre_oficio ?? '';
     }
 
+    const closedByClaim = closedClaimIds.has(c.id);
     results.push({
       id: c.id,
       otherUserId: otherId,
       otherDisplayName: name,
       otherAvatarUrl: (prof as { avatar_url?: string | null } | null)?.avatar_url ?? null,
       primaryTrade,
-      lastMessage:
-        last?.type === 'image'
+      lastMessage: closedByClaim
+        ? CHAT_CERRADO_POR_RECLAMO
+        : last?.type === 'image'
           ? '📷 Foto'
           : last?.body ?? null,
       lastMessageAt: last?.created_at ?? null,
       lastMessageSenderId: last?.sender_id ?? null,
       peerReadAt: peerReadById.get(c.id) ?? null,
-      unreadCount: unreadById.get(c.id) ?? 0,
+      unreadCount: closedByClaim ? 0 : (unreadById.get(c.id) ?? 0),
       updatedAt: c.updated_at ?? new Date().toISOString(),
       myRole,
     });

@@ -81,12 +81,20 @@ import {
   obtenerPinCliente,
   rechazarDisponibilidad,
 } from '../../services/contratacionesSupabase';
+import {
+  fetchClosedClaimChatIds,
+  subscribeClaimChatLock,
+} from '../../services/claimChatSupabase';
 import type { DisponibilidadOpcion } from '../../types/contrataciones';
 import { isMercadoPagoEnabled } from '../../config/mercadoPago';
 import { openPagoCheckout } from '../../navigation/openPagoCheckout';
 import { crearPreferenciaSeña, sincronizarSeñaSiPendiente } from '../../services/pagosMercadoPago';
 import { computeSaldoPendiente } from '../../types/contrataciones';
 import { ESTADOS_PUEDEN_NOTIFICAR_SALDO } from '../../utils/contratacionStatus';
+import {
+  CHAT_CERRADO_POR_RECLAMO,
+  CHAT_CERRADO_POR_RECLAMO_DETALLE,
+} from '../../utils/claimChatVisibility';
 import { getSystemEvent, shouldRenderSystemMessageInChat } from '../../utils/chatSystemMessages';
 import { newRandomUserId } from '../../utils/stableUserId';
 import { mapChatSendError } from '../../utils/chatErrors';
@@ -259,6 +267,8 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
   }, [participants]);
 
   const chatBlocked = blockStatus.iBlockedThem || blockStatus.theyBlockedMe;
+  const [chatClosedByClaim, setChatClosedByClaim] = useState(false);
+  const [claimLockLoading, setClaimLockLoading] = useState(() => isSupabaseConfigured());
 
   const refreshBlockStatus = useCallback(async () => {
     if (!otherUserId || !isSupabaseConfigured()) {
@@ -279,6 +289,33 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
   useEffect(() => {
     void refreshBlockStatus();
   }, [refreshBlockStatus]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !conversationId) {
+      setChatClosedByClaim(false);
+      setClaimLockLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setClaimLockLoading(true);
+    void fetchClosedClaimChatIds([conversationId])
+      .then((ids) => {
+        if (!cancelled) setChatClosedByClaim(ids.has(conversationId));
+      })
+      .catch(() => {
+        if (!cancelled) setChatClosedByClaim(false);
+      })
+      .finally(() => {
+        if (!cancelled) setClaimLockLoading(false);
+      });
+    const unsub = subscribeClaimChatLock(conversationId, (closed) => {
+      if (!cancelled) setChatClosedByClaim(closed);
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [conversationId]);
 
   const handleBlockUser = useCallback(() => {
     if (!otherUserId) return;
@@ -1195,7 +1232,7 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
   function send() {
     const text = input.trim();
     if (!text || !myId) return;
-    if (chatBlocked) return;
+    if (chatBlocked || chatClosedByClaim) return;
     if (inputModeration.blocked) {
       toast.warning(CONTACT_MODERATION_POLICY_MESSAGE, 'Mensaje bloqueado', {
         durationMs: 5200,
@@ -1288,7 +1325,7 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
   const sendImageFromUri = useCallback(
     async (localUri: string) => {
       if (!myId || !isSupabaseConfigured()) return;
-      if (chatBlocked) return;
+      if (chatBlocked || chatClosedByClaim) return;
       if (participants?.myRole !== 'cliente') {
         toast.warning('Solo el cliente puede enviar imágenes.', 'Imágenes');
         return;
@@ -1343,6 +1380,7 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
     },
     [
       chatBlocked,
+      chatClosedByClaim,
       conversationId,
       myId,
       participants?.myRole,
@@ -1354,7 +1392,7 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
 
   const pickChatImage = useCallback(
     async (source: 'camera' | 'gallery') => {
-      if (attachingImage || sending || chatBlocked) return;
+      if (attachingImage || sending || chatBlocked || chatClosedByClaim) return;
       try {
         if (source === 'gallery') {
           const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -1401,18 +1439,18 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
         );
       }
     },
-    [attachingImage, chatBlocked, sendImageFromUri, sending, toast],
+    [attachingImage, chatBlocked, chatClosedByClaim, sendImageFromUri, sending, toast],
   );
 
   const openAttachImageMenu = useCallback(() => {
-    if (attachingImage || sending || chatBlocked) return;
+    if (attachingImage || sending || chatBlocked || chatClosedByClaim) return;
     if (participants?.myRole !== 'cliente') return;
     Alert.alert('Enviar imagen', 'Elegí el origen de la foto', [
       { text: 'Cámara', onPress: () => void pickChatImage('camera') },
       { text: 'Galería', onPress: () => void pickChatImage('gallery') },
       { text: 'Cancelar', style: 'cancel' },
     ]);
-  }, [attachingImage, chatBlocked, participants?.myRole, pickChatImage, sending]);
+  }, [attachingImage, chatBlocked, chatClosedByClaim, participants?.myRole, pickChatImage, sending]);
 
   const renderItem = useCallback(
     ({ item }: { item: UiMessage }) => {
@@ -2747,9 +2785,15 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
           enabled={Platform.OS === 'ios'}
           keyboardVerticalOffset={keyboardVerticalOffset}
         >
-          {loading ? (
+          {loading || claimLockLoading ? (
             <View style={styles.center}>
               <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+          ) : chatClosedByClaim ? (
+            <View style={styles.claimClosedWrap}>
+              <Ionicons name="chatbubble-ellipses-outline" size={36} color={colors.textSecondary} />
+              <Text style={styles.claimClosedTitle}>{CHAT_CERRADO_POR_RECLAMO}</Text>
+              <Text style={styles.claimClosedText}>{CHAT_CERRADO_POR_RECLAMO_DETALLE}</Text>
             </View>
           ) : (
             <View style={styles.chatBody}>
@@ -2909,6 +2953,27 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     paddingHorizontal: spacing.xl,
+  },
+  claimClosedWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+    gap: spacing.sm,
+  },
+  claimClosedTitle: {
+    marginTop: spacing.sm,
+    textAlign: 'center',
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  claimClosedText: {
+    textAlign: 'center',
+    color: colors.textSecondary,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '600',
   },
   row: { marginVertical: 4, maxWidth: '100%' },
   rowMine: { alignItems: 'flex-end' },

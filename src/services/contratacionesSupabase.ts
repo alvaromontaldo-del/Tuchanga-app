@@ -88,6 +88,11 @@ function mapContratacionRow(r: Record<string, unknown>): Contratacion {
       r.conformidad_aceptada === null || r.conformidad_aceptada === undefined
         ? null
         : Boolean(r.conformidad_aceptada),
+    is_claim_open: r.is_claim_open === true,
+    claim_status: String(r.claim_status ?? 'none'),
+    claim_opened_at: (r.claim_opened_at as string | null) ?? null,
+    claim_marked_done_at: (r.claim_marked_done_at as string | null) ?? null,
+    claim_resolved_at: (r.claim_resolved_at as string | null) ?? null,
     offline_pago_notificado_at: (r.offline_pago_notificado_at as string | null) ?? null,
     offline_pago_confirmado_at: (r.offline_pago_confirmado_at as string | null) ?? null,
     disputa_motivo: String(r.disputa_motivo ?? ''),
