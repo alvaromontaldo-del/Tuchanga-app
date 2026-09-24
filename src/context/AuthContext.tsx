@@ -1,4 +1,4 @@
-import {
+﻿import {
   createContext,
   useCallback,
   useContext,
@@ -27,6 +27,7 @@ import {
   validateAccountForAction,
   validateRemoteAccount,
 } from '../services/sessionValidity';
+import { isPaymentSessionGuarded } from '../services/paymentSessionGuard';
 
 type AuthContextValue = {
   isAuthed: boolean;
@@ -39,8 +40,8 @@ type AuthContextValue = {
   replaceOrMergeUser: (next: AuthUser) => void;
   signOut: () => Promise<void>;
   /**
-   * Verifica Auth+perfil. Si la cuenta ya no existe: cierra sesión,
-   * avisa y abre Registro. Devuelve false si no hay sesión válida.
+   * Verifica Auth+perfil. Si la cuenta ya no existe: cierra sesiÃ³n,
+   * avisa y abre Registro. Devuelve false si no hay sesiÃ³n vÃ¡lida.
    */
   ensureActiveAccount: (options?: { redirectTo?: string }) => Promise<boolean>;
 };
@@ -62,7 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await persistExpoPushTokenToSupabase(res.token);
       }
     } catch {
-      /* un fallo de push no debe tumbar la sesión */
+      /* un fallo de push no debe tumbar la sesiÃ³n */
     }
   }, []);
 
@@ -124,10 +125,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const forceAccountUnavailable = useCallback(
     async (options?: { redirectTo?: string }) => {
       if (forcingOutRef.current) return;
+      if (isPaymentSessionGuarded()) return;
       forcingOutRef.current = true;
       try {
         await signOut();
-        setFlashMessage('Tu cuenta ya no está disponible o ha sido desactivada.');
+        setFlashMessage('Tu cuenta ya no estÃ¡ disponible o ha sido desactivada.');
         try {
           const { openAuthModal } = await import('../navigation/openAuthModal');
           // Como alguien sin registrarse: ir a Registro (no Login).
@@ -136,7 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           /* ignore */
         }
       } finally {
-        // Permitir otro force más adelante en la misma sesión de app.
+        // Permitir otro force mÃ¡s adelante en la misma sesiÃ³n de app.
         setTimeout(() => {
           forcingOutRef.current = false;
         }, 1500);
@@ -157,7 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } = await sb.auth.getSession();
         const uid = session?.user?.id ?? user?.id;
         if (!uid) {
-          // Sin sesión ni user en memoria: tratar como invitado (abrir registro).
+          // Sin sesiÃ³n ni user en memoria: tratar como invitado (abrir registro).
           await forceAccountUnavailable(options);
           return false;
         }
@@ -277,11 +279,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       // Al volver al foreground: solo outs definitivos (usuario borrado en Auth).
-      // Nunca expulsar solo porque getSession() venga vacío un instante (común en iOS al refrescar token).
+      // Nunca expulsar solo porque getSession() venga vacÃ­o un instante (comÃºn en iOS al refrescar token).
       const appSub = AppState.addEventListener('change', (state) => {
         if (state !== 'active') return;
         void (async () => {
           try {
+            if (isPaymentSessionGuarded()) return;
             const uid = userRef.current?.id;
             if (!uid) return;
             const {
@@ -326,7 +329,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       mounted = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- user se lee en revalidate vía closure fresca en interval; forceAccountUnavailable es estable
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- user se lee en revalidate vÃ­a closure fresca en interval; forceAccountUnavailable es estable
   }, [forceAccountUnavailable]);
 
   const value = useMemo(
@@ -354,3 +357,4 @@ export function useAuth() {
   }
   return ctx;
 }
+
