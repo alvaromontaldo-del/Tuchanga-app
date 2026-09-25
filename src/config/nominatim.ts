@@ -4,10 +4,10 @@ import {
   type NominatimAddressParts,
 } from '../utils/formatAddress';
 import {
+  hitsIncludeNearbyStreet,
   houseNumberDigits,
   parseStreetAddressQuery,
   rankGeocodeHits,
-  rawHitsIncludeRequestedHouse,
   type GeocodeHit,
 } from '../utils/streetAddressQuery';
 
@@ -145,15 +145,25 @@ export async function fetchNominatimSuggestions(
   const parsed = parseStreetAddressQuery(q);
   let hits = await fetchGeocodeHits(searchParamsFor(q, opts, true));
 
-  // Si la caja del GPS no trajo esa altura, buscar de nuevo en todo el país.
+  // `street=1140 Volta` a veces solo devuelve un portal en otra ciudad.
+  // Si en la zona no está esa calle, la buscamos por nombre y conservamos la altura tipeada.
   if (
     parsed &&
     houseNumberDigits(parsed.houseNumber) &&
     opts?.near &&
-    !rawHitsIncludeRequestedHouse(hits, parsed)
+    !hitsIncludeNearbyStreet(hits, parsed, opts.near)
   ) {
-    const wider = await fetchGeocodeHits(searchParamsFor(q, opts, false));
-    hits = mergeHits(hits, wider);
+    const local = new URLSearchParams();
+    local.set('q', parsed.street);
+    local.set('format', 'json');
+    local.set('addressdetails', '1');
+    local.set('accept-language', 'es');
+    local.set('countrycodes', (opts.countryCode ?? 'ar').toLowerCase());
+    local.set('limit', '6');
+    local.set('viewbox', buildViewBoxAround(opts.near.lat, opts.near.lng, 0.18));
+    local.set('bounded', '1');
+    const localHits = await fetchGeocodeHits(local);
+    hits = mergeHits(hits, localHits);
   }
 
   return rankGeocodeHits(hits, q, opts?.near).map((item) => ({

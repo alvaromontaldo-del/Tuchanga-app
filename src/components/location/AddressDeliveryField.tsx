@@ -45,6 +45,7 @@ export function AddressDeliveryField({
   const [results, setResults] = useState<DeliveryGeoPoint[]>([]);
   const [devicePos, setDevicePos] = useState<{ lat: number; lng: number } | null>(near ?? null);
   const requestIdRef = useRef(0);
+  const skipGeocodeRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +85,10 @@ export function AddressDeliveryField({
 
   useEffect(() => {
     const q = value.trim();
+    if (skipGeocodeRef.current === q) {
+      skipGeocodeRef.current = null;
+      return;
+    }
     const t = setTimeout(() => void runGeocode(q), 450);
     return () => clearTimeout(t);
   }, [value, runGeocode]);
@@ -162,6 +167,7 @@ export function AddressDeliveryField({
               key={`${r.lat}-${r.lng}-${r.address}`}
               style={styles.resultRow}
               onPress={() => {
+                skipGeocodeRef.current = r.address;
                 onChangeText(r.address);
                 onGeoChange(r);
                 setResults([]);

@@ -4,6 +4,7 @@ import {
   houseNumberDigits,
   parseStreetAddressQuery,
   rankGeocodeHits,
+  retainHouseNumber,
   type GeocodeHit,
 } from './streetAddressQuery';
 
@@ -144,24 +145,29 @@ describe('rankGeocodeHits', () => {
     }),
   ];
 
-  it('muestra la altura y no el local de otra calle', () => {
+  it('muestra la altura en la calle cercana y no un portal de otra ciudad', () => {
     const ranked = rankGeocodeHits(voltaHits, 'Volta 1140', baNear);
-    expect(ranked.map((item) => item.id)).toEqual(['street-palermo', 'house-ag']);
+    expect(ranked.map((item) => item.id)).toEqual(['street-palermo']);
     expect(ranked[0]?.address).toContain('Volta 1140');
     expect(ranked[0]?.address).toContain('Las Cañitas');
     expect(ranked[0]?.lat).toBe(palermo.lat);
-    expect(ranked[1]?.address).toContain('1140');
-    expect(ranked[1]?.address).toContain('Alta Gracia');
-    expect(ranked[1]?.lat).toBe(altaGracia.lat);
+    expect(ranked.some((item) => item.address.includes('Alta Gracia'))).toBe(false);
     expect(ranked.some((item) => item.address.includes('Libertador'))).toBe(false);
+  });
+
+  it('con ciudad escrita no se va a otra localidad', () => {
+    const ranked = rankGeocodeHits(voltaHits, 'Volta 1140, Buenos Aires', baNear);
+    expect(ranked.map((item) => item.id)).toEqual(['street-palermo']);
+    expect(ranked[0]?.address).toContain('Volta 1140');
+    expect(ranked[0]?.address).toContain('Buenos Aires');
   });
 
   it('conserva piso o depto sin cambiar la altura', () => {
     const ranked = rankGeocodeHits(voltaHits, 'Volta 1140 4B', baNear);
+    expect(ranked).toHaveLength(1);
     expect(ranked[0]?.address.startsWith('Volta 1140 4B')).toBe(true);
     expect(ranked[0]?.address.includes('4B 1140')).toBe(false);
-    expect(ranked[1]?.address).toContain('1140');
-    expect(ranked[1]?.address).toContain('4B');
+    expect(ranked[0]?.lat).toBe(palermo.lat);
   });
 
   it('prioriza la ciudad escrita y el punto real de esa altura', () => {
@@ -246,6 +252,23 @@ describe('rankGeocodeHits', () => {
     expect(ranked[0]?.address).toContain('5000');
     expect(ranked[0]?.address).toContain('Libertador');
     expect(ranked[0]?.lat).toBe(-34.5639);
+  });
+});
+
+describe('retainHouseNumber', () => {
+  it('repone la altura si el reverso de la misma calle la pierde', () => {
+    expect(retainHouseNumber('Volta 1140, Las Cañitas, Buenos Aires', 'Volta, Las Cañitas')).toBe(
+      'Volta 1140, Las Cañitas',
+    );
+    expect(
+      retainHouseNumber('Volta 1140 4B, Las Cañitas, Buenos Aires', 'Volta, Las Cañitas'),
+    ).toBe('Volta 1140 4B, Las Cañitas');
+  });
+
+  it('no pega la altura sobre otra calle', () => {
+    expect(retainHouseNumber('Volta 1140, Las Cañitas', 'Cerviño 3562, Palermo')).toBe(
+      'Cerviño 3562, Palermo',
+    );
   });
 });
 

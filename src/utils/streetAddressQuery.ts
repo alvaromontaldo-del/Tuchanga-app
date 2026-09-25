@@ -228,21 +228,45 @@ function canUseAsStreetFallback(hit: GeocodeHit): boolean {
   return osmClass === 'highway' || osmClass === 'place' || osmClass === 'boundary' || osmClass === 'building';
 }
 
-export function rawHitsIncludeRequestedHouse(hits: GeocodeHit[], parsed: ParsedStreetQuery): boolean {
+/**
+ * Hay una calle con ese nombre cerca del usuario (aunque no tenga portal).
+ * Un portal lejano, como Volta 1140 en Alta Gracia, no cuenta.
+ */
+export function hitsIncludeNearbyStreet(
+  hits: GeocodeHit[],
+  parsed: ParsedStreetQuery,
+  near?: { lat: number; lng: number } | null,
+): boolean {
   return hits.some((hit) => {
     const road = hit.parts.road ?? hit.parts.pedestrian;
-    return (
-      Boolean(hit.parts.house_number) &&
-      houseNumbersMatch(hit.parts.house_number ?? '', parsed.houseNumber) &&
-      roadMatchScore(road, parsed.street) >= 1
-    );
+    if (roadMatchScore(road, parsed.street) < 1) return false;
+    if (!near) return true;
+    return distanceMeters(near, hit) <= NEAR_RADIUS_M;
   });
 }
 
 /**
+ * Si el reverso de un punto sobre la calle pierde la altura, se la volvemos a poner.
+ * Si el reverso es otra calle, se respeta.
+ */
+export function retainHouseNumber(selectedAddress: string, reversedAddress: string): string {
+  const selected = selectedAddress.trim();
+  const reversed = reversedAddress.trim();
+  if (!selected || !reversed) return reversed || selected;
+  const parsed = parseStreetAddressQuery(selected);
+  if (!parsed) return reversed;
+  const head = reversed.split(',')[0]?.trim() ?? '';
+  const digits = houseNumberDigits(parsed.houseNumber);
+  if (digits && new RegExp(`\\b${escapeRegExp(digits)}\\b`).test(head)) return reversed;
+  if (roadMatchScore(head, parsed.street) < 1) return reversed;
+  return ensureHouseOnLabel(reversed, parsed.houseNumber, parsed.unit);
+}
+
+/**
  * Arma las sugerencias que ve el usuario.
- * Con altura: prioriza el portal real cercano. Si cerca solo existe la calle,
- * la etiqueta igual lleva la altura y, si hay un portal en otra ciudad, también se ofrece.
+ * Con altura: si hay portal cerca, usa ese punto. Si OSM solo tiene la calle,
+ * la etiqueta y lo que se guarda llevan igual la altura tipeada (el pin queda en la calle).
+ * Un portal en otra ciudad no reemplaza esa calle.
  */
 export function rankGeocodeHits(
   hits: GeocodeHit[],
@@ -305,10 +329,21 @@ export function rankGeocodeHits(
     });
   }
 
-  const hasNearbyExact = candidates.some((item) => item.tier === 0);
-  // Con un portal cerca, no mezclar el centro de la calle ni alturas de otra provincia.
-  // Si cerca solo está la calle, igual mostramos la altura lejana (punto real).
-  let filtered = hasNearbyExact ? candidates.filter((item) => item.tier === 0) : candidates;
+  let filtered = candidates;
+  if (parsed.locality) {
+    const inCity = candidates.filter((item) => item.localityRank === 0);
+    if (inCity.length) filtered = inCity;
+  }
+
+  const hasNearbyExact = filtered.some((item) => item.tier === 0);
+  const hasNearbyStreet = filtered.some((item) => item.tier === 1);
+  if (hasNearbyExact) {
+    filtered = filtered.filter((item) => item.tier === 0);
+  } else if (hasNearbyStreet) {
+    // Sin portal en la zona: la calle cercana, con la altura que escribió la persona.
+    // No sumar un portal de otra ciudad (Volta 1140 en Alta Gracia).
+    filtered = filtered.filter((item) => item.tier === 1);
+  }
   const fallbacks = filtered.filter((item) => item.tier === 1);
   if (fallbacks.some((item) => item.nameScore === 2)) {
     filtered = filtered.filter((item) => item.tier !== 1 || item.nameScore === 2);
