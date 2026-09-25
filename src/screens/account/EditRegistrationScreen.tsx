@@ -27,7 +27,7 @@ import { colors, radii, spacing } from '../../constants/theme';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/nominatim';
-import { retainHouseNumber } from '../../utils/streetAddressQuery';
+import { addressFromPick, addressToPersist, retainHouseNumber } from '../../utils/streetAddressQuery';
 import {
   DEFAULT_PHONE_COUNTRY_ID,
   getPhoneCountryById,
@@ -122,6 +122,11 @@ export function EditRegistrationScreen({ navigation }: Props) {
   const reverseReqRef = useRef(0);
   const skipGeocodeRef = useRef<string | null>(null);
   const selectedAddressRef = useRef<string | null>(null);
+  /** Texto que escribió la persona antes de elegir (calle + altura + piso). */
+  const typedQueryRef = useRef<string | null>(null);
+  /** Etiqueta confirmada al elegir, con la altura. No la pisa un reverso si el pin no se movió. */
+  const confirmedLabelRef = useRef<string | null>(null);
+  const pinMovedRef = useRef(false);
   const [locating, setLocating] = useState(false);
   const [locationHint, setLocationHint] = useState<string | null>(null);
   const [devicePos, setDevicePos] = useState<{ lat: number; lng: number } | null>(null);
@@ -257,7 +262,9 @@ export function EditRegistrationScreen({ navigation }: Props) {
       const addr = await reverseNominatimStreet(lat, lng);
       if (reqId !== reverseReqRef.current) return;
       if (!addr) return;
-      const kept = selectedAddressRef.current ? retainHouseNumber(selectedAddressRef.current, addr) : addr;
+      if (!pinMovedRef.current && confirmedLabelRef.current) return;
+      const source = typedQueryRef.current || selectedAddressRef.current || '';
+      const kept = source ? retainHouseNumber(source, addr) : addr;
       selectedAddressRef.current = kept;
       skipGeocodeRef.current = kept;
       setGeo((prev) => (prev ? { ...prev, address: kept, lat, lng } : { address: kept, lat, lng }));
@@ -281,6 +288,9 @@ export function EditRegistrationScreen({ navigation }: Props) {
       const { lat, lng } = res.position;
       setDevicePos({ lat, lng });
       selectedAddressRef.current = null;
+      typedQueryRef.current = null;
+      confirmedLabelRef.current = null;
+      pinMovedRef.current = false;
       setGeo({ address: 'Ubicación actual', lat, lng });
       setAddressResults([]);
       await runReverseGeocode(lat, lng);
@@ -320,6 +330,13 @@ export function EditRegistrationScreen({ navigation }: Props) {
       phoneCountryId,
       phoneNationalDigits,
     );
+    const savedAddress = addressToPersist({
+      typedQuery: typedQueryRef.current,
+      confirmedLabel: confirmedLabelRef.current,
+      currentLabel: geo.address,
+      pinMoved: pinMovedRef.current,
+    });
+    const baseLocation = { address: savedAddress, lat: geo.lat, lng: geo.lng };
     setSaving(true);
     try {
       if (isSupabaseConfigured()) {
@@ -329,7 +346,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
           dni: normalizeDigitsOnly(dni),
           birthDate: birthDate.trim(),
           phone: phoneIntl,
-          baseLocation: { address: geo.address.trim(), lat: geo.lat, lng: geo.lng },
+          baseLocation,
           avatarUri,
           locationDetails: locationDetails.trim(),
         });
@@ -358,8 +375,8 @@ export function EditRegistrationScreen({ navigation }: Props) {
             fullName: `${firstName.trim()} ${lastName.trim()}`.trim(),
             dni: normalizeDigitsOnly(dni),
             phone: phoneIntl,
-            baseLocation: { address: geo.address.trim(), lat: geo.lat, lng: geo.lng },
-            location: geo.address.trim(),
+            baseLocation,
+            location: savedAddress,
             avatarUri: avatarUri.trim(),
           }) ?? user,
         );
@@ -559,6 +576,9 @@ export function EditRegistrationScreen({ navigation }: Props) {
                   value={addressQuery}
                   onChangeText={(t) => {
                     selectedAddressRef.current = null;
+                    typedQueryRef.current = null;
+                    confirmedLabelRef.current = null;
+                    pinMovedRef.current = false;
                     setAddressQuery(t);
                     setGeo(null);
                     setErrors((prev) => ({ ...prev, location: undefined }));
@@ -589,10 +609,16 @@ export function EditRegistrationScreen({ navigation }: Props) {
                     key={`${r.lat}-${r.lng}-${r.address}`}
                     style={styles.resultRow}
                     onPress={() => {
-                      selectedAddressRef.current = r.address;
-                      skipGeocodeRef.current = r.address;
-                      setAddressQuery(r.address);
-                      setGeo(r);
+                      const typed = addressQuery;
+                      const address = addressFromPick(typed, r.address);
+                      typedQueryRef.current = typed;
+                      confirmedLabelRef.current = address;
+                      pinMovedRef.current = false;
+                      selectedAddressRef.current = address;
+                      reverseReqRef.current += 1;
+                      skipGeocodeRef.current = address;
+                      setAddressQuery(address);
+                      setGeo({ ...r, address });
                       setAddressResults([]);
                     }}
                   >
@@ -627,6 +653,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
                 locating={locating}
                 onLocateMe={() => void locateMe()}
                 onPinMoved={(lat: number, lng: number) => {
+                  pinMovedRef.current = true;
                   setGeo((prev) => (prev ? { ...prev, lat, lng } : { address: '', lat, lng }));
                   const id = ++reverseReqRef.current;
                   setTimeout(() => {

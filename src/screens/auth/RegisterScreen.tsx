@@ -31,7 +31,7 @@ import { TextLink } from '../../components/common/TextLink';
 import { TermsAndConditionsModal } from '../../components/legal/TermsAndConditionsModal';
 import { useAppToast } from '../../components/toast/toast';
 import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/nominatim';
-import { retainHouseNumber } from '../../utils/streetAddressQuery';
+import { addressFromPick, addressToPersist, retainHouseNumber } from '../../utils/streetAddressQuery';
 import {
   DEFAULT_PHONE_COUNTRY_ID,
   getPhoneCountryById,
@@ -172,6 +172,11 @@ export function RegisterScreen({ navigation, route }: Props) {
   const reverseReqRef = useRef(0);
   const skipGeocodeRef = useRef<string | null>(null);
   const selectedAddressRef = useRef<string | null>(null);
+  /** Texto que escribió la persona antes de elegir (calle + altura + piso). */
+  const typedQueryRef = useRef<string | null>(null);
+  /** Etiqueta confirmada al elegir, con la altura. No la pisa un reverso si el pin no se movió. */
+  const confirmedLabelRef = useRef<string | null>(null);
+  const pinMovedRef = useRef(false);
   const [locating, setLocating] = useState(false);
   const [locationHint, setLocationHint] = useState<string | null>(null);
   const [devicePos, setDevicePos] = useState<{ lat: number; lng: number } | null>(null);
@@ -540,7 +545,9 @@ export function RegisterScreen({ navigation, route }: Props) {
       const addr = await reverseNominatimStreet(lat, lng);
       if (reqId !== reverseReqRef.current) return;
       if (!addr) return;
-      const kept = selectedAddressRef.current ? retainHouseNumber(selectedAddressRef.current, addr) : addr;
+      if (!pinMovedRef.current && confirmedLabelRef.current) return;
+      const source = typedQueryRef.current || selectedAddressRef.current || '';
+      const kept = source ? retainHouseNumber(source, addr) : addr;
       selectedAddressRef.current = kept;
       skipGeocodeRef.current = kept;
       setGeo((prev) => (prev ? { ...prev, address: kept, lat, lng } : { address: kept, lat, lng }));
@@ -564,6 +571,9 @@ export function RegisterScreen({ navigation, route }: Props) {
       const { lat, lng } = res.position;
       setDevicePos({ lat, lng });
       selectedAddressRef.current = null;
+      typedQueryRef.current = null;
+      confirmedLabelRef.current = null;
+      pinMovedRef.current = false;
       setGeo({ address: 'Ubicación actual', lat, lng });
       setAddressResults([]);
       await runReverseGeocode(lat, lng);
@@ -685,6 +695,13 @@ export function RegisterScreen({ navigation, route }: Props) {
       selectedPhoneCountry.id,
       phoneNationalDigits,
     );
+    const savedAddress = addressToPersist({
+      typedQuery: typedQueryRef.current,
+      confirmedLabel: confirmedLabelRef.current,
+      currentLabel: geo.address,
+      pinMoved: pinMovedRef.current,
+    });
+    const baseLocation = { address: savedAddress, lat: geo.lat, lng: geo.lng };
 
     setLoading(true);
     try {
@@ -699,7 +716,7 @@ export function RegisterScreen({ navigation, route }: Props) {
         phone,
         password,
         bio: wantWorker ? professionalDescription.trim() : undefined,
-        baseLocation: geo,
+        baseLocation,
         locationDetails: locationDetails.trim() || undefined,
         offerServices: wantWorker,
         coverageKm: wantWorker ? clampInt(Number(coverageKm) || 0, 1, 300) : undefined,
@@ -740,7 +757,7 @@ export function RegisterScreen({ navigation, route }: Props) {
           await registerMyStore({
             name: storeName.trim(),
             phone,
-            address: geo.address.trim() || storeName.trim(),
+            address: savedAddress || storeName.trim(),
             latitude: geo.lat,
             longitude: geo.lng,
             rubroIds: selectedStoreRubros,
@@ -1042,6 +1059,9 @@ export function RegisterScreen({ navigation, route }: Props) {
                   value={addressQuery}
                   onChangeText={(t) => {
                     selectedAddressRef.current = null;
+                    typedQueryRef.current = null;
+                    confirmedLabelRef.current = null;
+                    pinMovedRef.current = false;
                     setAddressQuery(t);
                     setGeo(null);
                     setErrors((prev) => ({ ...prev, location: undefined }));
@@ -1072,10 +1092,16 @@ export function RegisterScreen({ navigation, route }: Props) {
                     key={`${r.lat}-${r.lng}-${r.address}`}
                     style={styles.resultRow}
                     onPress={() => {
-                      selectedAddressRef.current = r.address;
-                      skipGeocodeRef.current = r.address;
-                      setAddressQuery(r.address);
-                      setGeo(r);
+                      const typed = addressQuery;
+                      const address = addressFromPick(typed, r.address);
+                      typedQueryRef.current = typed;
+                      confirmedLabelRef.current = address;
+                      pinMovedRef.current = false;
+                      selectedAddressRef.current = address;
+                      reverseReqRef.current += 1;
+                      skipGeocodeRef.current = address;
+                      setAddressQuery(address);
+                      setGeo({ ...r, address });
                       setAddressResults([]);
                     }}
                   >
@@ -1110,6 +1136,7 @@ export function RegisterScreen({ navigation, route }: Props) {
                 locating={locating}
                 onLocateMe={() => void locateMe()}
                 onPinMoved={(lat: number, lng: number) => {
+                  pinMovedRef.current = true;
                   setGeo((prev) => (prev ? { ...prev, lat, lng } : { address: '', lat, lng }));
                   const id = ++reverseReqRef.current;
                   setTimeout(() => {
