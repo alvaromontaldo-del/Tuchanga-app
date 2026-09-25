@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { AppButton } from '../../components/common/AppButton';
-import { colors, radii, spacing } from '../../constants/theme';
+import { colors, radii, spacing, typography } from '../../constants/theme';
 import { useClientMaterialPickups } from '../../hooks/useClientMaterialPickups';
 import { formatMoneyAr } from '../../services/clientQuotesSupabase';
 import { listKey } from '../../utils/safeAsync';
@@ -27,20 +27,26 @@ const TABS: { id: ClientPickupSection; label: string }[] = [
   { id: 'historial', label: 'Historial' },
 ];
 
+const LEAD: Record<ClientPickupSection, string> = {
+  para_retirar: 'Pedidos listos para retirar: dirección, horario, número de pedido y PIN.',
+  historial: 'Pedidos ya retirados en el comercio.',
+};
+
 const EMPTY_COPY: Record<ClientPickupSection, { title: string; body: string }> = {
   para_retirar: {
     title: 'No hay pedidos para retirar',
-    body: 'Cuando pagues el costo de servicio, el pedido va a aparecer acá para retirarlo en el comercio.',
+    body: 'Acá aparecen solo los pedidos en los que ya aceptaste y pagaste el costo de servicio YaChanga. Cuando retires en el comercio, pasan al historial.',
   },
   historial: {
-    title: 'Todavía no hay retiros',
-    body: 'Los pedidos que ya retiraste van a quedar en este historial.',
+    title: 'Historial vacío',
+    body: 'Cuando el comercio cierre el pedido con tu PIN, lo vas a ver acá.',
   },
 };
 
 /**
  * Solicitudes de materiales del cliente: listas para retirar e historial.
  * La tarjeta no muestra “Disponible desde” ni el N° de solicitud.
+ * El resumen de materiales va en un desplegable.
  */
 export function ClientMaterialPickupsScreen() {
   const { orders, loading, error, refresh } = useClientMaterialPickups(true);
@@ -75,6 +81,7 @@ export function ClientMaterialPickupsScreen() {
         {TABS.map((tab) => {
           const active = section === tab.id;
           const count = counts[tab.id];
+          const label = count > 0 ? `${tab.label} (${count > 99 ? '99+' : count})` : tab.label;
           return (
             <Pressable
               key={tab.id}
@@ -84,18 +91,11 @@ export function ClientMaterialPickupsScreen() {
                 active ? styles.tabBtnActive : null,
                 pressed && styles.pressed,
               ]}
-              accessibilityRole="button"
+              accessibilityRole="tab"
               accessibilityState={{ selected: active }}
-              accessibilityLabel={tab.label}
+              accessibilityLabel={label}
             >
-              <Text style={[styles.tabBtnText, active ? styles.tabBtnTextActive : null]}>
-                {tab.label}
-              </Text>
-              {count > 0 ? (
-                <View style={[styles.tabBadge, active ? styles.tabBadgeActive : null]}>
-                  <Text style={styles.tabBadgeText}>{count > 99 ? '99+' : String(count)}</Text>
-                </View>
-              ) : null}
+              <Text style={[styles.tabBtnText, active ? styles.tabBtnTextActive : null]}>{label}</Text>
             </Pressable>
           );
         })}
@@ -104,7 +104,7 @@ export function ClientMaterialPickupsScreen() {
       {loading && orders.length === 0 ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.muted}>Cargando solicitudes…</Text>
+          <Text style={styles.muted}>Cargando pedidos…</Text>
         </View>
       ) : null}
 
@@ -122,6 +122,9 @@ export function ClientMaterialPickupsScreen() {
           contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={colors.primary} />
+          }
+          ListHeaderComponent={
+            list.length > 0 ? <Text style={styles.lead}>{LEAD[section]}</Text> : null
           }
           ListEmptyComponent={
             !loading ? (
@@ -155,26 +158,33 @@ function PickupCard({
   onToggle: () => void;
 }) {
   const content = buildClientPickupCardContent(card);
-  const fields = [
-    ...content.fields,
-    { label: 'A abonar en el comercio', value: formatMoneyAr(card.amountDue) },
-  ];
 
   return (
-    <View style={styles.card}>
+    <View style={styles.card} accessibilityRole="summary">
       <Text style={styles.storeName} numberOfLines={2}>
         {content.storeName}
       </Text>
-      {content.logistics ? <Text style={styles.logistics}>{content.logistics}</Text> : null}
-      {content.pickedUpLabel ? <Text style={styles.pickedUp}>{content.pickedUpLabel}</Text> : null}
+      {content.title ? (
+        <Text style={styles.cardTitle} numberOfLines={2}>
+          {content.title}
+        </Text>
+      ) : null}
 
-      {fields.map((field) => (
-        <View
-          key={field.label}
-          style={field.emphasize ? styles.pinBox : styles.fieldRow}
-        >
-          <Text style={field.emphasize ? styles.pinLabel : styles.fieldLabel}>{field.label}</Text>
-          <Text style={field.emphasize ? styles.pinValue : styles.fieldValue}>{field.value}</Text>
+      {content.orderCode ? (
+        <View style={styles.idRow}>
+          <Text style={styles.idLabel}>Nº pedido</Text>
+          <Text style={styles.idValueStrong} selectable>
+            {content.orderCode}
+          </Text>
+        </View>
+      ) : null}
+
+      <View style={styles.divider} />
+
+      {content.fields.map((field) => (
+        <View key={field.label} style={styles.field}>
+          <Text style={styles.fieldLabel}>{field.label}</Text>
+          <Text style={styles.fieldValue}>{field.value}</Text>
         </View>
       ))}
 
@@ -185,14 +195,8 @@ function PickupCard({
         accessibilityState={{ expanded }}
         accessibilityLabel={expanded ? 'Ocultar materiales' : 'Ver materiales'}
       >
-        <Text style={styles.expandBtnText}>
-          {expanded ? 'Ocultar materiales' : 'Ver materiales'}
-        </Text>
-        <Ionicons
-          name={expanded ? 'chevron-up' : 'chevron-down'}
-          size={18}
-          color={colors.primary}
-        />
+        <Text style={styles.expandBtnText}>{expanded ? 'Ocultar materiales' : 'Ver materiales'}</Text>
+        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.primary} />
       </Pressable>
 
       {expanded ? (
@@ -206,6 +210,21 @@ function PickupCard({
           ) : (
             <Text style={styles.materialEmpty}>No hay detalle de materiales.</Text>
           )}
+        </View>
+      ) : null}
+
+      <View style={styles.totalRow}>
+        <Text style={styles.totalLabel}>Total a abonar en el comercio</Text>
+        <Text style={styles.totalValue}>{formatMoneyAr(card.amountDue)}</Text>
+      </View>
+
+      {content.pinDisplay ? (
+        <View style={content.pinUsed ? styles.pinUsedBox : styles.pinBox}>
+          <Text style={content.pinUsed ? styles.pinUsedLabel : styles.pinLabel}>
+            {content.pinUsed ? 'PIN usado' : 'PIN de retiro'}
+          </Text>
+          <Text style={content.pinUsed ? styles.pinUsedValue : styles.pinValue}>{content.pinDisplay}</Text>
+          {content.pinHint ? <Text style={styles.pinHint}>{content.pinHint}</Text> : null}
         </View>
       ) : null}
     </View>
@@ -223,15 +242,13 @@ const styles = StyleSheet.create({
   },
   tabBtn: {
     flex: 1,
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
     paddingVertical: 10,
-    borderRadius: radii.input,
+    borderRadius: radii.button,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
   },
   tabBtnActive: {
     borderColor: colors.primary,
@@ -243,21 +260,17 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   tabBtnTextActive: { color: colors.primary },
-  tabBadge: {
-    minWidth: 18,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 9,
-    backgroundColor: colors.border,
-    alignItems: 'center',
-  },
-  tabBadgeActive: { backgroundColor: colors.primary },
-  tabBadgeText: { fontSize: 11, fontWeight: '800', color: '#fff' },
   list: {
     padding: spacing.md,
     paddingBottom: spacing.xl,
     flexGrow: 1,
     gap: spacing.sm,
+  },
+  lead: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    marginBottom: spacing.xs,
   },
   card: {
     backgroundColor: colors.surface,
@@ -265,45 +278,112 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     padding: spacing.md,
-    gap: 8,
+    gap: spacing.sm,
   },
-  storeName: { fontSize: 17, fontWeight: '800', color: colors.text },
-  logistics: { fontSize: 13, fontWeight: '700', color: colors.textSecondary },
-  pickedUp: { fontSize: 13, fontWeight: '700', color: '#1B5E20' },
-  fieldRow: { gap: 2 },
-  fieldLabel: { fontSize: 12, fontWeight: '700', color: colors.textSecondary },
-  fieldValue: { fontSize: 15, fontWeight: '700', color: colors.text },
+  storeName: { fontSize: 18, fontWeight: '800', color: colors.text },
+  cardTitle: { ...typography.body, color: colors.textSecondary },
+  idRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  idLabel: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
+  idValueStrong: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.primary,
+    fontVariant: ['tabular-nums'],
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.border,
+    marginVertical: spacing.xs,
+  },
+  field: { gap: 2 },
+  fieldLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  fieldValue: { ...typography.body, fontWeight: '600', color: colors.text },
+  expandBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.input,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  expandBtnText: { fontSize: 14, fontWeight: '800', color: colors.primary },
+  materialsBox: {
+    gap: 4,
+    paddingHorizontal: spacing.xs,
+  },
+  materialLine: { fontSize: 14, color: colors.text, lineHeight: 20 },
+  materialEmpty: { fontSize: 13, color: colors.textSecondary },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  totalLabel: { flex: 1, fontSize: 14, fontWeight: '700', color: colors.text },
+  totalValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.primary,
+    fontVariant: ['tabular-nums'],
+  },
   pinBox: {
-    marginTop: 2,
+    marginTop: spacing.xs,
+    padding: spacing.md,
+    borderRadius: radii.input,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    gap: 4,
+  },
+  pinLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  pinValue: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: colors.text,
+    letterSpacing: 2,
+    fontVariant: ['tabular-nums'],
+  },
+  pinHint: { fontSize: 12, color: colors.textSecondary, textAlign: 'center' },
+  pinUsedBox: {
+    marginTop: spacing.xs,
     padding: spacing.sm,
     borderRadius: radii.input,
     backgroundColor: colors.background,
     borderWidth: 1,
     borderColor: colors.border,
-    gap: 2,
-  },
-  pinLabel: { fontSize: 12, fontWeight: '800', color: colors.textSecondary },
-  pinValue: {
-    fontSize: 22,
-    fontWeight: '900',
-    color: colors.text,
-    letterSpacing: 2,
-  },
-  expandBtn: {
-    marginTop: 2,
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 4,
   },
-  expandBtnText: { fontSize: 14, fontWeight: '800', color: colors.primary },
-  materialsBox: {
-    gap: 4,
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+  pinUsedLabel: { fontSize: 13, fontWeight: '700', color: colors.textSecondary },
+  pinUsedValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.textSecondary,
+    fontVariant: ['tabular-nums'],
   },
-  materialLine: { fontSize: 14, color: colors.text, lineHeight: 20 },
-  materialEmpty: { fontSize: 13, color: colors.textSecondary },
   pressed: { opacity: 0.88 },
   centered: {
     flex: 1,
