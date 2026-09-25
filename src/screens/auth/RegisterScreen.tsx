@@ -32,11 +32,12 @@ import { TermsAndConditionsModal } from '../../components/legal/TermsAndConditio
 import { useAppToast } from '../../components/toast/toast';
 import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/nominatim';
 import {
-  addressFromPick,
+  activeStreetQuery,
   addressToPersist,
   isIgnorableAddressEcho,
   isNegligiblePinMove,
   retainHouseNumber,
+  visibleSuggestionAddress,
 } from '../../utils/streetAddressQuery';
 import {
   DEFAULT_PHONE_COUNTRY_ID,
@@ -82,7 +83,7 @@ import { normalizeLocalImageUri } from '../../utils/normalizeLocalImage';
 
 type Props = AuthStackScreenProps<'Register'>;
 
-type GeoPoint = { lat: number; lng: number; address: string };
+type GeoPoint = { lat: number; lng: number; address: string; plainAddress?: string };
 
 type DraftErrors = Partial<Record<
   | 'firstName'
@@ -508,6 +509,7 @@ export function RegisterScreen({ navigation, route }: Props) {
       // Mapeo a nuestro GeoPoint
       const mapped: GeoPoint[] = suggestions.map((s) => ({
         address: s.address,
+        plainAddress: s.plainAddress,
         lat: s.lat,
         lng: s.lng,
       }));
@@ -554,7 +556,10 @@ export function RegisterScreen({ navigation, route }: Props) {
       if (!addr) return;
       if (!pinMovedRef.current && confirmedLabelRef.current) return;
       const source =
-        confirmedLabelRef.current || typedQueryRef.current || selectedAddressRef.current || '';
+        confirmedLabelRef.current ||
+        activeStreetQuery(addressQuery, typedQueryRef.current) ||
+        selectedAddressRef.current ||
+        '';
       const kept = source ? retainHouseNumber(source, addr) : addr;
       selectedAddressRef.current = kept;
       if (pinMovedRef.current) confirmedLabelRef.current = kept;
@@ -700,7 +705,7 @@ export function RegisterScreen({ navigation, route }: Props) {
       phoneNationalDigits,
     );
     const savedAddress = addressToPersist({
-      typedQuery: typedQueryRef.current || addressQuery,
+      typedQuery: activeStreetQuery(addressQuery, typedQueryRef.current),
       confirmedLabel: confirmedLabelRef.current,
       currentLabel: geo.address,
       pinMoved: pinMovedRef.current,
@@ -1105,36 +1110,38 @@ export function RegisterScreen({ navigation, route }: Props) {
 
             {addressResults.length > 0 ? (
               <View style={styles.results}>
-                {addressResults.map((r) => (
+                {addressResults.map((r) => {
+                  const label = visibleSuggestionAddress(addressQuery, typedQueryRef.current, r);
+                  return (
                   <Pressable
-                    key={`${r.lat}-${r.lng}-${r.address}`}
+                    key={`${r.lat}-${r.lng}-${r.plainAddress ?? r.address}`}
                     style={styles.resultRow}
                     onPress={() => {
-                      const typed = typedQueryRef.current?.trim() || addressQuery;
-                      const address = addressFromPick(typed, r.address);
+                      const typed = activeStreetQuery(addressQuery, typedQueryRef.current);
                       addressSessionRef.current += 1;
                       typedQueryRef.current = typed;
-                      confirmedLabelRef.current = address;
+                      confirmedLabelRef.current = label;
                       pinMovedRef.current = false;
-                      selectedAddressRef.current = address;
+                      selectedAddressRef.current = label;
                       pickedPointRef.current = { lat: r.lat, lng: r.lng };
                       reverseReqRef.current += 1;
-                      commitAddressQuery(address);
-                      setGeo({ ...r, address });
+                      commitAddressQuery(label);
+                      setGeo({ address: label, lat: r.lat, lng: r.lng });
                       setAddressResults([]);
                     }}
                   >
                     <Ionicons name="location-outline" size={18} color={colors.textSecondary} />
                     <View style={styles.resultText}>
                       <Text style={styles.resultTitle} numberOfLines={2}>
-                        {addressFromPick(typedQueryRef.current?.trim() || addressQuery, r.address)}
+                        {label}
                       </Text>
                       <Text style={styles.resultHint}>
                         {r.lat.toFixed(5)}, {r.lng.toFixed(5)}
                       </Text>
                     </View>
                   </Pressable>
-                ))}
+                  );
+                })}
               </View>
             ) : null}
 
