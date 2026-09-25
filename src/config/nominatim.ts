@@ -9,12 +9,15 @@ import {
   houseNumberDigits,
   parseStreetAddressQuery,
   rankGeocodeHits,
+  stampSuggestions,
   type GeocodeHit,
 } from '../utils/streetAddressQuery';
 
 export type NominatimSuggestion = {
   id: string;
   address: string;
+  /** Calle OSM sin la altura tipeada. La UI vuelve a armar el rótulo con el texto del campo. */
+  plainAddress: string;
   lat: number;
   lng: number;
 };
@@ -171,12 +174,16 @@ export async function fetchNominatimSuggestions(
     }
   }
 
-  return rankGeocodeHits(hits, q, opts?.near).map((item) => ({
-    id: item.id,
-    address: item.address,
-    lat: item.lat,
-    lng: item.lng,
-  }));
+  return stampSuggestions(
+    q,
+    rankGeocodeHits(hits, q, opts?.near).map((item) => ({
+      id: item.id,
+      address: item.address,
+      plainAddress: item.plainAddress?.trim() || item.address,
+      lat: item.lat,
+      lng: item.lng,
+    })),
+  );
 }
 
 export async function reverseNominatim(lat: number, lng: number): Promise<string | null> {

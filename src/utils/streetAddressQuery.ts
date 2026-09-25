@@ -30,6 +30,12 @@ export type RankedAddress = {
   address: string;
   lat: number;
   lng: number;
+  /**
+   * Etiqueta OSM sin la altura que escribió la persona.
+   * La fila visible se arma desde acá, así un resultado viejo (solo calle)
+   * muestra el número del campo y, si lo borra, no queda inventado.
+   */
+  plainAddress?: string;
 };
 
 const NEAR_RADIUS_M = 35_000;
@@ -224,6 +230,52 @@ function ensureUnitOnFirstPiece(label: string, unit: string | null): string {
   return pieces.join(', ');
 }
 
+function queryHasHouseNumber(text: string): boolean {
+  const parsed = parseStreetAddressQuery(text);
+  return Boolean(parsed && houseNumberDigits(parsed.houseNumber));
+}
+
+/**
+ * Texto del campo que hay que usar para rotular sugerencias.
+ * Si el campo visible trae altura, gana sobre un recuerdo anterior sin número.
+ */
+export function activeStreetQuery(fieldText: string, remembered?: string | null): string {
+  const field = fieldText.trim();
+  const memory = remembered?.trim() ?? '';
+  if (queryHasHouseNumber(field)) return field;
+  if (memory && queryHasHouseNumber(memory)) return memory;
+  return field || memory;
+}
+
+/** Etiqueta de una fila del autocomplete. Con altura tipeada, la muestra; sin altura, no inventa. */
+export function suggestionLabel(typedQuery: string, rawLabel: string): string {
+  return addressFromPick(typedQuery, rawLabel);
+}
+
+export function stampSuggestions<T extends { address: string }>(query: string, items: T[]): T[] {
+  const parsed = parseStreetAddressQuery(query);
+  if (!parsed || !houseNumberDigits(parsed.houseNumber)) return items;
+  return items.map((item) => {
+    const address = addressFromPick(query, item.address);
+    if (address === item.address) return item;
+    return { ...item, address };
+  });
+}
+
+/**
+ * Texto de una fila del listado, usando el campo visible.
+ * `plainAddress` es la calle OSM sin número inyectado: si el campo no trae altura, no se inventa.
+ */
+export function visibleSuggestionAddress(
+  fieldText: string,
+  remembered: string | null | undefined,
+  row: { address: string; plainAddress?: string | null },
+): string {
+  const query = activeStreetQuery(fieldText, remembered);
+  const base = row.plainAddress?.trim() || row.address;
+  return suggestionLabel(query, base);
+}
+
 /**
  * Texto que hay que guardar al elegir una sugerencia.
  * Si la etiqueta ya trae la altura tipeada, se usa esa.
@@ -358,6 +410,10 @@ function hitStreetName(hit: GeocodeHit): string {
   return hit.displayName.split(',')[0]?.trim() ?? '';
 }
 
+function plainHitAddress(hit: GeocodeHit): string {
+  return (buildShortAddressFromParts(hit.parts) || formatShortAddress(hit.displayName)).trim();
+}
+
 function formatNumberedHit(hit: GeocodeHit, parsed: ParsedStreetQuery): string {
   const road = hitStreetName(hit);
   if (road && roadMatchScore(road, parsed.street) >= 1) {
@@ -460,12 +516,16 @@ export function rankGeocodeHits(
   const parsed = parseStreetAddressQuery(query);
   if (!parsed) {
     return hits
-      .map((hit) => ({
-        id: hit.id,
-        lat: hit.lat,
-        lng: hit.lng,
-        address: buildShortAddressFromParts(hit.parts) || formatShortAddress(hit.displayName),
-      }))
+      .map((hit) => {
+        const address = buildShortAddressFromParts(hit.parts) || formatShortAddress(hit.displayName);
+        return {
+          id: hit.id,
+          lat: hit.lat,
+          lng: hit.lng,
+          address,
+          plainAddress: address,
+        };
+      })
       .filter((hit) => hit.address.trim().length > 0)
       .slice(0, 6);
   }
@@ -503,6 +563,7 @@ export function rankGeocodeHits(
     candidates.push({
       id: hit.id,
       address,
+      plainAddress: plainHitAddress(hit),
       lat: hit.lat,
       lng: hit.lng,
       tier,
@@ -552,7 +613,13 @@ export function rankGeocodeHits(
     const key = `${fold(item.address)}|${item.lat.toFixed(4)}|${item.lng.toFixed(4)}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    ranked.push({ id: item.id, address: item.address, lat: item.lat, lng: item.lng });
+    ranked.push({
+      id: item.id,
+      address: item.address,
+      plainAddress: item.plainAddress,
+      lat: item.lat,
+      lng: item.lng,
+    });
     if (ranked.length >= 6) break;
   }
   return ensureTypedHeightSuggestion(ranked, hits, parsed, near);
@@ -596,7 +663,13 @@ export function ensureTypedHeightSuggestion(
   const address = formatNumberedHit(best, parsed);
   if (!labelHasHouseDigits(address, parsed.houseNumber)) return withNumber;
   return [
-    { id: `altura-${houseNumberDigits(parsed.houseNumber)}`, address, lat: best.lat, lng: best.lng },
+    {
+      id: `altura-${houseNumberDigits(parsed.houseNumber)}`,
+      address,
+      plainAddress: plainHitAddress(best),
+      lat: best.lat,
+      lng: best.lng,
+    },
     ...withNumber,
   ].slice(0, 6);
 }

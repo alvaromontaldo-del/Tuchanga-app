@@ -9,7 +9,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/nominatim';
-import { addressFromPick, isIgnorableAddressEcho } from '../../utils/streetAddressQuery';
+import {
+  activeStreetQuery,
+  isIgnorableAddressEcho,
+  visibleSuggestionAddress,
+} from '../../utils/streetAddressQuery';
 import { colors, radii, spacing } from '../../constants/theme';
 import { getHighAccuracyPosition } from '../../utils/deviceGeolocation';
 
@@ -17,6 +21,8 @@ export type DeliveryGeoPoint = {
   address: string;
   lat: number;
   lng: number;
+  /** Calle OSM sin altura inyectada. No se persiste: solo rotula el listado. */
+  plainAddress?: string;
 };
 
 type Props = {
@@ -87,7 +93,14 @@ export function AddressDeliveryField({
           near: near ?? devicePos ?? undefined,
         });
         if (reqId !== requestIdRef.current) return;
-        setResults(suggestions.map((s) => ({ address: s.address, lat: s.lat, lng: s.lng })));
+        setResults(
+          suggestions.map((s) => ({
+            address: s.address,
+            plainAddress: s.plainAddress,
+            lat: s.lat,
+            lng: s.lng,
+          })),
+        );
       } catch {
         if (reqId === requestIdRef.current) setResults([]);
       } finally {
@@ -190,30 +203,32 @@ export function AddressDeliveryField({
 
       {results.length > 0 ? (
         <View style={styles.results}>
-          {results.map((r) => (
+          {results.map((r) => {
+            const label = visibleSuggestionAddress(value, typedQueryRef.current, r);
+            return (
             <Pressable
-              key={`${r.lat}-${r.lng}-${r.address}`}
+              key={`${r.lat}-${r.lng}-${r.plainAddress ?? r.address}`}
               style={styles.resultRow}
               onPress={() => {
-                const typed = typedQueryRef.current?.trim() || value;
-                const address = addressFromPick(typed, r.address);
+                const typed = activeStreetQuery(value, typedQueryRef.current);
                 typedQueryRef.current = typed;
-                commitText(address);
-                onGeoChange({ ...r, address });
+                commitText(label);
+                onGeoChange({ address: label, lat: r.lat, lng: r.lng });
                 setResults([]);
               }}
             >
               <Ionicons name="location-outline" size={18} color={colors.textSecondary} />
               <View style={styles.resultText}>
                 <Text style={styles.resultTitle} numberOfLines={2}>
-                  {addressFromPick(typedQueryRef.current?.trim() || value, r.address)}
+                  {label}
                 </Text>
                 <Text style={styles.resultHint}>
                   {r.lat.toFixed(5)}, {r.lng.toFixed(5)}
                 </Text>
               </View>
             </Pressable>
-          ))}
+            );
+          })}
         </View>
       ) : null}
 
