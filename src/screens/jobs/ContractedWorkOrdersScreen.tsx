@@ -1,20 +1,33 @@
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExpandableText } from '../../components/common/ExpandableText';
+import { useAppToast } from '../../components/toast/toast';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { getSupabaseClient } from '../../lib/supabase';
 import { formatPostDate } from '../../utils/formatDate';
 
-import { fetchContratacionesByUser } from '../../services/contratacionesSupabase';
+import { fetchContratacionesByUser, iniciarReclamoGarantia } from '../../services/contratacionesSupabase';
+import type { AccountStackScreenProps } from '../../navigation/accountTypes';
 import type { Contratacion, ContratacionEstadoPago, ContratacionEstadoTrabajo } from '../../types/contrataciones';
 import {
   contractedWarrantyDurationLabel,
   contractedWorkMoneyDisplay,
+  contractedWorkSection,
+  warrantyClaimAction,
+  warrantyClaimButtonLabel,
   workerGivenName,
+  type ContractedWorkSection,
 } from '../../utils/contractedWorkDisplay';
 import { warrantyAnchorIso, warrantyCountdown } from '../../utils/warrantyDays';
+
+type Props = AccountStackScreenProps<'ContractedWorkOrders'>;
+
+const TABS: { id: ContractedWorkSection; label: string }[] = [
+  { id: 'garantia', label: 'Trabajos en garantía' },
+  { id: 'historial', label: 'Historial' },
+];
 
 type OrderRow = {
   conversation_id: string;
@@ -34,6 +47,8 @@ type OrderRow = {
   warranty_anchor_at: string | null;
   finalizado_at: string | null;
   completed_by_worker_at: string | null;
+  is_claim_open: boolean;
+  claim_status: string;
 };
 
 function statusBadge(row: OrderRow): { label: string; tone: 'pending' | 'paid' | 'done' } {
@@ -68,14 +83,32 @@ function mapContratacion(c: Contratacion): OrderRow {
     warranty_anchor_at: c.warranty_anchor_at,
     finalizado_at: c.finalizado_at,
     completed_by_worker_at: c.completed_by_worker_at,
+    is_claim_open: c.is_claim_open,
+    claim_status: c.claim_status,
   };
 }
 
-export function ContractedWorkOrdersScreen() {
+function warrantyFor(row: OrderRow, now: Date) {
+  return warrantyCountdown({
+    warrantyDays: row.warranty_days,
+    anchorAt: warrantyAnchorIso({
+      estadoTrabajo: row.estado_trabajo,
+      warrantyAnchorAt: row.warranty_anchor_at,
+      finalizadoAt: row.finalizado_at,
+      completedByWorkerAt: row.completed_by_worker_at,
+    }),
+    now,
+  });
+}
+
+export function ContractedWorkOrdersScreen({ navigation }: Props) {
+  const toast = useAppToast();
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<OrderRow[]>([]);
   const [workerNameById, setWorkerNameById] = useState<Record<string, string>>({});
   const [now, setNow] = useState(() => new Date());
+  const [section, setSection] = useState<ContractedWorkSection>('garantia');
+  const [claimBusyId, setClaimBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
@@ -129,35 +162,129 @@ export function ContractedWorkOrdersScreen() {
     };
   }, [rows]);
 
+  const visibleRows = useMemo(
+    () =>
+      rows.filter(
+        (row) => contractedWorkSection({ estadoTrabajo: row.estado_trabajo, warranty: warrantyFor(row, now) }) === section,
+      ),
+    [rows, section, now],
+  );
+
+  const counts = useMemo(() => {
+    const garantia = rows.filter(
+      (row) => contractedWorkSection({ estadoTrabajo: row.estado_trabajo, warranty: warrantyFor(row, now) }) === 'garantia',
+    ).length;
+    return { garantia, historial: rows.length - garantia };
+  }, [rows, now]);
+
+  function openClaimChat(row: OrderRow, conversationId: string) {
+    const workerName = workerNameById[row.worker_id] ?? 'Profesional';
+    navigation.navigate('Mensajes', {
+      screen: 'ChatConversation',
+      params: {
+        conversationId,
+        otherDisplayName: workerName,
+        headerSubtitle: 'Profesional',
+        workerId: row.worker_id,
+      },
+    });
+  }
+
+  async function startClaim(row: OrderRow) {
+    setClaimBusyId(row.id);
+    try {
+      const conversationId = await iniciarReclamoGarantia(row.id);
+      setRows((prev) =>
+        prev.map((item) =>
+          item.id === row.id ? { ...item, is_claim_open: true, claim_status: 'open' } : item,
+        ),
+      );
+      openClaimChat(row, conversationId);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'No se pudo iniciar el reclamo.';
+      toast.error(message, 'Reclamo');
+    } finally {
+      setClaimBusyId(null);
+    }
+  }
+
+  function onClaimPress(row: OrderRow, action: 'start' | 'resume') {
+    if (action === 'resume') {
+      void startClaim(row);
+      return;
+    }
+    Alert.alert(
+      'Iniciar reclamo',
+      'Se abre el chat con el profesional para coordinar la garantía. El plazo en días sigue corriendo.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Iniciar reclamo', onPress: () => void startClaim(row) },
+      ],
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
+      <View style={styles.tabRow}>
+        {TABS.map((tab) => {
+          const active = section === tab.id;
+          const count = counts[tab.id];
+          const label = count > 0 ? `${tab.label} (${count})` : tab.label;
+          return (
+            <Pressable
+              key={tab.id}
+              onPress={() => setSection(tab.id)}
+              style={({ pressed }) => [styles.tabBtn, active && styles.tabBtnActive, pressed && styles.pressed]}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={label}
+            >
+              <Text style={[styles.tabBtnText, active && styles.tabBtnTextActive]}>{label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={styles.lead}>Servicios que contrataste a otros profesionales.</Text>
+        <Text style={styles.lead}>
+          {section === 'garantia'
+            ? 'Trabajos con garantía vigente o todavía en curso.'
+            : 'Trabajos con la garantía vencida, sin garantía o cancelados.'}
+        </Text>
 
         {loading ? (
           <View style={styles.center}>
             <ActivityIndicator size="large" color={colors.primary} />
           </View>
-        ) : rows.length === 0 ? (
+        ) : visibleRows.length === 0 ? (
           <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>Todavía no contrataste trabajos</Text>
-            <Text style={styles.emptyText}>Cuando aceptes una cotización, van a aparecer acá.</Text>
+            <Text style={styles.emptyTitle}>
+              {rows.length === 0
+                ? 'Todavía no contrataste trabajos'
+                : section === 'garantia'
+                  ? 'No hay trabajos en garantía'
+                  : 'El historial está vacío'}
+            </Text>
+            <Text style={styles.emptyText}>
+              {rows.length === 0
+                ? 'Cuando aceptes una cotización, van a aparecer acá.'
+                : section === 'garantia'
+                  ? 'Cuando un trabajo finalizado siga dentro del plazo, lo vas a ver en esta pestaña.'
+                  : 'Los trabajos con la garantía vencida van a quedar acá.'}
+            </Text>
           </View>
         ) : (
-          rows.map((q) => {
+          visibleRows.map((q) => {
             const badge = statusBadge(q);
             const workerName = workerNameById[q.worker_id] ?? 'Profesional';
-            const warranty = warrantyCountdown({
-              warrantyDays: q.warranty_days,
-              anchorAt: warrantyAnchorIso({
-                estadoTrabajo: q.estado_trabajo,
-                warrantyAnchorAt: q.warranty_anchor_at,
-                finalizadoAt: q.finalizado_at,
-                completedByWorkerAt: q.completed_by_worker_at,
-              }),
-              now,
-            });
+            const warranty = warrantyFor(q, now);
             const warrantyLabel = contractedWarrantyDurationLabel(warranty);
+            const claimAction = warrantyClaimAction({
+              estadoTrabajo: q.estado_trabajo,
+              warranty,
+              isClaimOpen: q.is_claim_open,
+              claimStatus: q.claim_status,
+            });
+            const claimLabel = warrantyClaimButtonLabel(claimAction);
             return (
               <View key={q.id} style={styles.card}>
                 <View
@@ -189,6 +316,27 @@ export function ContractedWorkOrdersScreen() {
                     Garantía: {warrantyLabel}
                   </Text>
                 ) : null}
+                {claimLabel && claimAction !== 'none' ? (
+                  <Pressable
+                    onPress={() => onClaimPress(q, claimAction)}
+                    disabled={claimBusyId === q.id}
+                    style={({ pressed }) => [
+                      styles.claimBtn,
+                      pressed && styles.pressed,
+                      claimBusyId === q.id && styles.claimBtnDisabled,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      claimAction === 'start' ? 'Reclamo para iniciar la garantía' : 'Ver reclamo de garantía'
+                    }
+                  >
+                    {claimBusyId === q.id ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.claimBtnText}>{claimLabel}</Text>
+                    )}
+                  </Pressable>
+                ) : null}
                 <Text style={styles.date}>{formatPostDate(q.created_at)}</Text>
               </View>
             );
@@ -201,6 +349,25 @@ export function ContractedWorkOrdersScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
+  tabRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+  },
+  tabBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+  },
+  tabBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  tabBtnText: { fontSize: 12, fontWeight: '800', color: colors.text, textAlign: 'center' },
+  tabBtnTextActive: { color: '#fff' },
   scroll: { flex: 1 },
   content: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xl * 2 },
   lead: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.lg },
@@ -247,6 +414,15 @@ const styles = StyleSheet.create({
   detail: { marginTop: spacing.sm, ...typography.body, color: colors.textSecondary },
   warranty: { marginTop: spacing.sm, fontSize: 14, fontWeight: '800', color: colors.text },
   warrantyExpired: { color: colors.textSecondary },
+  claimBtn: {
+    marginTop: spacing.md,
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  claimBtnDisabled: { opacity: 0.7 },
+  claimBtnText: { color: '#fff', fontWeight: '900', fontSize: 15 },
   date: { marginTop: spacing.sm, fontSize: 12, fontWeight: '700', color: colors.textSecondary },
+  pressed: { opacity: 0.88 },
 });
-

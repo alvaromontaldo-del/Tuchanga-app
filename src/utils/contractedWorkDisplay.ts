@@ -82,3 +82,48 @@ export function contractedWarrantyDurationLabel(state: WarrantyCountdown): strin
       return null;
   }
 }
+
+export type ContractedWorkSection = 'garantia' | 'historial';
+
+/**
+ * Trabajos en garantía: la garantía sigue vigente, o el trabajo todavía no cerró.
+ * Historial: garantía vencida, sin garantía ya finalizado, cancelado o en disputa.
+ */
+export function contractedWorkSection(params: {
+  estadoTrabajo: string;
+  warranty: WarrantyCountdown;
+}): ContractedWorkSection {
+  if (params.estadoTrabajo === 'cancelado' || params.estadoTrabajo === 'disputa') {
+    return 'historial';
+  }
+  if (params.warranty.status === 'expired') return 'historial';
+  if (params.warranty.status === 'none' && params.estadoTrabajo === 'finalizado') {
+    return 'historial';
+  }
+  return 'garantia';
+}
+
+export type WarrantyClaimAction = 'start' | 'resume' | 'none';
+
+/**
+ * El reclamo solo se inicia con la garantía ya corriendo (trabajo finalizado, días restantes).
+ * Si ya está abierto, se vuelve al chat. No reinicia el plazo.
+ */
+export function warrantyClaimAction(params: {
+  estadoTrabajo: string;
+  warranty: WarrantyCountdown;
+  isClaimOpen?: boolean;
+  claimStatus?: string | null;
+}): WarrantyClaimAction {
+  if (params.estadoTrabajo === 'cancelado' || params.estadoTrabajo === 'disputa') return 'none';
+  if (params.warranty.status !== 'active') return 'none';
+  const status = params.claimStatus ?? 'none';
+  if (params.isClaimOpen && (status === 'open' || status === 'pending_approval')) return 'resume';
+  return 'start';
+}
+
+export function warrantyClaimButtonLabel(action: WarrantyClaimAction): string | null {
+  if (action === 'start') return 'Iniciar reclamo';
+  if (action === 'resume') return 'Ver reclamo';
+  return null;
+}
