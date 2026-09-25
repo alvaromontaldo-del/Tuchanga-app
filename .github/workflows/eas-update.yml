@@ -5,6 +5,11 @@
 # La app de Testing (perfil preview de eas.json) pide el canal `preview`,
 # enganchado a la branch EAS preview. Publicar en la branch EAS main no llega
 # a esos celulares: no existe un canal main.
+#
+# `--environment preview` carga las variables de EAS del mismo entorno que el
+# perfil de build `preview` (EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_ANON_KEY).
+# Sin ese flag, eas update no inyecta el entorno: app.config.js deja
+# extra.supabaseUrl / extra.supabaseAnonKey vacíos y la app cae en modo demo.
 name: EAS Update (OTA)
 
 on:
@@ -28,4 +33,4 @@ jobs:
       - name: Publish OTA update
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: npx eas-cli update --branch preview --non-interactive --message "${{ github.event.head_commit.message }}"
+        run: npx eas-cli update --branch preview --environment preview --non-interactive --message "${{ github.event.head_commit.message }}"
