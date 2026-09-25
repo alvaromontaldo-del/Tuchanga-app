@@ -13,6 +13,7 @@ import type {
   StoreRequestDetail,
 } from '../types/materials';
 import { formatOrderCodeDisplay } from '../utils/orderCode';
+import { parseIncludeFreightFlag, storeAmountDue } from '../utils/quoteFreightTotal';
 
 export async function fetchMyStores(): Promise<MyStoreSummary[]> {
   const sb = getSupabaseClient();
@@ -277,6 +278,7 @@ function preferBoardOrder(
     accepted_total: number | null;
     deposit_amount: number | null;
     contact_revealed_at?: string | null;
+    include_freight?: boolean | null;
   } | undefined,
   next: {
     id: string;
@@ -286,6 +288,7 @@ function preferBoardOrder(
     accepted_total: number | null;
     deposit_amount: number | null;
     contact_revealed_at?: string | null;
+    include_freight?: boolean | null;
   },
 ): typeof next {
   if (!prev) return next;
@@ -405,6 +408,7 @@ export async function fetchStoreBoardCards(): Promise<StoreBoardCard[]> {
     accepted_total: number | null;
     deposit_amount: number | null;
     contact_revealed_at?: string | null;
+    include_freight?: boolean | null;
   };
   type QuoteRel = {
     id: string;
@@ -479,14 +483,40 @@ export async function fetchStoreBoardCards(): Promise<StoreBoardCard[]> {
     // Carga fiable de orders por quote_ids (evita embeds PostgREST incompletos / cache).
     const ordersByQuote = new Map<string, OrderRel>();
     if (quoteIds.length > 0) {
-      const ordersRes = await sb
+      const ordersWithFreight = await sb
         .from('orders')
         .select(
-          'id, quote_id, order_code, status, deposit_status, accepted_total, deposit_amount, contact_revealed_at',
+          'id, quote_id, order_code, status, deposit_status, accepted_total, deposit_amount, contact_revealed_at, include_freight',
         )
         .in('quote_id', quoteIds);
-      if (ordersRes.error) throw ordersRes.error;
-      for (const o of ordersRes.data ?? []) {
+      let orderRows = (ordersWithFreight.data ?? []) as Array<Record<string, unknown>>;
+      if (
+        ordersWithFreight.error &&
+        /include_freight|schema cache|column/i.test(ordersWithFreight.error.message ?? '')
+      ) {
+        const legacyOrders = await sb
+          .from('orders')
+          .select(
+            'id, quote_id, order_code, status, deposit_status, accepted_total, deposit_amount, contact_revealed_at',
+          )
+          .in('quote_id', quoteIds);
+        if (legacyOrders.error) throw legacyOrders.error;
+        orderRows = (legacyOrders.data ?? []) as Array<Record<string, unknown>>;
+      } else if (ordersWithFreight.error) {
+        throw ordersWithFreight.error;
+      }
+      for (const raw of orderRows) {
+        const o = raw as {
+          id?: string;
+          quote_id?: string;
+          order_code?: string | null;
+          status?: string;
+          deposit_status?: string | null;
+          accepted_total?: number | null;
+          deposit_amount?: number | null;
+          contact_revealed_at?: string | null;
+          include_freight?: unknown;
+        };
         const qid = String(o.quote_id);
         const mapped = {
           id: String(o.id),
@@ -497,6 +527,9 @@ export async function fetchStoreBoardCards(): Promise<StoreBoardCard[]> {
           deposit_amount: o.deposit_amount != null ? Number(o.deposit_amount) : null,
           contact_revealed_at:
             (o as { contact_revealed_at?: string | null }).contact_revealed_at ?? null,
+          include_freight: parseIncludeFreightFlag(
+            (o as { include_freight?: unknown }).include_freight,
+          ),
         };
         ordersByQuote.set(qid, preferBoardOrder(ordersByQuote.get(qid), mapped));
       }
@@ -507,7 +540,7 @@ export async function fetchStoreBoardCards(): Promise<StoreBoardCard[]> {
       const viaStore = await sb
         .from('orders')
         .select(
-          'id, quote_id, order_code, status, deposit_status, accepted_total, deposit_amount, contact_revealed_at, quotes!inner ( store_id )',
+          'id, quote_id, order_code, status, deposit_status, accepted_total, deposit_amount, contact_revealed_at, include_freight, quotes!inner ( store_id )',
         )
         .in('quotes.store_id', storeIds);
       if (!viaStore.error) {
@@ -532,6 +565,9 @@ export async function fetchStoreBoardCards(): Promise<StoreBoardCard[]> {
                 : null,
             contact_revealed_at:
               (o as { contact_revealed_at?: string | null }).contact_revealed_at ?? null,
+            include_freight: parseIncludeFreightFlag(
+              (o as { include_freight?: unknown }).include_freight,
+            ),
           };
           ordersByQuote.set(qid, preferBoardOrder(ordersByQuote.get(qid), mapped));
         }
@@ -615,21 +651,23 @@ export async function fetchStoreBoardCards(): Promise<StoreBoardCard[]> {
     });
 
     const freightType = (quote?.freight_type ?? 'pickup') as FreightType;
-    const freight = freightType === 'cost' ? Number(quote?.freight_cost) || 0 : 0;
-
     const acceptedItemsSum = acceptedItems.reduce((acc, it) => acc + (it.unitPrice || 0), 0);
     const allItemsSum = decisions.reduce((acc, it) => acc + (it.unitPrice || 0), 0);
-    const quoteTotalAll = quote ? allItemsSum + (Number(quote.freight_cost) || 0) : null;
-    const acceptedComputed =
-      acceptedItems.length > 0 ? acceptedItemsSum + freight : null;
-
-    const acceptedTotal =
+    const persistedTotal =
       order?.accepted_total != null && Number.isFinite(Number(order.accepted_total))
         ? Number(order.accepted_total)
-        : acceptedComputed;
+        : null;
 
-    // Precio final = solo aceptados (+ flete si aplica); si aún no hay decisión, total cotizado.
-    const finalAmount = acceptedTotal ?? quoteTotalAll;
+    // Precio final = solo aceptados. El flete entra solo si esta orden lo incluyó.
+    const finalAmount = storeAmountDue({
+      acceptedItemsSum,
+      hasAcceptedItems: acceptedItems.length > 0,
+      allItemsSum,
+      quotedFreightCost: Number(quote?.freight_cost) || 0,
+      freightType,
+      orderIncludeFreight: order?.include_freight ?? null,
+      acceptedTotal: persistedTotal,
+    });
     const totalAmount = finalAmount;
     const amountDueToStore = totalAmount;
     const serviceFee =
