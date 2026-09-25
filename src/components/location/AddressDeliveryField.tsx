@@ -29,7 +29,10 @@ type Props = {
 };
 
 /**
- * Autocomplete + GPS de dirección (mismo flujo Nominatim que ABM / EditRegistration).
+ * Autocomplete + GPS de dirección.
+ * La búsqueda es la misma que en registro (`RegisterScreen`), modificación de datos
+ * (`EditRegistrationScreen`) y el origen del radio (`SearchAreaOriginModal`).
+ * El ABM profesional no geocodifica: usa el domicilio guardado en el perfil.
  */
 export function AddressDeliveryField({
   label = 'Dirección de entrega',

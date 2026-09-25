@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeDisplayAddress } from './formatAddress';
 import {
+  ensureTypedHeightSuggestion,
   houseNumberDigits,
   parseStreetAddressQuery,
   rankGeocodeHits,
@@ -226,6 +227,41 @@ describe('rankGeocodeHits', () => {
     expect(ranked[0]?.address.startsWith('Volta,')).toBe(true);
     expect(ranked[0]?.address.includes('1140')).toBe(false);
     expect(ranked.some((item) => item.id === 'helado')).toBe(true);
+  });
+
+  it('la calle sin house_number igual se muestra como Volta 1140', () => {
+    const ranked = rankGeocodeHits(
+      [
+        hit({
+          id: 'solo-calle',
+          lat: palermo.lat,
+          lng: palermo.lng,
+          displayName: 'Volta, Las Cañitas, Palermo, Buenos Aires, Argentina',
+          osmClass: 'highway',
+          parts: { neighbourhood: 'Las Cañitas', city: 'Buenos Aires' },
+        }),
+      ],
+      'Volta 1140',
+      baNear,
+    );
+    expect(ranked[0]?.address).toContain('Volta 1140');
+    expect(ranked[0]?.address).toContain('Las Cañitas');
+    expect(ranked[0]?.lat).toBe(palermo.lat);
+    expect(ranked[0]?.lng).toBe(palermo.lng);
+  });
+
+  it('si la etiqueta perdió la altura, la primera sugerencia la recupera', () => {
+    const parsed = parseStreetAddressQuery('Volta 1140');
+    const street = voltaHits[0];
+    const out = ensureTypedHeightSuggestion(
+      [{ id: street.id, address: 'Volta, Las Cañitas', lat: street.lat, lng: street.lng }],
+      [street],
+      parsed!,
+      baNear,
+    );
+    expect(out[0]?.address).toContain('Volta 1140');
+    expect(out.some((item) => item.address === 'Volta, Las Cañitas')).toBe(false);
+    expect(out[0]?.lat).toBe(palermo.lat);
   });
 
   it('reconoce Libertador aunque en el mapa figure como avenida', () => {

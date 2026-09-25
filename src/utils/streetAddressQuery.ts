@@ -182,15 +182,28 @@ function ensureHouseOnLabel(label: string, houseNumber: string, unit: string | n
   return pieces.join(', ');
 }
 
+/** Nombre de calle del hit. A veces Nominatim no manda `road` y el nombre está solo en display_name. */
+function hitStreetName(hit: GeocodeHit): string {
+  const fromParts = (hit.parts.road ?? hit.parts.pedestrian ?? '').trim();
+  if (fromParts) return fromParts;
+  return hit.displayName.split(',')[0]?.trim() ?? '';
+}
+
 function formatNumberedHit(hit: GeocodeHit, parsed: ParsedStreetQuery): string {
-  const road = (hit.parts.road ?? hit.parts.pedestrian ?? '').trim();
-  if (road) {
+  const road = hitStreetName(hit);
+  if (road && roadMatchScore(road, parsed.street) >= 1) {
     const line = composeStreetLine(road, parsed.houseNumber, parsed.unit);
     const tail = localityTail(hit.parts);
     return [line, tail].filter(Boolean).join(', ');
   }
   const fallback = formatShortAddress(hit.displayName);
   return ensureHouseOnLabel(fallback, parsed.houseNumber, parsed.unit);
+}
+
+function labelHasHouseDigits(address: string, houseNumber: string): boolean {
+  const digits = houseNumberDigits(houseNumber);
+  if (!digits) return false;
+  return new RegExp(`\\b${escapeRegExp(digits)}\\b`).test(address);
 }
 
 function localityMatches(parts: NominatimAddressParts, locality: string | null): boolean {
@@ -238,7 +251,7 @@ export function hitsIncludeNearbyStreet(
   near?: { lat: number; lng: number } | null,
 ): boolean {
   return hits.some((hit) => {
-    const road = hit.parts.road ?? hit.parts.pedestrian;
+    const road = hitStreetName(hit);
     if (roadMatchScore(road, parsed.street) < 1) return false;
     if (!near) return true;
     return distanceMeters(near, hit) <= NEAR_RADIUS_M;
@@ -297,7 +310,7 @@ export function rankGeocodeHits(
   const candidates: Candidate[] = [];
   for (let index = 0; index < hits.length; index += 1) {
     const hit = hits[index];
-    const road = hit.parts.road ?? hit.parts.pedestrian;
+    const road = hitStreetName(hit);
     const nameScore = roadMatchScore(road, parsed.street);
     if (nameScore < 1) continue;
 
@@ -366,5 +379,48 @@ export function rankGeocodeHits(
     ranked.push({ id: item.id, address: item.address, lat: item.lat, lng: item.lng });
     if (ranked.length >= 6) break;
   }
-  return ranked;
+  return ensureTypedHeightSuggestion(ranked, hits, parsed, near);
+}
+
+/**
+ * Si la lista no muestra la altura tipeada, arma una sugerencia con esa altura
+ * y el punto de la calle (centro de calle si OSM no tiene el portal).
+ */
+export function ensureTypedHeightSuggestion(
+  ranked: RankedAddress[],
+  hits: GeocodeHit[],
+  parsed: ParsedStreetQuery,
+  near?: { lat: number; lng: number } | null,
+): RankedAddress[] {
+  const withNumber = ranked.map((item) => {
+    if (labelHasHouseDigits(item.address, parsed.houseNumber)) return item;
+    const hit = hits.find((candidate) => candidate.id === item.id);
+    if (!hit || roadMatchScore(hitStreetName(hit), parsed.street) < 1) return item;
+    const address = formatNumberedHit(hit, parsed);
+    return address.trim() ? { ...item, address } : item;
+  });
+  if (withNumber.some((item) => labelHasHouseDigits(item.address, parsed.houseNumber))) {
+    return withNumber;
+  }
+
+  const streets = hits.filter(
+    (hit) => canUseAsStreetFallback(hit) && roadMatchScore(hitStreetName(hit), parsed.street) >= 1,
+  );
+  if (!streets.length) return withNumber;
+
+  const best = [...streets].sort((a, b) => {
+    const aNear = !near || distanceMeters(near, a) <= NEAR_RADIUS_M ? 0 : 1;
+    const bNear = !near || distanceMeters(near, b) <= NEAR_RADIUS_M ? 0 : 1;
+    if (aNear !== bNear) return aNear - bNear;
+    const score = roadMatchScore(hitStreetName(b), parsed.street) - roadMatchScore(hitStreetName(a), parsed.street);
+    if (score !== 0) return score;
+    if (!near) return 0;
+    return distanceMeters(near, a) - distanceMeters(near, b);
+  })[0];
+  const address = formatNumberedHit(best, parsed);
+  if (!labelHasHouseDigits(address, parsed.houseNumber)) return withNumber;
+  return [
+    { id: `altura-${houseNumberDigits(parsed.houseNumber)}`, address, lat: best.lat, lng: best.lng },
+    ...withNumber,
+  ].slice(0, 6);
 }
