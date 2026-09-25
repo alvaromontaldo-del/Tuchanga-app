@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchNominatimSuggestions, type NominatimSuggestion } from '../../config/nominatim';
+import { addressFromPick } from '../../utils/streetAddressQuery';
 import { colors, radii, spacing } from '../../constants/theme';
 import { listKey } from '../../utils/safeAsync';
 
@@ -115,7 +116,11 @@ export function SearchAreaOriginModal({ visible, onClose, near, onPick }: Props)
               <Pressable
                 style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                 onPress={() => {
-                  onPick({ lat: item.lat, lng: item.lng, label: item.address });
+                  onPick({
+                    lat: item.lat,
+                    lng: item.lng,
+                    label: addressFromPick(query, item.address),
+                  });
                   onClose();
                 }}
               >

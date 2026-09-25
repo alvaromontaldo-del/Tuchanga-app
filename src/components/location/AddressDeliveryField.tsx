@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/nominatim';
+import { addressFromPick } from '../../utils/streetAddressQuery';
 import { colors, radii, spacing } from '../../constants/theme';
 import { getHighAccuracyPosition } from '../../utils/deviceGeolocation';
 
@@ -170,9 +171,10 @@ export function AddressDeliveryField({
               key={`${r.lat}-${r.lng}-${r.address}`}
               style={styles.resultRow}
               onPress={() => {
-                skipGeocodeRef.current = r.address;
-                onChangeText(r.address);
-                onGeoChange(r);
+                const address = addressFromPick(value, r.address);
+                skipGeocodeRef.current = address;
+                onChangeText(address);
+                onGeoChange({ ...r, address });
                 setResults([]);
               }}
             >

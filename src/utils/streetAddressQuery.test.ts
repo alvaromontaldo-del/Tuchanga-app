@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeDisplayAddress } from './formatAddress';
 import {
+  addressFromPick,
+  addressToPersist,
   ensureTypedHeightSuggestion,
   houseNumberDigits,
   parseStreetAddressQuery,
@@ -305,6 +307,88 @@ describe('retainHouseNumber', () => {
     expect(retainHouseNumber('Volta 1140, Las Cañitas', 'Cerviño 3562, Palermo')).toBe(
       'Cerviño 3562, Palermo',
     );
+  });
+
+  it('reemplaza el portal cercano de OSM por la altura tipeada', () => {
+    expect(retainHouseNumber('Volta 1140, Las Cañitas', 'Volta 1853, Las Cañitas')).toBe(
+      'Volta 1140, Las Cañitas',
+    );
+    expect(
+      retainHouseNumber('Alejandro Volta 1140', 'Volta 1853, Las Cañitas, Palermo'),
+    ).toBe('Alejandro Volta 1140, Las Cañitas, Palermo');
+    expect(
+      retainHouseNumber(
+        'Alejandro Volta 1140',
+        'Alejandro Volta, Troncos del Talar, Partido de Tigre',
+      ),
+    ).toBe('Alejandro Volta 1140, Troncos del Talar, Partido de Tigre');
+  });
+});
+
+describe('addressFromPick', () => {
+  it('guarda la etiqueta de la sugerencia si ya trae la altura', () => {
+    expect(addressFromPick('Alejandro Volta 1140', 'Volta 1140, Las Cañitas, Palermo')).toBe(
+      'Volta 1140, Las Cañitas, Palermo',
+    );
+  });
+
+  it('mezcla la altura tipeada cuando OSM solo tiene la calle', () => {
+    expect(addressFromPick('Alejandro Volta 1140', 'Alejandro Volta, Troncos del Talar')).toBe(
+      'Alejandro Volta 1140, Troncos del Talar',
+    );
+    expect(addressFromPick('Volta 1140', 'Volta, Las Cañitas, Palermo')).toBe(
+      'Volta 1140, Las Cañitas, Palermo',
+    );
+  });
+
+  it('no deja el portal equivocado ni inventa altura', () => {
+    expect(addressFromPick('Volta 1140', 'Volta 1853, Las Cañitas')).toBe(
+      'Volta 1140, Las Cañitas',
+    );
+    expect(addressFromPick('Volta', 'Volta, Las Cañitas')).toBe('Volta, Las Cañitas');
+    expect(addressFromPick('Volta 1140', 'Cerviño 3562, Palermo')).toBe('Cerviño 3562, Palermo');
+  });
+
+  it('conserva piso o depto junto con la altura', () => {
+    expect(addressFromPick('Volta 1140 4B', 'Volta, Las Cañitas')).toBe('Volta 1140 4B, Las Cañitas');
+    expect(addressFromPick('Volta 1140 piso 4', 'Volta 1853, Palermo')).toBe(
+      'Volta 1140 piso 4, Palermo',
+    );
+  });
+});
+
+describe('addressToPersist', () => {
+  it('al guardar sin mover el pin usa la etiqueta confirmada, no el reverso sin altura', () => {
+    const saved = addressToPersist({
+      typedQuery: 'Alejandro Volta 1140',
+      confirmedLabel: 'Alejandro Volta 1140, Troncos del Talar',
+      currentLabel: 'Alejandro Volta, Troncos del Talar',
+      pinMoved: false,
+    });
+    expect(saved).toContain('1140');
+    expect(saved).toContain('Volta');
+    expect(normalizeDisplayAddress(saved)).toContain('1140');
+  });
+
+  it('si el reverso corrió igual, reconstruye la altura tipeada', () => {
+    const saved = addressToPersist({
+      typedQuery: 'Volta 1140 4B',
+      confirmedLabel: null,
+      currentLabel: 'Volta, Las Cañitas',
+      pinMoved: false,
+    });
+    expect(saved).toBe('Volta 1140 4B, Las Cañitas');
+  });
+
+  it('si movieron el pin a otra calle, no reimpone la altura anterior', () => {
+    expect(
+      addressToPersist({
+        typedQuery: 'Volta 1140',
+        confirmedLabel: 'Volta 1140, Las Cañitas',
+        currentLabel: 'Cerviño 3562, Palermo',
+        pinMoved: true,
+      }),
+    ).toBe('Cerviño 3562, Palermo');
   });
 });
 

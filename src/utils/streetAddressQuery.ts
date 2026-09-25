@@ -158,12 +158,19 @@ function localityTail(parts: NominatimAddressParts): string | null {
   return barrio || city || parts.municipality?.trim() || null;
 }
 
+function containsTokenSequence(line: string, token: string): boolean {
+  const foldedLine = fold(line);
+  const foldedToken = fold(token);
+  if (!foldedToken) return false;
+  return new RegExp(`(?:^|\\s)${escapeRegExp(foldedToken)}(?:$|\\s)`).test(foldedLine);
+}
+
 function composeStreetLine(road: string, houseNumber: string, unit: string | null): string {
   const digits = houseNumberDigits(houseNumber);
   const already =
     Boolean(digits) && new RegExp(`\\b${escapeRegExp(digits)}\\b`).test(road);
   let line = already ? road.trim() : `${road.trim()} ${houseNumber}`.trim();
-  if (unit && !line.toLowerCase().includes(unit.toLowerCase())) {
+  if (unit && !containsTokenSequence(line, unit)) {
     line = `${line} ${unit}`;
   }
   return line;
@@ -176,10 +183,111 @@ function ensureHouseOnLabel(label: string, houseNumber: string, unit: string | n
   if (!digits || !new RegExp(`\\b${escapeRegExp(digits)}\\b`).test(pieces[0])) {
     pieces[0] = `${pieces[0]} ${houseNumber}`.trim();
   }
-  if (unit && !pieces[0].toLowerCase().includes(unit.toLowerCase())) {
+  if (unit && !containsTokenSequence(pieces[0], unit)) {
     pieces[0] = `${pieces[0]} ${unit}`;
   }
   return pieces.join(', ');
+}
+
+function splitAddressPieces(label: string): string[] {
+  return label.split(',').map((part) => part.trim()).filter(Boolean);
+}
+
+/** Nombre de calle, sin un portal que venga adelante («1853 Volta») o atrás («Volta 1853»). */
+function roadNameOnly(piece: string): string {
+  const parsed = parseStreetAddressQuery(piece);
+  if (parsed) return parsed.street;
+  const tokens = piece.split(' ').filter(Boolean);
+  if (tokens.length > 1 && isHeightToken(tokens[0].replace(/\s+/g, ''))) {
+    return tokens.slice(1).join(' ').trim();
+  }
+  return piece.trim();
+}
+
+function preferredRoad(labelRoad: string, typedStreet: string): string {
+  if (roadMatchScore(labelRoad, typedStreet) < 1) return labelRoad.trim();
+  if (streetTokens(typedStreet).length > streetTokens(labelRoad).length) return typedStreet.trim();
+  return labelRoad.trim();
+}
+
+function isStandalonePortalNumber(piece: string): boolean {
+  return /^\d{1,6}(?:\s*bis)?$/i.test(piece.trim());
+}
+
+function ensureUnitOnFirstPiece(label: string, unit: string | null): string {
+  if (!unit) return label;
+  const pieces = splitAddressPieces(label);
+  if (!pieces.length) return label;
+  if (!containsTokenSequence(pieces[0], unit)) {
+    pieces[0] = `${pieces[0]} ${unit}`;
+  }
+  return pieces.join(', ');
+}
+
+/**
+ * Texto que hay que guardar al elegir una sugerencia.
+ * Si la etiqueta ya trae la altura tipeada, se usa esa.
+ * Si no, se mezcla calle + altura (+ piso/depto) del texto escrito.
+ * No inventa altura cuando el usuario no escribió un número.
+ * Un portal distinto de la misma calle (el más cercano en OSM) no reemplaza la altura tipeada.
+ */
+export function addressFromPick(typedQuery: string, suggestionLabel: string): string {
+  const label = suggestionLabel.trim();
+  const parsed = parseStreetAddressQuery(typedQuery);
+  if (!parsed || !houseNumberDigits(parsed.houseNumber)) return label;
+
+  if (!label) {
+    const line = composeStreetLine(parsed.street, parsed.houseNumber, parsed.unit);
+    return parsed.locality ? `${line}, ${parsed.locality}` : line;
+  }
+
+  if (labelHasHouseDigits(label, parsed.houseNumber)) {
+    return ensureUnitOnFirstPiece(label, parsed.unit);
+  }
+
+  const pieces = splitAddressPieces(label);
+  if (!pieces.length) {
+    return composeStreetLine(parsed.street, parsed.houseNumber, parsed.unit);
+  }
+
+  const matchIdx = pieces.findIndex(
+    (piece) => roadMatchScore(roadNameOnly(piece), parsed.street) >= 1,
+  );
+  if (matchIdx >= 0) {
+    const name = preferredRoad(roadNameOnly(pieces[matchIdx]), parsed.street);
+    pieces[matchIdx] = composeStreetLine(name, parsed.houseNumber, parsed.unit);
+    return pieces
+      .filter((piece, index) => index === matchIdx || !isStandalonePortalNumber(piece))
+      .join(', ');
+  }
+
+  const headParsed = parseStreetAddressQuery(pieces[0]);
+  const headHasOwnNumber = Boolean(headParsed && houseNumberDigits(headParsed.houseNumber));
+  if (headHasOwnNumber) return label;
+
+  const line = composeStreetLine(parsed.street, parsed.houseNumber, parsed.unit);
+  return [line, ...pieces.slice(1)].join(', ');
+}
+
+/**
+ * Dirección que se persiste.
+ * Si el pin no se movió, gana la etiqueta confirmada al elegir (con la altura).
+ * Si no hubo etiqueta, se reconstruye desde lo tipeado. Mover el pin a otra calle respeta el reverso.
+ */
+export function addressToPersist(options: {
+  typedQuery?: string | null;
+  confirmedLabel?: string | null;
+  currentLabel: string;
+  pinMoved: boolean;
+}): string {
+  const current = options.currentLabel.trim();
+  if (!options.pinMoved) {
+    const confirmed = options.confirmedLabel?.trim();
+    if (confirmed) return confirmed;
+    const typed = options.typedQuery?.trim();
+    if (typed) return addressFromPick(typed, current);
+  }
+  return current;
 }
 
 /** Nombre de calle del hit. A veces Nominatim no manda `road` y el nombre está solo en display_name. */
@@ -267,12 +375,13 @@ export function retainHouseNumber(selectedAddress: string, reversedAddress: stri
   const reversed = reversedAddress.trim();
   if (!selected || !reversed) return reversed || selected;
   const parsed = parseStreetAddressQuery(selected);
-  if (!parsed) return reversed;
-  const head = reversed.split(',')[0]?.trim() ?? '';
-  const digits = houseNumberDigits(parsed.houseNumber);
-  if (digits && new RegExp(`\\b${escapeRegExp(digits)}\\b`).test(head)) return reversed;
-  if (roadMatchScore(head, parsed.street) < 1) return reversed;
-  return ensureHouseOnLabel(reversed, parsed.houseNumber, parsed.unit);
+  if (!parsed || !houseNumberDigits(parsed.houseNumber)) return reversed;
+  const pieces = splitAddressPieces(reversed);
+  const sameStreet = pieces.some(
+    (piece) => roadMatchScore(roadNameOnly(piece), parsed.street) >= 1,
+  );
+  if (!sameStreet) return reversed;
+  return addressFromPick(selected, reversed);
 }
 
 /**
