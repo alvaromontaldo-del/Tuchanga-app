@@ -1990,41 +1990,43 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
               style={({ pressed }) => [styles.payBtn, pressed && styles.pressed]}
               onPress={() => {
                 if (quoteBusy !== 'none') return;
-                if (isMercadoPagoEnabled()) {
-                  setQuoteBusy('paid');
-                  void (async () => {
-                    try {
-                      const synced = await sincronizarSeñaSiPendiente(job.id);
-                      if (synced) {
-                        const j = await fetchLatestJobByConversation(conversationId);
-                        setJob(j);
-                        await refreshMessages();
-                        toast.success('El costo de servicio ya estaba acreditado', 'Pago');
-                        return;
-                      }
-                      const result = await crearPreferenciaSeña(job.id);
-                      if (!result.ok) throw new Error(result.message);
-                      openPagoCheckout({
-                        contratacionId: job.id,
-                        checkoutUrl: result.data.checkout_url,
-                        sandbox: Boolean(result.data.sandbox),
-                        conversationId,
-                      });
-                    } catch (e) {
-                      toast.error(
-                        e instanceof Error ? e.message : 'No se pudo iniciar el pago',
-                        'Pago',
-                      );
-                    } finally {
-                      setQuoteBusy('none');
+                // Checkout de la seña de esta contratación (PagoCheckout / Mercado Pago).
+                // Sin EXPO_PUBLIC_MP_ENABLED el botón decía «Ver pago» y abría Detalle del servicio,
+                // que no tiene CTA de pago. No es el flujo de materiales ni «Ver servicio».
+                setQuoteBusy('paid');
+                void (async () => {
+                  try {
+                    const synced = await sincronizarSeñaSiPendiente(job.id);
+                    if (synced) {
+                      const j = await fetchLatestJobByConversation(conversationId);
+                      setJob(j);
+                      await refreshMessages();
+                      toast.success('El costo de servicio ya estaba acreditado', 'Pago');
+                      return;
                     }
-                  })();
-                  return;
-                }
-                navigation.navigate('DetalleServicio', {
-                  contratacionId: job.id,
-                  conversationId,
-                });
+                    const result = await crearPreferenciaSeña(job.id);
+                    if (!result.ok) {
+                      throw new Error(
+                        result.code === 'mp_not_configured'
+                          ? 'Mercado Pago no está configurado. No se puede iniciar el pago.'
+                          : result.message,
+                      );
+                    }
+                    openPagoCheckout({
+                      contratacionId: job.id,
+                      checkoutUrl: result.data.checkout_url,
+                      sandbox: Boolean(result.data.sandbox),
+                      conversationId,
+                    });
+                  } catch (e) {
+                    toast.error(
+                      e instanceof Error ? e.message : 'No se pudo iniciar el pago',
+                      'Pago',
+                    );
+                  } finally {
+                    setQuoteBusy('none');
+                  }
+                })();
               }}
               accessibilityRole="button"
               accessibilityLabel="Pagar costo de servicio de YaChanga"
