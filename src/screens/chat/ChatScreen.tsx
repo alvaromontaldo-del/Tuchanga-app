@@ -102,6 +102,11 @@ import { getSystemEvent, shouldRenderSystemMessageInChat } from '../../utils/cha
 import { dedupeMaterialServiceFeePaidMessages } from '../../utils/materialFeePaidChat';
 import { newRandomUserId } from '../../utils/stableUserId';
 import { mapChatSendError } from '../../utils/chatErrors';
+import {
+  CHAT_MESSAGE_LIST_MIN_HEIGHT,
+  shouldMountChatMessageList,
+  splitChatBodyHeight,
+} from '../../utils/chatReviewLayout';
 import { setActiveConversationForNotifications } from '../../services/chatFocus';
 
 export type ChatScreenParams = {
@@ -232,6 +237,7 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
   } = useUnreadMessages();
   const { socket, connected } = useSocket();
   const listRef = useRef<FlatList<UiMessage>>(null);
+  const footerScrollRef = useRef<ScrollView>(null);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [input, setInput] = useState('');
@@ -425,6 +431,10 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
   const [reviewComment, setReviewComment] = useState('');
   const [reviewSending, setReviewSending] = useState(false);
   const [reviewSubmitted, setReviewSubmitted] = useState(false);
+  /** Foco del comentario de reseña: no desmonta el historial; solo compacta el pie. */
+  const [reviewInputFocused, setReviewInputFocused] = useState(false);
+  const [chatBodyHeight, setChatBodyHeight] = useState(0);
+  const [footerContentHeight, setFooterContentHeight] = useState(0);
   const [agendaOpciones, setAgendaOpciones] = useState<DisponibilidadOpcion[]>([]);
   const [agendaBusy, setAgendaBusy] = useState(false);
   const [saldoBusy, setSaldoBusy] = useState(false);
@@ -2138,6 +2148,9 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
               style={styles.reviewInput}
               multiline
               maxLength={800}
+              accessibilityLabel="Dejar reseña"
+              onFocus={() => setReviewInputFocused(true)}
+              onBlur={() => setReviewInputFocused(false)}
             />
             <Pressable
               style={({ pressed }) => [
@@ -2338,6 +2351,30 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
     send,
     sending,
   ]);
+
+  const mountChatMessages = shouldMountChatMessageList({
+    loading,
+    claimLockLoading,
+    chatClosedByClaim,
+    reviewInputFocused,
+  });
+  const assumedFooterHeight =
+    footerContentHeight > 0 ? footerContentHeight : showReviewForm ? 260 : 88;
+  const chatFooterLayout =
+    chatBodyHeight > 0
+      ? splitChatBodyHeight({
+          availableHeight: chatBodyHeight,
+          footerContentHeight: assumedFooterHeight,
+        })
+      : null;
+
+  useEffect(() => {
+    if (!reviewInputFocused) return;
+    const id = requestAnimationFrame(() => {
+      footerScrollRef.current?.scrollToEnd({ animated: false });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [reviewInputFocused, footerContentHeight, chatBodyHeight]);
 
   return (
     <>
@@ -2774,19 +2811,16 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
           enabled={Platform.OS === 'ios'}
           keyboardVerticalOffset={keyboardVerticalOffset}
         >
-          {loading || claimLockLoading ? (
-            <View style={styles.center}>
-              <ActivityIndicator size="large" color={colors.primary} />
-            </View>
-          ) : chatClosedByClaim ? (
-            <View style={styles.claimClosedWrap}>
-              <Ionicons name="chatbubble-ellipses-outline" size={36} color={colors.textSecondary} />
-              <Text style={styles.claimClosedTitle}>{CHAT_CERRADO_POR_RECLAMO}</Text>
-              <Text style={styles.claimClosedText}>{CHAT_CERRADO_POR_RECLAMO_DETALLE}</Text>
-            </View>
-          ) : (
-            <View style={styles.chatBody}>
-              <FlatList
+          {mountChatMessages ? (
+            <View
+              style={styles.chatBody}
+              onLayout={(e) => {
+                const next = Math.round(e.nativeEvent.layout.height);
+                setChatBodyHeight((prev) => (prev === next ? prev : next));
+              }}
+            >
+              <View style={styles.messagePane} collapsable={false}>
+                <FlatList
                   ref={listRef}
                   inverted
                   data={visibleMessages}
@@ -2796,12 +2830,11 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                   initialNumToRender={20}
                   maxToRenderPerBatch={24}
                   windowSize={10}
-                  removeClippedSubviews={Platform.OS === 'android'}
-                  maintainVisibleContentPosition={
-                    Platform.OS === 'android'
-                      ? { minIndexForVisible: 0, autoscrollToTopThreshold: 24 }
-                      : undefined
-                  }
+                  removeClippedSubviews={false}
+                  maintainVisibleContentPosition={{
+                    minIndexForVisible: 0,
+                    autoscrollToTopThreshold: 24,
+                  }}
                   contentContainerStyle={[
                     styles.listContent,
                     messages.length === 0 && styles.listEmptyInverted,
@@ -2812,8 +2845,43 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                   keyboardShouldPersistTaps="handled"
                   keyboardDismissMode="interactive"
                 />
-              {chatActionBars}
-              {inputContainer}
+              </View>
+              <View
+                style={[
+                  styles.chatFooter,
+                  chatFooterLayout ? { height: chatFooterLayout.footerHeight } : null,
+                ]}
+              >
+                <ScrollView
+                  ref={footerScrollRef}
+                  style={chatFooterLayout ? styles.chatFooterScroll : undefined}
+                  contentContainerStyle={styles.chatFooterContent}
+                  keyboardShouldPersistTaps="handled"
+                  bounces={false}
+                  nestedScrollEnabled
+                  scrollEnabled={chatFooterLayout?.footerScrolls ?? true}
+                  onContentSizeChange={(_width, height) => {
+                    const next = Math.round(height);
+                    if (next < 24) return;
+                    setFooterContentHeight((prev) => (Math.abs(prev - next) < 2 ? prev : next));
+                  }}
+                >
+                  <View>
+                    {chatActionBars}
+                    {reviewInputFocused ? null : inputContainer}
+                  </View>
+                </ScrollView>
+              </View>
+            </View>
+          ) : loading || claimLockLoading ? (
+            <View style={styles.center}>
+              <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+          ) : (
+            <View style={styles.claimClosedWrap}>
+              <Ionicons name="chatbubble-ellipses-outline" size={36} color={colors.textSecondary} />
+              <Text style={styles.claimClosedTitle}>{CHAT_CERRADO_POR_RECLAMO}</Text>
+              <Text style={styles.claimClosedText}>{CHAT_CERRADO_POR_RECLAMO_DETALLE}</Text>
             </View>
           )}
         </KeyboardAvoidingView>
@@ -2915,7 +2983,22 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  chatBody: { flex: 1 },
+  chatBody: { flex: 1, minHeight: 0 },
+  /** El historial no se achica a 0 cuando el teclado abre la reseña. */
+  messagePane: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minHeight: CHAT_MESSAGE_LIST_MIN_HEIGHT,
+  },
+  chatFooter: {
+    flexGrow: 0,
+    flexShrink: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+  },
+  chatFooterScroll: { flex: 1 },
+  chatFooterContent: { flexGrow: 0 },
   list: { flex: 1 },
   inputContainer: {
     backgroundColor: colors.surface,

@@ -62,8 +62,14 @@ type RequestItemRow = {
   quantity?: number | string | null;
   unit?: string | null;
   sort_order?: number | null;
+  /** La RPC histórica manda el orden en camelCase. */
+  sortOrder?: number | null;
   variant_label?: string | null;
+  alternative_description?: string | null;
+  in_stock?: boolean | null;
   brand?: string | null;
+  /** Presente cuando la fila ya viene recortada a la decisión de ese comercio. */
+  client_decision?: string | null;
 };
 
 type QuoteItemRow = {
@@ -72,6 +78,7 @@ type QuoteItemRow = {
   variant_label?: string | null;
   alternative_description?: string | null;
   in_stock?: boolean | null;
+  variant_index?: number | null;
   request_item_id?: string | null;
   request_items?: RequestItemRow | RequestItemRow[] | null;
 };
@@ -335,65 +342,123 @@ function lineFromParts(
   return { id, description, quantity, unit, brand: cleanBrand };
 }
 
-function linesFromQuoteItems(items: QuoteItemRow[] | null | undefined): ClientPickupMaterialLine[] {
-  const mapped = (items ?? []).map((item, index) => {
-    const requestItem = one(item.request_items);
+function itemSortOrder(item: RequestItemRow | null | undefined): number {
+  const raw = item?.sort_order ?? item?.sortOrder;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function brandFromRequestItem(item: RequestItemRow): string | null {
+  const explicit = (item.brand ?? '').trim();
+  if (explicit) return explicit;
+  return brandFromQuoteItem({
+    variant_label: item.variant_label,
+    alternative_description: item.alternative_description,
+    in_stock: item.in_stock,
+  });
+}
+
+function requestItemLookup(items: RequestItemRow[] | null | undefined): Map<string, RequestItemRow> {
+  const byId = new Map<string, RequestItemRow>();
+  for (const item of items ?? []) {
+    const id = String(item.id ?? '').trim();
+    if (id) byId.set(id, item);
+  }
+  return byId;
+}
+
+/**
+ * Líneas que el cliente aceptó en esta cotización (este comercio).
+ * Si hay decisiones y ninguna es accepted, no rellena con el resto del pedido.
+ * Si nadie decidió todavía, conserva las líneas no rechazadas.
+ */
+function linesFromQuoteDecisions(
+  quoteItems: QuoteItemRow[],
+  requestItems: RequestItemRow[] | null | undefined,
+): ClientPickupMaterialLine[] {
+  const byId = requestItemLookup(requestItems);
+  const mapped = quoteItems.map((item, index) => {
+    const embedded = one(item.request_items);
+    const requestItem =
+      embedded ?? byId.get(String(item.request_item_id ?? '').trim()) ?? null;
     const decision = String(item.client_decision ?? 'pending').toLowerCase();
     const description = (requestItem?.description ?? '').trim() || 'Material';
-    const quantityRaw = Number(requestItem?.quantity);
-    const unit = (requestItem?.unit ?? '').trim() || 'u';
+    const variant = Number(item.variant_index);
+    const baseId = String(item.request_item_id ?? requestItem?.id ?? item.id ?? `item-${index}`);
+    const id = Number.isFinite(variant) && variant > 1 && item.id ? String(item.id) : baseId;
     return {
       line: lineFromParts(
-        String(item.id ?? requestItem?.id ?? `item-${index}`),
+        id,
         description,
-        quantityRaw,
-        unit,
+        Number(requestItem?.quantity),
+        (requestItem?.unit ?? '').trim() || 'u',
         brandFromQuoteItem(item),
       ),
       decision,
-      requestItemId: String(item.request_item_id ?? requestItem?.id ?? ''),
+      sort: itemSortOrder(requestItem),
     };
   });
   const accepted = mapped.filter((line) => line.decision === 'accepted');
-  const source = accepted.length > 0 ? accepted : mapped.filter((line) => line.decision !== 'rejected');
-  return source.map((entry) => entry.line);
+  const source =
+    accepted.length > 0
+      ? accepted
+      : mapped.some((line) => line.decision === 'rejected')
+        ? []
+        : mapped.filter((line) => line.decision !== 'rejected');
+  return source
+    .sort((a, b) => a.sort - b.sort)
+    .map((entry) => entry.line);
 }
 
 function linesFromRequestItems(
   items: RequestItemRow[] | null | undefined,
   quoteItems: QuoteItemRow[] | null | undefined,
 ): ClientPickupMaterialLine[] {
-  const rows = [...(items ?? [])].sort(
-    (a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0),
-  );
-  if (rows.length === 0) return linesFromQuoteItems(quoteItems);
-
   const quotes = quoteItems ?? [];
-  const decisionFor = (id: string) =>
-    quotes.filter((item) => {
-      const requestItem = one(item.request_items);
-      return String(item.request_item_id ?? requestItem?.id ?? '') === id;
-    });
+  if (quotes.length > 0) return linesFromQuoteDecisions(quotes, items);
 
-  const lines: ClientPickupMaterialLine[] = [];
-  rows.forEach((item, index) => {
-    const id = String(item.id ?? `item-${index}`);
-    const related = decisionFor(id);
-    const accepted = related.find(
-      (quote) => String(quote.client_decision ?? '').toLowerCase() === 'accepted',
-    );
-    const rejected =
-      related.length > 0 &&
-      related.every((quote) => String(quote.client_decision ?? '').toLowerCase() === 'rejected');
-    if (rejected && !accepted) return;
-    const source = accepted ?? null;
-    const description = (item.description ?? '').trim() || 'Material';
-    const brand = (item.brand ?? item.variant_label ?? '').trim() || (source ? brandFromQuoteItem(source) : null);
-    lines.push(
-      lineFromParts(id, description, Number(item.quantity), (item.unit ?? '').trim() || 'u', brand),
-    );
+  const rows = [...(items ?? [])].sort((a, b) => itemSortOrder(a) - itemSortOrder(b));
+  const decided = rows.some((item) => String(item.client_decision ?? '').trim() !== '');
+  const source = decided
+    ? rows.filter((item) => String(item.client_decision ?? '').toLowerCase() === 'accepted')
+    : rows;
+  return source.map((item, index) =>
+    lineFromParts(
+      String(item.id ?? `item-${index}`),
+      (item.description ?? '').trim() || 'Material',
+      Number(item.quantity),
+      (item.unit ?? '').trim() || 'u',
+      brandFromRequestItem(item),
+    ),
+  );
+}
+
+/** La RPC ya recortó los ítems a la decisión de ese comercio. */
+export function pickupItemsDeclareDecision(row: ClientPickupOrderRow): boolean {
+  return (row.items ?? []).some((item) => String(item.client_decision ?? '').trim() !== '');
+}
+
+/**
+ * Completa filas de la RPC con las cotizaciones del pedido cuando `items`
+ * todavía trae el pedido entero, sin decisión por comercio.
+ */
+export function mergeStoreQuoteDetails(
+  rows: ClientPickupOrderRow[],
+  details: ClientPickupOrderRow[],
+): ClientPickupOrderRow[] {
+  const byId = new Map<string, ClientPickupOrderRow>();
+  for (const detail of details) {
+    const id = String(detail.id ?? detail.order_id ?? '').trim();
+    if (id) byId.set(id, detail);
+  }
+  return rows.map((row) => {
+    if (pickupItemsDeclareDecision(row)) return row;
+    const id = String(row.order_id ?? row.id ?? '').trim();
+    const detail = byId.get(id);
+    const quote = one(detail?.quotes);
+    if (!quote?.quote_items || quote.quote_items.length === 0) return row;
+    return { ...row, quotes: detail?.quotes };
   });
-  return lines.length > 0 ? lines : linesFromQuoteItems(quoteItems);
 }
 
 function orderCodeOf(row: ClientPickupOrderRow): string | null {
@@ -435,7 +500,7 @@ export function mapClientPickupOrders(rows: ClientPickupOrderRow[]): ClientPicku
         availableAt: availableAtOf(row),
         pickedUpAt: section === 'historial' ? row.completed_at ?? null : null,
         createdAt: row.available_at ?? row.created_at ?? null,
-        materials: linesFromRequestItems(row.items, null),
+        materials: linesFromRequestItems(row.items, one(row.quotes)?.quote_items),
       });
       continue;
     }

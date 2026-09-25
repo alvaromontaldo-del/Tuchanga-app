@@ -3,6 +3,7 @@ import {
   buildClientPickupCardContent,
   formatPickupOpeningHours,
   mapClientPickupOrders,
+  mergeStoreQuoteDetails,
   type ClientPickupOrderRow,
 } from './clientMaterialPickups';
 
@@ -192,5 +193,136 @@ describe('mapClientPickupOrders', () => {
     expect(content.fields.find((field) => field.label === 'Modalidad de entrega')?.value).toBe(
       'Flete a domicilio',
     );
+  });
+
+  it('cada comercio lista solo los materiales aceptados para retirar ahí', () => {
+    const requestItems = [
+      { id: 'ri-hose', description: 'Manguera', quantity: 1, unit: 'u', sort_order: 1 },
+      { id: 'ri-clamp', description: 'Abrazadera', quantity: 2, unit: 'u', sort_order: 2 },
+      { id: 'ri-plug', description: 'Tarugos', quantity: 10, unit: 'u', sort_order: 3 },
+    ];
+    const quoteFor = (store: string, acceptedIds: string[]) => ({
+      freight_type: 'pickup',
+      stores: { name: store, address: 'Calle 123', opening_hours: [] },
+      material_requests: {
+        id: 'req-shared',
+        title: 'Pedido de materiales',
+        request_items: requestItems,
+      },
+      quote_items: requestItems.map((item) => ({
+        id: `qi-${store}-${item.id}`,
+        client_decision: acceptedIds.includes(item.id) ? 'accepted' : 'rejected',
+        variant_label: item.id === 'ri-hose' ? 'Aluminio' : null,
+        in_stock: true,
+        request_item_id: item.id,
+        request_items: item,
+      })),
+    });
+
+    const cards = mapClientPickupOrders([
+      {
+        ...cement,
+        id: 'order-ferreteria',
+        order_code: '1001',
+        quotes: quoteFor('Ferretería El Tornillo', ['ri-hose', 'ri-clamp']),
+      },
+      {
+        ...cement,
+        id: 'order-muebleria',
+        order_code: '1002',
+        quotes: quoteFor('Mueblería Voolentiera', ['ri-plug']),
+      },
+    ]);
+
+    const byStore = Object.fromEntries(
+      cards.map((card) => [
+        card.storeName,
+        buildClientPickupCardContent(card).materials.map((item) => item.line),
+      ]),
+    );
+    expect(byStore['Ferretería El Tornillo']).toEqual([
+      'Manguera (Aluminio) · 1 u',
+      'Abrazadera · 2 u',
+    ]);
+    expect(byStore['Mueblería Voolentiera']).toEqual(['Tarugos · 10 u']);
+    expect(JSON.stringify(byStore)).not.toContain('solicitud');
+  });
+
+  it('la fila de la RPC no repite en un comercio los materiales aceptados en otro', () => {
+    const fullOrder = [
+      { id: 'ri-hose', description: 'Manguera', quantity: 1, unit: 'u', sort_order: 1, client_decision: 'accepted' },
+      { id: 'ri-plug', description: 'Tarugos', quantity: 10, unit: 'u', sort_order: 2, client_decision: 'rejected' },
+    ];
+    const [card] = mapClientPickupOrders([
+      {
+        order_id: 'order-rpc-store',
+        numero_pedido: '1001',
+        list_bucket: 'activa',
+        title: 'Pedido de materiales',
+        store_name: 'Ferretería El Tornillo',
+        store_address: 'Calle 123',
+        include_freight: false,
+        verification_pin: '1111',
+        accepted_total: 4000,
+        items: fullOrder,
+      },
+    ]);
+    const content = buildClientPickupCardContent(card);
+    expect(content.materials.map((item) => item.line)).toEqual(['Manguera · 1 u']);
+    expect(content.orderCode).toBe('1001');
+    expect(content.fields.map((field) => field.label)).not.toContain('Nº solicitud');
+    expect(content.fields.map((field) => field.label)).not.toContain('Disponible desde');
+  });
+
+  it('si la RPC manda el pedido entero, usa las líneas aceptadas de esa cotización', () => {
+    const rpcRow: ClientPickupOrderRow = {
+      order_id: 'order-rpc-unscoped',
+      numero_pedido: '1002',
+      list_bucket: 'historial',
+      status: 'completed',
+      title: 'Pedido de materiales',
+      store_name: 'Mueblería Voolentiera',
+      store_address: 'Calle 456',
+      completed_at: '2026-09-20T12:00:00.000Z',
+      include_freight: false,
+      verification_pin: '2222',
+      accepted_total: 900,
+      items: [
+        { id: 'ri-hose', description: 'Manguera', quantity: 1, unit: 'u', sort_order: 1 },
+        { id: 'ri-plug', description: 'Tarugos', quantity: 10, unit: 'u', sort_order: 2 },
+      ],
+    };
+    const [card] = mapClientPickupOrders(
+      mergeStoreQuoteDetails(
+        [rpcRow],
+        [
+          {
+            id: 'order-rpc-unscoped',
+            quotes: {
+              quote_items: [
+                {
+                  id: 'qi-hose',
+                  client_decision: 'rejected',
+                  request_item_id: 'ri-hose',
+                  request_items: { id: 'ri-hose', description: 'Manguera', quantity: 1, unit: 'u', sort_order: 1 },
+                },
+                {
+                  id: 'qi-plug',
+                  client_decision: 'accepted',
+                  variant_label: '10 mm',
+                  in_stock: true,
+                  request_item_id: 'ri-plug',
+                  request_items: { id: 'ri-plug', description: 'Tarugos', quantity: 10, unit: 'u', sort_order: 2 },
+                },
+              ],
+            },
+          },
+        ],
+      ),
+    );
+    const content = buildClientPickupCardContent(card);
+    expect(content.materials.map((item) => item.line)).toEqual(['Tarugos (10 mm) · 10 u']);
+    expect(content.fields.map((field) => field.label)).toContain('Retirado');
+    expect(content.fields.map((field) => field.label)).not.toContain('Disponible desde');
   });
 });

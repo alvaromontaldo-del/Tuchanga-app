@@ -1,6 +1,8 @@
 import { getSupabaseClient } from '../lib/supabase';
 import {
   mapClientPickupOrders,
+  mergeStoreQuoteDetails,
+  pickupItemsDeclareDecision,
   type ClientPickupCardModel,
   type ClientPickupOrderRow,
 } from '../utils/clientMaterialPickups';
@@ -41,14 +43,47 @@ const QUOTE_EMBED = `
 const SELECT_OWN = `${ORDER_COLUMNS}, quotes ( ${QUOTE_EMBED} )`;
 const SELECT_BY_QUOTE_CLIENT = `${ORDER_COLUMNS}, quotes!inner ( ${QUOTE_EMBED} )`;
 
+/** Cotización del pedido, para recortar materiales cuando la RPC manda el pedido entero. */
+const SELECT_STORE_QUOTES = `
+  id,
+  quotes (
+    quote_items (
+      id,
+      client_decision,
+      variant_label,
+      alternative_description,
+      in_stock,
+      variant_index,
+      request_item_id,
+      request_items ( id, description, quantity, unit, sort_order )
+    )
+  )
+`;
+
 function rowsFromRpc(data: unknown): ClientPickupOrderRow[] | null {
   if (!Array.isArray(data)) return null;
   return data as ClientPickupOrderRow[];
 }
 
+async function scopeRpcRowsToStore(
+  sb: ReturnType<typeof getSupabaseClient>,
+  rows: ClientPickupOrderRow[],
+): Promise<ClientPickupOrderRow[]> {
+  const ids = rows
+    .filter((row) => !pickupItemsDeclareDecision(row))
+    .map((row) => String(row.order_id ?? row.id ?? '').trim())
+    .filter(Boolean);
+  if (ids.length === 0) return rows;
+
+  const { data, error } = await sb.from('orders').select(SELECT_STORE_QUOTES).in('id', ids);
+  if (error || !Array.isArray(data)) return rows;
+  return mergeStoreQuoteDetails(rows, data as ClientPickupOrderRow[]);
+}
+
 /**
  * Pedidos de materiales del cliente ya pagos: listos para retirar o ya retirados.
- * Prefiere la RPC existente. Si no está, lee ítems de `request_items`.
+ * Prefiere la RPC existente. Cada tarjeta queda con los materiales aceptados
+ * de esa cotización. Si no está, lee ítems de `request_items` / `quote_items`.
  * No usa el id de la solicitud en la tarjeta.
  */
 export async function fetchClientMaterialPickups(): Promise<ClientPickupCardModel[]> {
@@ -64,7 +99,7 @@ export async function fetchClientMaterialPickups(): Promise<ClientPickupCardMode
     const rpcRows = rowsFromRpc(rpc.data) ?? [];
     // Lista vacía: la RPC ya filtró. Si hay filas, exigimos `items` para el desplegable.
     if (rpcRows.length === 0 || rpcRows.some((row) => Array.isArray(row.items))) {
-      return mapClientPickupOrders(rpcRows);
+      return mapClientPickupOrders(await scopeRpcRowsToStore(sb, rpcRows));
     }
   }
 
