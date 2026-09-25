@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExpandableText } from '../../components/common/ExpandableText';
@@ -9,19 +9,22 @@ import { formatPostDate } from '../../utils/formatDate';
 
 import { fetchContratacionesByUser } from '../../services/contratacionesSupabase';
 import type { Contratacion, ContratacionEstadoPago, ContratacionEstadoTrabajo } from '../../types/contrataciones';
-import { professionalPayoutAmount, workerGivenName } from '../../utils/contractedWorkDisplay';
 import {
-  warrantyAnchorIso,
-  warrantyCountdown,
-  warrantyCountdownLabel,
-} from '../../utils/warrantyDays';
+  contractedWarrantyDurationLabel,
+  contractedWorkMoneyDisplay,
+  workerGivenName,
+} from '../../utils/contractedWorkDisplay';
+import { warrantyAnchorIso, warrantyCountdown } from '../../utils/warrantyDays';
 
 type OrderRow = {
   conversation_id: string;
   worker_id: string;
   client_id: string;
   id: string;
-  amount: number;
+  professionalLabel: string;
+  professionalAmount: string;
+  serviceFeeLabel: string;
+  serviceFeeAmount: string;
   description: string;
   estado_trabajo: ContratacionEstadoTrabajo;
   estado_pago: ContratacionEstadoPago;
@@ -46,12 +49,16 @@ function statusBadge(row: OrderRow): { label: string; tone: 'pending' | 'paid' |
 }
 
 function mapContratacion(c: Contratacion): OrderRow {
+  const money = contractedWorkMoneyDisplay(c);
   return {
     id: c.id,
     conversation_id: c.conversation_id,
     worker_id: c.worker_id,
     client_id: c.client_id,
-    amount: professionalPayoutAmount(c),
+    professionalLabel: money.professionalLabel,
+    professionalAmount: money.professionalAmount,
+    serviceFeeLabel: money.serviceFeeLabel,
+    serviceFeeAmount: money.serviceFeeAmount,
     description: c.service_detail,
     estado_trabajo: c.estado_trabajo,
     estado_pago: c.estado_pago,
@@ -69,16 +76,6 @@ export function ContractedWorkOrdersScreen() {
   const [rows, setRows] = useState<OrderRow[]>([]);
   const [workerNameById, setWorkerNameById] = useState<Record<string, string>>({});
   const [now, setNow] = useState(() => new Date());
-
-  const currency = useMemo(
-    () =>
-      new Intl.NumberFormat('es-AR', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
-    [],
-  );
-  const fmtMoney = (n: number) => `$${currency.format(Math.round((Number(n) || 0) * 100) / 100)}`;
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
@@ -160,7 +157,7 @@ export function ContractedWorkOrdersScreen() {
               }),
               now,
             });
-            const warrantyLabel = warrantyCountdownLabel(warranty);
+            const warrantyLabel = contractedWarrantyDurationLabel(warranty);
             return (
               <View key={q.id} style={styles.card}>
                 <View
@@ -175,7 +172,11 @@ export function ContractedWorkOrdersScreen() {
                 <Text style={styles.workerName} numberOfLines={1}>
                   Profesional: <Text style={styles.workerNameStrong}>{workerName}</Text>
                 </Text>
-                <Text style={styles.amount}>{fmtMoney(q.amount)}</Text>
+                <Text style={styles.amountCaption}>{q.professionalLabel}</Text>
+                <Text style={styles.amount}>{q.professionalAmount}</Text>
+                <Text style={styles.feeLine}>
+                  {q.serviceFeeLabel}: {q.serviceFeeAmount}
+                </Text>
                 <ExpandableText
                   text={q.description?.trim() || 'Sin detalle del servicio.'}
                   numberOfLinesCollapsed={3}
@@ -185,7 +186,7 @@ export function ContractedWorkOrdersScreen() {
                   <Text
                     style={[styles.warranty, warranty.status === 'expired' && styles.warrantyExpired]}
                   >
-                    {warrantyLabel}
+                    Garantía: {warrantyLabel}
                   </Text>
                 ) : null}
                 <Text style={styles.date}>{formatPostDate(q.created_at)}</Text>
@@ -235,7 +236,14 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 12, fontWeight: '900', color: colors.text },
   workerName: { marginTop: spacing.sm, fontSize: 13, color: colors.textSecondary, fontWeight: '700' },
   workerNameStrong: { color: colors.text, fontWeight: '900' },
-  amount: { marginTop: spacing.sm, fontSize: 20, fontWeight: '900', color: colors.text },
+  amountCaption: {
+    marginTop: spacing.sm,
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.textSecondary,
+  },
+  amount: { marginTop: 2, fontSize: 20, fontWeight: '900', color: colors.text },
+  feeLine: { marginTop: spacing.xs, fontSize: 14, fontWeight: '800', color: colors.text },
   detail: { marginTop: spacing.sm, ...typography.body, color: colors.textSecondary },
   warranty: { marginTop: spacing.sm, fontSize: 14, fontWeight: '800', color: colors.text },
   warrantyExpired: { color: colors.textSecondary },
