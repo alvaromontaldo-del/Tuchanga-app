@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/nominatim';
-import { addressFromPick } from '../../utils/streetAddressQuery';
+import { addressFromPick, isIgnorableAddressEcho } from '../../utils/streetAddressQuery';
 import { colors, radii, spacing } from '../../constants/theme';
 import { getHighAccuracyPosition } from '../../utils/deviceGeolocation';
 
@@ -50,6 +50,16 @@ export function AddressDeliveryField({
   const [devicePos, setDevicePos] = useState<{ lat: number; lng: number } | null>(near ?? null);
   const requestIdRef = useRef(0);
   const skipGeocodeRef = useRef<string | null>(null);
+  const typedQueryRef = useRef<string | null>(null);
+  const programmaticQueryRef = useRef<string | null>(null);
+  const echoUntilRef = useRef(0);
+
+  const commitText = useCallback((next: string) => {
+    programmaticQueryRef.current = next.trim();
+    echoUntilRef.current = Date.now() + 500;
+    skipGeocodeRef.current = next.trim();
+    onChangeText(next);
+  }, [onChangeText]);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,12 +114,13 @@ export function AddressDeliveryField({
       if (!result.ok) return;
       const { lat, lng } = result.position;
       setDevicePos({ lat, lng });
+      typedQueryRef.current = null;
       let address = value.trim();
       try {
         const rev = await reverseNominatimStreet(lat, lng);
         if (rev) {
           address = rev;
-          onChangeText(rev);
+          commitText(rev);
         }
       } catch {
         /* keep text */
@@ -119,7 +130,7 @@ export function AddressDeliveryField({
     } finally {
       setLocating(false);
     }
-  }, [onChangeText, onGeoChange, value]);
+  }, [commitText, onGeoChange, value]);
 
   return (
     <View style={styles.wrap}>
@@ -130,6 +141,19 @@ export function AddressDeliveryField({
             style={styles.searchInput}
             value={value}
             onChangeText={(t) => {
+              if (
+                isIgnorableAddressEcho(
+                  t,
+                  programmaticQueryRef.current,
+                  typedQueryRef.current,
+                  Date.now(),
+                  echoUntilRef.current,
+                )
+              ) {
+                return;
+              }
+              typedQueryRef.current = t;
+              programmaticQueryRef.current = null;
               onChangeText(t);
               onGeoChange(null);
             }}
@@ -171,9 +195,10 @@ export function AddressDeliveryField({
               key={`${r.lat}-${r.lng}-${r.address}`}
               style={styles.resultRow}
               onPress={() => {
-                const address = addressFromPick(value, r.address);
-                skipGeocodeRef.current = address;
-                onChangeText(address);
+                const typed = typedQueryRef.current?.trim() || value;
+                const address = addressFromPick(typed, r.address);
+                typedQueryRef.current = typed;
+                commitText(address);
                 onGeoChange({ ...r, address });
                 setResults([]);
               }}
@@ -181,7 +206,7 @@ export function AddressDeliveryField({
               <Ionicons name="location-outline" size={18} color={colors.textSecondary} />
               <View style={styles.resultText}>
                 <Text style={styles.resultTitle} numberOfLines={2}>
-                  {r.address}
+                  {addressFromPick(typedQueryRef.current?.trim() || value, r.address)}
                 </Text>
                 <Text style={styles.resultHint}>
                   {r.lat.toFixed(5)}, {r.lng.toFixed(5)}
