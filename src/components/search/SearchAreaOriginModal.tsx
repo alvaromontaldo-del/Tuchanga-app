@@ -126,7 +126,7 @@ export function SearchAreaOriginModal({ visible, onClose, near, onPick }: Props)
               >
                 <Ionicons name="location-outline" size={22} color={colors.primary} />
                 <Text style={styles.rowText} numberOfLines={3}>
-                  {item.address}
+                  {addressFromPick(query, item.address)}
                 </Text>
               </Pressable>
             )}

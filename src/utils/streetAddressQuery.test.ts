@@ -4,7 +4,10 @@ import {
   addressFromPick,
   addressToPersist,
   ensureTypedHeightSuggestion,
+  fallbackStreetNames,
   houseNumberDigits,
+  isIgnorableAddressEcho,
+  isNegligiblePinMove,
   parseStreetAddressQuery,
   rankGeocodeHits,
   retainHouseNumber,
@@ -389,6 +392,139 @@ describe('addressToPersist', () => {
         pinMoved: true,
       }),
     ).toBe('Cerviño 3562, Palermo');
+  });
+
+  it('Alejandro Volta 1140 sobrevive al reverso del centro de calle, que no tiene portal', () => {
+    const typed = 'Alejandro Volta 1140';
+    const suggestion = 'Alejandro Volta, Troncos del Talar';
+    const confirmed = addressFromPick(typed, suggestion);
+    const reversed = 'Alejandro Volta, Troncos del Talar';
+    const saved = addressToPersist({
+      typedQuery: typed,
+      confirmedLabel: confirmed,
+      currentLabel: reversed,
+      pinMoved: true,
+    });
+    expect(confirmed).toContain('1140');
+    expect(saved).toContain('1140');
+    expect(saved).toContain('Volta');
+    expect(normalizeDisplayAddress(saved)).toContain('1140');
+    expect(saved.includes('1853')).toBe(false);
+  });
+
+  it('Volta 1140 no queda como el portal cercano 1853', () => {
+    const saved = addressToPersist({
+      typedQuery: 'Volta 1140',
+      confirmedLabel: 'Volta 1140, Las Cañitas, Buenos Aires',
+      currentLabel: 'Volta 1853, Las Cañitas',
+      pinMoved: true,
+    });
+    expect(saved).toContain('1140');
+    expect(saved.includes('1853')).toBe(false);
+    expect(normalizeDisplayAddress(saved)).toContain('1140');
+  });
+
+  it('Volta 1140 4B conserva altura y piso aunque el reverso no traiga número', () => {
+    const saved = addressToPersist({
+      typedQuery: 'Volta 1140 4B',
+      confirmedLabel: null,
+      currentLabel: 'Volta, Las Cañitas',
+      pinMoved: true,
+    });
+    expect(saved).toContain('1140');
+    expect(saved).toContain('4B');
+  });
+
+  it('Volta sin número no inventa altura ni se queda con un portal de OSM', () => {
+    expect(
+      addressToPersist({
+        typedQuery: 'Volta',
+        confirmedLabel: 'Volta, Las Cañitas',
+        currentLabel: 'Volta 1853, Las Cañitas',
+        pinMoved: false,
+      }),
+    ).toBe('Volta, Las Cañitas');
+    expect(
+      addressFromPick('Volta', 'Volta, Las Cañitas, Palermo'),
+    ).toBe('Volta, Las Cañitas, Palermo');
+  });
+
+  it('una calle con portal real en OSM guarda ese portal', () => {
+    const typed = 'Cerviño 3562';
+    const suggestion = 'Cerviño 3562, Palermo';
+    const saved = addressToPersist({
+      typedQuery: typed,
+      confirmedLabel: addressFromPick(typed, suggestion),
+      currentLabel: suggestion,
+      pinMoved: false,
+    });
+    expect(saved).toContain('3562');
+    expect(saved).toContain('Cerviño');
+    expect(normalizeDisplayAddress(saved)).toContain('3562');
+  });
+});
+
+describe('eco del TextInput y move fantasma del mapa', () => {
+  it('ignora el eco del texto que acabamos de escribir y un vacío inmediato', () => {
+    expect(isIgnorableAddressEcho('Volta 1140, Las Cañitas', 'Volta 1140, Las Cañitas', 'Volta 1140', 1_000, 1_500)).toBe(
+      true,
+    );
+    expect(isIgnorableAddressEcho('', 'Volta 1140, Las Cañitas', 'Volta 1140', 1_000, 1_500)).toBe(true);
+    expect(isIgnorableAddressEcho('Volta 1140', 'Volta 1140, Las Cañitas', 'Volta 1140', 1_000, 1_500)).toBe(
+      true,
+    );
+    expect(isIgnorableAddressEcho('Volta 1141', 'Volta 1140, Las Cañitas', 'Volta 1140', 2_000, 1_500)).toBe(
+      false,
+    );
+  });
+
+  it('un centrado del pin no cuenta como arrastre', () => {
+    expect(isNegligiblePinMove(palermo, { lat: palermo.lat + 0.00005, lng: palermo.lng })).toBe(true);
+    expect(isNegligiblePinMove(palermo, { lat: palermo.lat + 0.01, lng: palermo.lng })).toBe(false);
+    expect(isNegligiblePinMove(null, palermo)).toBe(false);
+  });
+});
+
+describe('calle corta cerca contra homónimo lejos', () => {
+  it('Alejandro Volta 1140 cerca de Palermo usa Volta y no Tigre', () => {
+    const tigre = { lat: -34.4552826, lng: -58.6011515 };
+    const ranked = rankGeocodeHits(
+      [
+        hit({
+          id: 'tigre',
+          lat: tigre.lat,
+          lng: tigre.lng,
+          displayName: 'Alejandro Volta, Troncos del Talar, Partido de Tigre, Buenos Aires',
+          osmClass: 'highway',
+          parts: { road: 'Alejandro Volta', town: 'Troncos del Talar' },
+        }),
+        hit({
+          id: 'palermo-volta',
+          lat: palermo.lat,
+          lng: palermo.lng,
+          displayName: 'Volta, Las Cañitas, Palermo, Buenos Aires',
+          osmClass: 'highway',
+          parts: {
+            road: 'Volta',
+            neighbourhood: 'Las Cañitas',
+            suburb: 'Palermo',
+            city: 'Buenos Aires',
+          },
+        }),
+      ],
+      'Alejandro Volta 1140',
+      palermo,
+    );
+    expect(ranked[0]?.id).toBe('palermo-volta');
+    expect(ranked[0]?.address).toContain('1140');
+    expect(ranked[0]?.address.includes('1853')).toBe(false);
+    expect(ranked[0]?.lat).toBe(palermo.lat);
+  });
+
+  it('el fallback de nombre no parte calles que ya traen un número', () => {
+    expect(fallbackStreetNames('Alejandro Volta')).toEqual(['Volta']);
+    expect(fallbackStreetNames('Volta')).toEqual([]);
+    expect(fallbackStreetNames('Av. 9 de Julio')).toEqual([]);
   });
 });
 

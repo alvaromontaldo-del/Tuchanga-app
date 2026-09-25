@@ -4,6 +4,7 @@ import {
   type NominatimAddressParts,
 } from '../utils/formatAddress';
 import {
+  fallbackStreetNames,
   hitsIncludeNearbyStreet,
   houseNumberDigits,
   parseStreetAddressQuery,
@@ -145,25 +146,29 @@ export async function fetchNominatimSuggestions(
   const parsed = parseStreetAddressQuery(q);
   let hits = await fetchGeocodeHits(searchParamsFor(q, opts, true));
 
-  // `street=1140 Volta` a veces solo devuelve un portal en otra ciudad.
-  // Si en la zona no está esa calle, la buscamos por nombre y conservamos la altura tipeada.
-  if (
-    parsed &&
-    houseNumberDigits(parsed.houseNumber) &&
-    opts?.near &&
-    !hitsIncludeNearbyStreet(hits, parsed, opts.near)
-  ) {
-    const local = new URLSearchParams();
-    local.set('q', parsed.street);
-    local.set('format', 'json');
-    local.set('addressdetails', '1');
-    local.set('accept-language', 'es');
-    local.set('countrycodes', (opts.countryCode ?? 'ar').toLowerCase());
-    local.set('limit', '6');
-    local.set('viewbox', buildViewBoxAround(opts.near.lat, opts.near.lng, 0.18));
-    local.set('bounded', '1');
-    const localHits = await fetchGeocodeHits(local);
-    hits = mergeHits(hits, localHits);
+  // `street=1140 Alejandro Volta` puede devolver solo un homónimo a 20 km
+  // (Tigre) y ni enterarse de «Volta» en Palermo. Si no hay esa calle al lado,
+  // buscamos el nombre y, si hace falta, el último token. La altura tipeada
+  // se conserva igual en la etiqueta.
+  const digits = parsed ? houseNumberDigits(parsed.houseNumber) : '';
+  // 8 km: un homónimo en otro partido (Tigre) no cuenta como “la calle de acá”.
+  const localStreetM = 8_000;
+  if (parsed && digits && opts?.near && !hitsIncludeNearbyStreet(hits, parsed, opts.near, localStreetM)) {
+    const names = [parsed.street, ...fallbackStreetNames(parsed.street)];
+    for (const name of names) {
+      const local = new URLSearchParams();
+      local.set('q', name);
+      local.set('format', 'json');
+      local.set('addressdetails', '1');
+      local.set('accept-language', 'es');
+      local.set('countrycodes', (opts.countryCode ?? 'ar').toLowerCase());
+      local.set('limit', '6');
+      local.set('viewbox', buildViewBoxAround(opts.near.lat, opts.near.lng, 0.18));
+      local.set('bounded', '1');
+      const localHits = await fetchGeocodeHits(local);
+      hits = mergeHits(hits, localHits);
+      if (hitsIncludeNearbyStreet(hits, parsed, opts.near, localStreetM)) break;
+    }
   }
 
   return rankGeocodeHits(hits, q, opts?.near).map((item) => ({

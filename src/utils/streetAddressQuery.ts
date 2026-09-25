@@ -269,10 +269,22 @@ export function addressFromPick(typedQuery: string, suggestionLabel: string): st
   return [line, ...pieces.slice(1)].join(', ');
 }
 
+function reapplyTypedHeight(label: string, typedQuery: string): string {
+  const typed = typedQuery.trim();
+  if (!typed) return label;
+  const parsed = parseStreetAddressQuery(typed);
+  if (!parsed || !houseNumberDigits(parsed.houseNumber)) return label;
+  if (labelHasHouseDigits(label, parsed.houseNumber)) {
+    return ensureUnitOnFirstPiece(label, parsed.unit);
+  }
+  return addressFromPick(typed, label);
+}
+
 /**
  * Dirección que se persiste.
- * Si el pin no se movió, gana la etiqueta confirmada al elegir (con la altura).
- * Si no hubo etiqueta, se reconstruye desde lo tipeado. Mover el pin a otra calle respeta el reverso.
+ * La altura tipeada manda sobre el centro de calle o un portal cercano de OSM
+ * mientras la calle sea la misma. Mover el pin a otra calle respeta ese reverso.
+ * Si nadie escribió un número, no se inventa.
  */
 export function addressToPersist(options: {
   typedQuery?: string | null;
@@ -281,13 +293,62 @@ export function addressToPersist(options: {
   pinMoved: boolean;
 }): string {
   const current = options.currentLabel.trim();
+  const typed = options.typedQuery?.trim() ?? '';
+  const confirmed = options.confirmedLabel?.trim() ?? '';
+
   if (!options.pinMoved) {
-    const confirmed = options.confirmedLabel?.trim();
-    if (confirmed) return confirmed;
-    const typed = options.typedQuery?.trim();
+    if (confirmed) return reapplyTypedHeight(confirmed, typed);
     if (typed) return addressFromPick(typed, current);
+    return current;
   }
-  return current;
+
+  const anchor = confirmed || typed;
+  if (!anchor) return current;
+  return retainHouseNumber(anchor, current);
+}
+
+/** El TextInput repitió el valor que acabamos de escribir desde código. */
+export function isIgnorableAddressEcho(
+  nextText: string,
+  programmaticLabel: string | null | undefined,
+  typedQuery: string | null | undefined,
+  nowMs: number,
+  echoUntilMs: number,
+): boolean {
+  const next = nextText.trim();
+  const programmatic = programmaticLabel?.trim() ?? '';
+  if (programmatic && next === programmatic) return true;
+  if (nowMs >= echoUntilMs) return false;
+  if (!next) return true;
+  const typed = typedQuery?.trim() ?? '';
+  return Boolean(typed) && next === typed;
+}
+
+const PIN_JITTER_M = 25;
+
+/** Un “move” del mapa al centrar el pin no es un arrastre del usuario. */
+export function isNegligiblePinMove(
+  from: { lat: number; lng: number } | null | undefined,
+  to: { lat: number; lng: number },
+): boolean {
+  if (!from) return false;
+  return distanceMeters(from, to) < PIN_JITTER_M;
+}
+
+/**
+ * Si el nombre completo no está cerca (Alejandro Volta vs la calle Volta),
+ * buscamos también el último token. No aplica a calles cuyo nombre ya trae un número.
+ */
+export function fallbackStreetNames(street: string): string[] {
+  const foldedTokens = streetTokens(street);
+  if (foldedTokens.length < 2) return [];
+  if (foldedTokens.some((token) => /^\d+$/.test(token))) return [];
+  const lastFold = foldedTokens[foldedTokens.length - 1] ?? '';
+  if (lastFold.length < 4) return [];
+  const rawTokens = street.trim().split(/\s+/).filter(Boolean);
+  const lastRaw = [...rawTokens].reverse().find((token) => fold(token) === lastFold);
+  if (!lastRaw || fold(lastRaw) === fold(street)) return [];
+  return [lastRaw];
 }
 
 /** Nombre de calle del hit. A veces Nominatim no manda `road` y el nombre está solo en display_name. */
@@ -357,12 +418,13 @@ export function hitsIncludeNearbyStreet(
   hits: GeocodeHit[],
   parsed: ParsedStreetQuery,
   near?: { lat: number; lng: number } | null,
+  radiusM = NEAR_RADIUS_M,
 ): boolean {
   return hits.some((hit) => {
     const road = hitStreetName(hit);
     if (roadMatchScore(road, parsed.street) < 1) return false;
     if (!near) return true;
-    return distanceMeters(near, hit) <= NEAR_RADIUS_M;
+    return distanceMeters(near, hit) <= radiusM;
   });
 }
 
@@ -466,8 +528,13 @@ export function rankGeocodeHits(
     // No sumar un portal de otra ciudad (Volta 1140 en Alta Gracia).
     filtered = filtered.filter((item) => item.tier === 1);
   }
-  const fallbacks = filtered.filter((item) => item.tier === 1);
-  if (fallbacks.some((item) => item.nameScore === 2)) {
+  // Un homónimo exacto lejos (Alejandro Volta en Tigre) no esconde la calle de al lado
+  // que OSM nombra más corto (Volta en Palermo).
+  const CLOSE_NAME_RADIUS_M = 8_000;
+  const closeExactName = filtered.some(
+    (item) => item.tier === 1 && item.nameScore === 2 && item.distance <= CLOSE_NAME_RADIUS_M,
+  );
+  if (closeExactName) {
     filtered = filtered.filter((item) => item.tier !== 1 || item.nameScore === 2);
   }
 

@@ -37,7 +37,10 @@ function buildMapHtml(
       }).addTo(map);
       var marker = L.marker([${lat}, ${lng}], { draggable: true }).addTo(map);
       var circle = ${radius > 0 ? `L.circle([${lat}, ${lng}], { radius: ${radius}, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.12, weight: 2 }).addTo(map);` : 'null'};
+      var ignoreDrag = false;
+      marker.on('dragstart', function() { ignoreDrag = false; });
       marker.on('dragend', function(e) {
+        if (ignoreDrag) return;
         var p = e.target.getLatLng();
         if (circle) circle.setLatLng(p);
         if (window.ReactNativeWebView) {
@@ -45,9 +48,11 @@ function buildMapHtml(
         }
       });
       window.setMapCenter = function(lat, lng, radiusM) {
+        ignoreDrag = true;
         var ll = [lat, lng];
         marker.setLatLng(ll);
         map.setView(ll, map.getZoom() < 10 ? 14 : map.getZoom());
+        setTimeout(function() { ignoreDrag = false; }, 400);
         if (circle) {
           if (radiusM > 0) {
             circle.setLatLng(ll);
@@ -85,9 +90,13 @@ export function LocationMapOsmWebView({
   const [loadError, setLoadError] = useState(false);
   const tileUrl = osmTileUrlTemplate();
 
+  // El HTML nace con el primer centro. Los recentrados van por setMapCenter:
+  // rehacer el WebView en cada lat/lng dispara un “move” fantasma y el reverso
+  // pisa la altura que la persona acaba de confirmar.
   const html = useMemo(
     () => buildMapHtml(geo.lat, geo.lng, coverageMeters, showCoverage, tileUrl),
-    [geo.lat, geo.lng, coverageMeters, showCoverage, tileUrl],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- centro inicial solamente
+    [tileUrl],
   );
 
   const radius = showCoverage && coverageMeters > 0 ? coverageMeters : 0;
