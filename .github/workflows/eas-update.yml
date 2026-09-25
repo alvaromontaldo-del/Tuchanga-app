@@ -1,6 +1,10 @@
 # Publica EAS Update al hacer push a `main` (requiere secret EXPO_TOKEN en el repo).
 # Crear token: https://expo.dev/accounts/[cuenta]/settings/access-tokens
 # En GitHub: Repo → Settings → Secrets → Actions → New: EXPO_TOKEN
+#
+# La app de Testing (perfil preview de eas.json) pide el canal `preview`,
+# enganchado a la branch EAS preview. Publicar en la branch EAS main no llega
+# a esos celulares: no existe un canal main.
 name: EAS Update (OTA)
 
 on:
@@ -24,4 +28,4 @@ jobs:
       - name: Publish OTA update
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: npx eas-cli update --branch main --non-interactive --message "${{ github.event.head_commit.message }}"
+        run: npx eas-cli update --branch preview --non-interactive --message "${{ github.event.head_commit.message }}"
