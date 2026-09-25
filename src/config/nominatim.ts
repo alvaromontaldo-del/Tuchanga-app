@@ -3,6 +3,13 @@ import {
   formatShortAddress,
   type NominatimAddressParts,
 } from '../utils/formatAddress';
+import {
+  hitsIncludeNearbyStreet,
+  houseNumberDigits,
+  parseStreetAddressQuery,
+  rankGeocodeHits,
+  type GeocodeHit,
+} from '../utils/streetAddressQuery';
 
 export type NominatimSuggestion = {
   id: string;
@@ -21,7 +28,8 @@ export type NominatimSearchOptions = {
   countryCode?: string;
   /**
    * Sesgo por cercanía (bounding box).
-   * Cuando está, usamos bounded=1 para priorizar y limitar resultados.
+   * Sin altura, bounded=1 limita a ~20 km.
+   * Con altura, la caja solo ordena: no esconde portales que caen más lejos.
    */
   near?: { lat: number; lng: number };
 };
@@ -36,26 +44,95 @@ function buildViewBoxAround(lat: number, lng: number, deltaDeg: number) {
 }
 
 
-/** Si el usuario escribio "Volta 1140" y Nominatim no trae house_number, recuperar la altura del query. */
-function extractStreetNumberFromQuery(query: string): string | null {
-  const m = query.trim().match(/^(.*?)\s+(\d{1,6}[A-Za-z]?)\s*$/);
-  if (!m) return null;
-  const street = m[1].trim();
-  const num = m[2].trim();
-  if (street.length < 2) return null;
-  return num;
+type NominatimRaw = {
+  place_id?: number | string;
+  display_name?: string;
+  lat?: string;
+  lon?: string;
+  class?: string;
+  address?: NominatimAddressParts;
+};
+
+function searchParamsFor(
+  query: string,
+  opts: NominatimSearchOptions | undefined,
+  biasNear: boolean,
+): URLSearchParams {
+  const params = new URLSearchParams();
+  params.set('format', 'json');
+  params.set('addressdetails', '1');
+  params.set('accept-language', 'es');
+  params.set('countrycodes', (opts?.countryCode ?? 'ar').toLowerCase());
+
+  const parsed = parseStreetAddressQuery(query);
+  const digits = parsed ? houseNumberDigits(parsed.houseNumber) : '';
+  if (parsed && digits) {
+    // Nominatim interpola mejor con calle y altura juntas (`street=1140 Volta`)
+    // que con `q=Volta 1140`, que a veces devuelve solo la calle o un comercio homónimo.
+    params.set('street', `${digits} ${parsed.street}`);
+    params.set('limit', '8');
+  } else {
+    params.set('q', query);
+    params.set('limit', '6');
+  }
+
+  if (opts?.near && biasNear) {
+    // ~20km. Con altura no recortamos (bounded=0): si no, se pierde el portal
+    // cuando el único punto numerado cae fuera de la caja del GPS.
+    params.set('viewbox', buildViewBoxAround(opts.near.lat, opts.near.lng, 0.18));
+    params.set('bounded', parsed && digits ? '0' : '1');
+  }
+
+  return params;
 }
 
-function ensureHouseNumberInAddress(address: string, query: string): string {
-  const num = extractStreetNumberFromQuery(query);
-  if (!num) return address;
-  const escaped = num.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  if (new RegExp(`\\b${escaped}\\b`).test(address)) return address;
-  const parts = address.split(',').map((x) => x.trim()).filter(Boolean);
-  if (!parts.length) return address;
-  if (new RegExp(`\\b${escaped}\\b`).test(parts[0])) return address;
-  parts[0] = `${parts[0]} ${num}`;
-  return parts.join(', ');
+async function fetchGeocodeHits(params: URLSearchParams): Promise<GeocodeHit[]> {
+  const url = `https://nominatim.openstreetmap.org/search?${params.toString()}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: {
+        'User-Agent': 'YaChanga/1.0',
+      },
+    });
+  } catch {
+    return [];
+  }
+  if (!res.ok) return [];
+
+  let data: NominatimRaw[] = [];
+  try {
+    data = (await res.json()) as NominatimRaw[];
+  } catch {
+    return [];
+  }
+
+  return (data ?? [])
+    .map((item) => {
+      const lat = numOrNull(item.lat);
+      const lng = numOrNull(item.lon);
+      if (!item.display_name || lat === null || lng === null) return null;
+      return {
+        id: String(item.place_id ?? `${lat},${lng}`),
+        lat,
+        lng,
+        displayName: item.display_name,
+        parts: { ...(item.address ?? {}) },
+        osmClass: item.class,
+      } satisfies GeocodeHit;
+    })
+    .filter((item): item is GeocodeHit => Boolean(item));
+}
+
+function mergeHits(primary: GeocodeHit[], extra: GeocodeHit[]): GeocodeHit[] {
+  const seen = new Set(primary.map((hit) => hit.id));
+  const merged = [...primary];
+  for (const hit of extra) {
+    if (seen.has(hit.id)) continue;
+    seen.add(hit.id);
+    merged.push(hit);
+  }
+  return merged;
 }
 
 export async function fetchNominatimSuggestions(
@@ -65,70 +142,36 @@ export async function fetchNominatimSuggestions(
   const q = query.trim();
   if (q.length < 4) return [];
 
-  const params = new URLSearchParams();
-  params.set('q', q);
-  params.set('format', 'json');
-  params.set('addressdetails', '1');
-  params.set('limit', '6');
-  params.set('accept-language', 'es');
-  // Muy importante: evita resultados de otros países.
-  params.set('countrycodes', (opts?.countryCode ?? 'ar').toLowerCase());
+  const parsed = parseStreetAddressQuery(q);
+  let hits = await fetchGeocodeHits(searchParamsFor(q, opts, true));
 
-  if (opts?.near) {
-    // ~20km alrededor (0.18°) aprox; suficiente para “Garibaldi” sin irse a otros países.
-    params.set('viewbox', buildViewBoxAround(opts.near.lat, opts.near.lng, 0.18));
-    params.set('bounded', '1');
+  // `street=1140 Volta` a veces solo devuelve un portal en otra ciudad.
+  // Si en la zona no está esa calle, la buscamos por nombre y conservamos la altura tipeada.
+  if (
+    parsed &&
+    houseNumberDigits(parsed.houseNumber) &&
+    opts?.near &&
+    !hitsIncludeNearbyStreet(hits, parsed, opts.near)
+  ) {
+    const local = new URLSearchParams();
+    local.set('q', parsed.street);
+    local.set('format', 'json');
+    local.set('addressdetails', '1');
+    local.set('accept-language', 'es');
+    local.set('countrycodes', (opts.countryCode ?? 'ar').toLowerCase());
+    local.set('limit', '6');
+    local.set('viewbox', buildViewBoxAround(opts.near.lat, opts.near.lng, 0.18));
+    local.set('bounded', '1');
+    const localHits = await fetchGeocodeHits(local);
+    hits = mergeHits(hits, localHits);
   }
 
-  const url = `https://nominatim.openstreetmap.org/search?${params.toString()}`;
-
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      headers: {
-        // Nominatim recomienda identificar la app; en mobile el header puede ignorarse,
-        // pero no rompe y ayuda cuando está disponible.
-        'User-Agent': 'YaChanga/1.0',
-      },
-    });
-  } catch {
-    return [];
-  }
-  if (!res.ok) return [];
-  let data: Array<{
-    place_id?: number | string;
-    display_name?: string;
-    lat?: string;
-    lon?: string;
-    address?: NominatimAddressParts;
-  }> = [];
-  try {
-    data = (await res.json()) as typeof data;
-  } catch {
-    return [];
-  }
-
-  return (data ?? [])
-    .map((x) => {
-      const lat = numOrNull(x.lat);
-      const lng = numOrNull(x.lon);
-      if (!x.display_name || lat === null || lng === null) return null;
-      const parts: NominatimAddressParts = { ...(x.address ?? {}) };
-      if (!parts.house_number) {
-        const fromQuery = extractStreetNumberFromQuery(q);
-        if (fromQuery) parts.house_number = fromQuery;
-      }
-      const short =
-        buildShortAddressFromParts(parts) || formatShortAddress(x.display_name);
-      const shortWithNum = ensureHouseNumberInAddress(short, q);
-      return {
-        id: String(x.place_id ?? `${lat},${lng}`),
-        address: shortWithNum,
-        lat,
-        lng,
-      } satisfies NominatimSuggestion;
-    })
-    .filter((x): x is NominatimSuggestion => Boolean(x));
+  return rankGeocodeHits(hits, q, opts?.near).map((item) => ({
+    id: item.id,
+    address: item.address,
+    lat: item.lat,
+    lng: item.lng,
+  }));
 }
 
 export async function reverseNominatim(lat: number, lng: number): Promise<string | null> {

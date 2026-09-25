@@ -27,6 +27,7 @@ import { colors, radii, spacing } from '../../constants/theme';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/nominatim';
+import { retainHouseNumber } from '../../utils/streetAddressQuery';
 import {
   DEFAULT_PHONE_COUNTRY_ID,
   getPhoneCountryById,
@@ -119,6 +120,8 @@ export function EditRegistrationScreen({ navigation }: Props) {
   const [addressResults, setAddressResults] = useState<GeoPoint[]>([]);
   const requestIdRef = useRef(0);
   const reverseReqRef = useRef(0);
+  const skipGeocodeRef = useRef<string | null>(null);
+  const selectedAddressRef = useRef<string | null>(null);
   const [locating, setLocating] = useState(false);
   const [locationHint, setLocationHint] = useState<string | null>(null);
   const [devicePos, setDevicePos] = useState<{ lat: number; lng: number } | null>(null);
@@ -238,6 +241,10 @@ export function EditRegistrationScreen({ navigation }: Props) {
 
   useEffect(() => {
     const q = addressQuery.trim();
+    if (skipGeocodeRef.current === q) {
+      skipGeocodeRef.current = null;
+      return;
+    }
     const t = setTimeout(() => void runGeocode(q), 450);
     return () => clearTimeout(t);
     // runGeocode usa requestIdRef y devicePos; no incluimos runGeocode para evitar re-disparos.
@@ -250,8 +257,11 @@ export function EditRegistrationScreen({ navigation }: Props) {
       const addr = await reverseNominatimStreet(lat, lng);
       if (reqId !== reverseReqRef.current) return;
       if (!addr) return;
-      setGeo((prev) => (prev ? { ...prev, address: addr, lat, lng } : { address: addr, lat, lng }));
-      setAddressQuery(addr);
+      const kept = selectedAddressRef.current ? retainHouseNumber(selectedAddressRef.current, addr) : addr;
+      selectedAddressRef.current = kept;
+      skipGeocodeRef.current = kept;
+      setGeo((prev) => (prev ? { ...prev, address: kept, lat, lng } : { address: kept, lat, lng }));
+      setAddressQuery(kept);
     } catch {
       /* ignore */
     }
@@ -270,6 +280,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
       }
       const { lat, lng } = res.position;
       setDevicePos({ lat, lng });
+      selectedAddressRef.current = null;
       setGeo({ address: 'Ubicación actual', lat, lng });
       setAddressResults([]);
       await runReverseGeocode(lat, lng);
@@ -547,6 +558,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
                   style={styles.searchInput}
                   value={addressQuery}
                   onChangeText={(t) => {
+                    selectedAddressRef.current = null;
                     setAddressQuery(t);
                     setGeo(null);
                     setErrors((prev) => ({ ...prev, location: undefined }));
@@ -577,6 +589,9 @@ export function EditRegistrationScreen({ navigation }: Props) {
                     key={`${r.lat}-${r.lng}-${r.address}`}
                     style={styles.resultRow}
                     onPress={() => {
+                      selectedAddressRef.current = r.address;
+                      skipGeocodeRef.current = r.address;
+                      setAddressQuery(r.address);
                       setGeo(r);
                       setAddressResults([]);
                     }}
