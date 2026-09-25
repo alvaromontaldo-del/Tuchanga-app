@@ -20,6 +20,7 @@ import {
   type DeliveryGeoPoint,
 } from '../../components/location/AddressDeliveryField';
 import { useAppToast } from '../../components/toast/toast';
+import { rejectedAddressMessage } from '../../utils/streetAddressQuery';
 import { colors, radii, spacing } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useUserMode } from '../../context/UserModeContext';
@@ -182,6 +183,13 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
     if (!trimmedAddress) {
       toast.warning('Ingresá la dirección de entrega.', 'Dirección');
       return;
+    }
+    if (!deliveryGeo) {
+      const rejected = rejectedAddressMessage(address);
+      if (rejected) {
+        toast.warning(rejected, 'Dirección');
+        return;
+      }
     }
 
     const cleaned: MaterialItemDraft[] = [];

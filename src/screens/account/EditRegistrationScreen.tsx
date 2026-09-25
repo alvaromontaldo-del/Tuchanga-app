@@ -30,8 +30,10 @@ import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/
 import {
   activeStreetQuery,
   addressToPersist,
+  emptyAddressSearchMessage,
   isIgnorableAddressEcho,
   isNegligiblePinMove,
+  rejectedAddressMessage,
   retainHouseNumber,
   visibleSuggestionAddress,
 } from '../../utils/streetAddressQuery';
@@ -125,6 +127,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
   const [geo, setGeo] = useState<GeoPoint | null>(null);
   const [searching, setSearching] = useState(false);
   const [addressResults, setAddressResults] = useState<GeoPoint[]>([]);
+  const [settledAddressQuery, setSettledAddressQuery] = useState('');
   const requestIdRef = useRef(0);
   const reverseReqRef = useRef(0);
   const skipGeocodeRef = useRef<string | null>(null);
@@ -253,6 +256,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
     const q = qRaw.trim();
     if (q.length < 4) {
       setAddressResults([]);
+      setSettledAddressQuery('');
       return;
     }
     const reqId = ++requestIdRef.current;
@@ -274,7 +278,10 @@ export function EditRegistrationScreen({ navigation }: Props) {
     } catch {
       if (reqId === requestIdRef.current) setAddressResults([]);
     } finally {
-      if (reqId === requestIdRef.current) setSearching(false);
+      if (reqId === requestIdRef.current) {
+        setSearching(false);
+        setSettledAddressQuery(q);
+      }
     }
   }
 
@@ -334,6 +341,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
       pickedPointRef.current = { lat, lng };
       setGeo({ address: 'Ubicación actual', lat, lng });
       setAddressResults([]);
+      setSettledAddressQuery('');
       await runReverseGeocode(lat, lng);
     } finally {
       setLocating(false);
@@ -359,7 +367,10 @@ export function EditRegistrationScreen({ navigation }: Props) {
     if (!avatarUri.trim()) next.avatar = 'Necesitamos una foto de perfil.';
     const phoneErr = validateNationalPhone(phoneCountryId, phoneNationalDigits);
     if (phoneErr) next.phone = phoneErr;
-    if (!geo) next.location = 'Seleccioná una dirección en el mapa o la lista.';
+    if (!geo) {
+      next.location =
+        rejectedAddressMessage(addressQuery) ?? 'Seleccioná una dirección en el mapa o la lista.';
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -656,6 +667,12 @@ export function EditRegistrationScreen({ navigation }: Props) {
               </Pressable>
             </View>
             {errors.location ? <Text style={styles.error}>{errors.location}</Text> : null}
+            {!searching &&
+            settledAddressQuery === addressQuery.trim() &&
+            addressQuery.trim().length >= 4 &&
+            addressResults.length === 0 ? (
+              <Text style={styles.hintWarn}>{emptyAddressSearchMessage(addressQuery)}</Text>
+            ) : null}
 
             {addressResults.length > 0 ? (
               <View style={styles.results}>
@@ -677,6 +694,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
                       commitAddressQuery(label);
                       setGeo({ address: label, lat: r.lat, lng: r.lng });
                       setAddressResults([]);
+                      setSettledAddressQuery('');
                     }}
                   >
                     <Ionicons name="location-outline" size={18} color={colors.textSecondary} />

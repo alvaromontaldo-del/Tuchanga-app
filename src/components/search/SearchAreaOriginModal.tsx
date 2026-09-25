@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchNominatimSuggestions, type NominatimSuggestion } from '../../config/nominatim';
-import { visibleSuggestionAddress } from '../../utils/streetAddressQuery';
+import { emptyAddressSearchMessage, visibleSuggestionAddress } from '../../utils/streetAddressQuery';
 import { colors, radii, spacing } from '../../constants/theme';
 import { listKey } from '../../utils/safeAsync';
 
@@ -107,7 +107,7 @@ export function SearchAreaOriginModal({ visible, onClose, near, onPick }: Props)
             style={styles.list}
             ListEmptyComponent={
               query.trim().length >= 4 ? (
-                <Text style={styles.empty}>Sin coincidencias. Probá otra redacción.</Text>
+                <Text style={styles.empty}>{emptyAddressSearchMessage(query)}</Text>
               ) : (
                 <Text style={styles.empty}>Escribí al menos 4 caracteres.</Text>
               )

@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/nominatim';
 import {
   activeStreetQuery,
+  emptyAddressSearchMessage,
   isIgnorableAddressEcho,
   visibleSuggestionAddress,
 } from '../../utils/streetAddressQuery';
@@ -53,6 +54,7 @@ export function AddressDeliveryField({
   const [searching, setSearching] = useState(false);
   const [locating, setLocating] = useState(false);
   const [results, setResults] = useState<DeliveryGeoPoint[]>([]);
+  const [settledQuery, setSettledQuery] = useState('');
   const [devicePos, setDevicePos] = useState<{ lat: number; lng: number } | null>(near ?? null);
   const requestIdRef = useRef(0);
   const skipGeocodeRef = useRef<string | null>(null);
@@ -83,6 +85,7 @@ export function AddressDeliveryField({
       const q = qRaw.trim();
       if (q.length < 4) {
         setResults([]);
+        setSettledQuery('');
         return;
       }
       const reqId = ++requestIdRef.current;
@@ -104,7 +107,10 @@ export function AddressDeliveryField({
       } catch {
         if (reqId === requestIdRef.current) setResults([]);
       } finally {
-        if (reqId === requestIdRef.current) setSearching(false);
+        if (reqId === requestIdRef.current) {
+          setSearching(false);
+          setSettledQuery(q);
+        }
       }
     },
     [devicePos, near],
@@ -140,6 +146,7 @@ export function AddressDeliveryField({
       }
       onGeoChange({ address: address || 'Ubicación actual', lat, lng });
       setResults([]);
+      setSettledQuery('');
     } finally {
       setLocating(false);
     }
@@ -201,6 +208,13 @@ export function AddressDeliveryField({
         </Text>
       </Pressable>
 
+      {!searching &&
+      settledQuery === value.trim() &&
+      value.trim().length >= 4 &&
+      results.length === 0 ? (
+        <Text style={styles.emptyHint}>{emptyAddressSearchMessage(value)}</Text>
+      ) : null}
+
       {results.length > 0 ? (
         <View style={styles.results}>
           {results.map((r) => {
@@ -215,6 +229,7 @@ export function AddressDeliveryField({
                 commitText(label);
                 onGeoChange({ address: label, lat: r.lat, lng: r.lng });
                 setResults([]);
+                setSettledQuery('');
               }}
             >
               <Ionicons name="location-outline" size={18} color={colors.textSecondary} />
@@ -286,6 +301,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   gpsLinkText: { fontSize: 13, fontWeight: '700', color: colors.primary },
+  emptyHint: { fontSize: 13, lineHeight: 18, color: '#8A4B08' },
   results: {
     borderWidth: 1,
     borderColor: colors.border,

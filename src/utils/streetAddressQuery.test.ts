@@ -4,13 +4,16 @@ import {
   activeStreetQuery,
   addressFromPick,
   addressToPersist,
+  emptyAddressSearchMessage,
   ensureTypedHeightSuggestion,
   fallbackStreetNames,
   houseNumberDigits,
   isIgnorableAddressEcho,
   isNegligiblePinMove,
+  isPlausibleHouseNumber,
   parseStreetAddressQuery,
   rankGeocodeHits,
+  rejectedAddressMessage,
   retainHouseNumber,
   stampSuggestions,
   visibleSuggestionAddress,
@@ -640,6 +643,191 @@ describe('calle corta cerca contra homónimo lejos', () => {
     expect(fallbackStreetNames('Alejandro Volta')).toEqual(['Volta']);
     expect(fallbackStreetNames('Volta')).toEqual([]);
     expect(fallbackStreetNames('Av. 9 de Julio')).toEqual([]);
+  });
+});
+
+describe('calidad de sugerencias: barrios repetidos y alturas inventadas', () => {
+  const sanNicolas = { lat: -33.33, lng: -60.22 };
+  const moreno = { lat: -33.3154675, lng: -60.2530522 };
+  const suizo = { lat: -33.3112064, lng: -60.2481839 };
+  const parque = { lat: -33.3057995, lng: -60.2425705 };
+  const centro = { lat: -33.3096824, lng: -60.246551 };
+
+  function chiclanaSegment(
+    id: string,
+    point: { lat: number; lng: number },
+    suburb: string | undefined,
+  ): GeocodeHit {
+    return hit({
+      id,
+      lat: point.lat,
+      lng: point.lng,
+      displayName: `Felipe Chiclana, ${suburb ? `${suburb}, ` : ''}San Nicolás de los Arroyos, Buenos Aires, Argentina`,
+      osmClass: 'highway',
+      parts: {
+        road: 'Felipe Chiclana',
+        suburb,
+        city: 'San Nicolás de los Arroyos',
+      },
+    });
+  }
+
+  const chiclanaSegments = [
+    chiclanaSegment('moreno', moreno, 'Moreno'),
+    chiclanaSegment('suizo', suizo, 'Suizo'),
+    chiclanaSegment('parque', parque, 'Parque Sarmiento'),
+    chiclanaSegment('centro', centro, undefined),
+  ];
+
+  it('colapsa los tramos de Chiclana 148 que solo cambian de barrio', () => {
+    const ranked = rankGeocodeHits(chiclanaSegments, 'Chiclana 148', moreno);
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0]?.lat).toBe(moreno.lat);
+    expect(ranked[0]?.lng).toBe(moreno.lng);
+    const visible = visibleSuggestionAddress('Chiclana 148', null, ranked[0]!);
+    expect(visible).toContain('148');
+    expect(visible).toContain('Felipe Chiclana');
+    expect(visible).toContain('San Nicolás de los Arroyos');
+    expect(visible).not.toMatch(/Moreno|Suizo|Parque Sarmiento/);
+    expect(ranked[0]?.plainAddress ?? '').not.toMatch(/\b148\b/);
+  });
+
+  it('mantiene portales iguales cuando las ciudades están lejos', () => {
+    const ranked = rankGeocodeHits(
+      [
+        hit({
+          id: 'olivos',
+          lat: -34.5114,
+          lng: -58.4855,
+          displayName: '1140, Corrientes, Olivos',
+          osmClass: 'place',
+          parts: { house_number: '1140', road: 'Corrientes', town: 'Olivos' },
+        }),
+        hit({
+          id: 'quilmes',
+          lat: -34.7308,
+          lng: -58.2711,
+          displayName: '1140, Corrientes, Quilmes',
+          osmClass: 'place',
+          parts: { house_number: '1140', road: 'Corrientes', town: 'Quilmes' },
+        }),
+      ],
+      'Corrientes 1140',
+      { lat: -34.51, lng: -58.49 },
+    );
+    expect(ranked.map((item) => item.id).sort()).toEqual(['olivos', 'quilmes']);
+  });
+
+  it('no fabrica coordenadas para Garibaldi 123555', () => {
+    const segments: GeocodeHit[] = [
+      hit({
+        id: 'mitre',
+        lat: -33.34834,
+        lng: -60.23066,
+        displayName: 'José Garibaldi, Mitre, San Nicolás de los Arroyos, Argentina',
+        osmClass: 'highway',
+        parts: { road: 'José Garibaldi', suburb: 'Mitre', city: 'San Nicolás de los Arroyos' },
+      }),
+      hit({
+        id: 'centro-g',
+        lat: -33.34133,
+        lng: -60.2235,
+        displayName: 'José Garibaldi, Centro, San Nicolás de los Arroyos, Argentina',
+        osmClass: 'highway',
+        parts: { road: 'José Garibaldi', suburb: 'Centro', city: 'San Nicolás de los Arroyos' },
+      }),
+      hit({
+        id: 'colombini',
+        lat: -33.3738,
+        lng: -60.25713,
+        displayName: 'José Garibaldi, Colombini, San Nicolás de los Arroyos, Argentina',
+        osmClass: 'highway',
+        parts: { road: 'José Garibaldi', suburb: 'Colombini', city: 'San Nicolás de los Arroyos' },
+      }),
+    ];
+    const parsed = parseStreetAddressQuery('Garibaldi 123555');
+    expect(parsed?.houseNumber).toBe('123555');
+    expect(isPlausibleHouseNumber('123555')).toBe(false);
+    expect(rankGeocodeHits(segments, 'Garibaldi 123555', sanNicolas)).toEqual([]);
+    expect(ensureTypedHeightSuggestion([], segments, parsed!, sanNicolas)).toEqual([]);
+    expect(
+      addressFromPick('Garibaldi 123555', 'José Garibaldi, Centro, San Nicolás de los Arroyos'),
+    ).toBe('José Garibaldi, Centro, San Nicolás de los Arroyos');
+    expect(
+      addressToPersist({
+        typedQuery: 'Garibaldi 123555',
+        confirmedLabel: null,
+        currentLabel: 'José Garibaldi, Centro',
+        pinMoved: false,
+      }),
+    ).toBe('José Garibaldi, Centro');
+    expect(retainHouseNumber('Garibaldi 123555, Centro', 'José Garibaldi, Centro')).toBe(
+      'José Garibaldi, Centro',
+    );
+    expect(rejectedAddressMessage('Garibaldi 123555')).toMatch(/altura/);
+    expect(emptyAddressSearchMessage('Garibaldi 123555')).toMatch(/inventada/);
+    expect(rejectedAddressMessage('Volta 1140')).toBeNull();
+  });
+
+  it('si el geocoder confirma una altura rara, esa sugerencia sí se ofrece', () => {
+    const ranked = rankGeocodeHits(
+      [
+        hit({
+          id: 'confirmado',
+          lat: -33.34,
+          lng: -60.23,
+          displayName: '123555, Garibaldi, San Nicolás de los Arroyos',
+          osmClass: 'place',
+          parts: {
+            house_number: '123555',
+            road: 'Garibaldi',
+            city: 'San Nicolás de los Arroyos',
+          },
+        }),
+      ],
+      'Garibaldi 123555',
+      sanNicolas,
+    );
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0]?.id).toBe('confirmado');
+    expect(ranked[0]?.lat).toBe(-33.34);
+    expect(ranked[0]?.address).toContain('123555');
+  });
+
+  it('Volta 1140 sigue en la calle cercana cuando OSM no tiene el portal', () => {
+    expect(isPlausibleHouseNumber('1140')).toBe(true);
+    const ranked = rankGeocodeHits(
+      [
+        hit({
+          id: 'street-palermo',
+          lat: palermo.lat,
+          lng: palermo.lng,
+          displayName: 'Volta, Las Cañitas, Palermo, Buenos Aires, Argentina',
+          osmClass: 'highway',
+          parts: {
+            road: 'Volta',
+            neighbourhood: 'Las Cañitas',
+            suburb: 'Palermo',
+            city: 'Buenos Aires',
+          },
+        }),
+      ],
+      'Volta 1140',
+      baNear,
+    );
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0]?.lat).toBe(palermo.lat);
+    expect(ranked[0]?.lng).toBe(palermo.lng);
+    expect(visibleSuggestionAddress('Volta 1140', null, ranked[0]!)).toContain('Volta 1140');
+    expect(visibleSuggestionAddress('Volta 1140', null, ranked[0]!)).toContain('Las Cañitas');
+    expect(
+      addressToPersist({
+        typedQuery: 'Volta 1140',
+        confirmedLabel: 'Volta 1140, Las Cañitas',
+        currentLabel: 'Volta, Las Cañitas',
+        pinMoved: false,
+      }),
+    ).toContain('1140');
   });
 });
 
