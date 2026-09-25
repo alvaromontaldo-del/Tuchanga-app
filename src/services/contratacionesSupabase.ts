@@ -637,6 +637,21 @@ export async function clienteNotificarPagoOffline(contratacionId: string): Promi
   if (error) throw error;
 }
 
+/**
+ * Abre el reclamo de garantía del cliente y devuelve el chat para coordinarlo.
+ * No cambia el estado del trabajo ni el ancla de la garantía.
+ */
+export async function iniciarReclamoGarantia(contratacionId: string): Promise<string> {
+  const sb = getSupabaseClient();
+  const { data, error } = await sb.rpc('iniciar_reclamo_garantia', {
+    p_contratacion_id: contratacionId,
+  });
+  if (error) throw error;
+  const conversationId = String(data ?? '').trim();
+  if (!conversationId) throw new Error('No se pudo abrir el chat del reclamo.');
+  return conversationId;
+}
+
 export async function trabajadorConfirmarRecepcionOffline(contratacionId: string): Promise<void> {
   const sb = getSupabaseClient();
   const { error } = await sb.rpc('trabajador_confirmar_recepcion_offline', {

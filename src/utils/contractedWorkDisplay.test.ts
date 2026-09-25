@@ -3,7 +3,10 @@ import { warrantyCountdown } from './warrantyDays';
 import {
   contractedWarrantyDurationLabel,
   contractedWorkMoneyDisplay,
+  contractedWorkSection,
   professionalPayoutAmount,
+  warrantyClaimAction,
+  warrantyClaimButtonLabel,
   workerGivenName,
   yachangaServiceFeeAmount,
 } from './contractedWorkDisplay';
@@ -93,5 +96,76 @@ describe('contractedWarrantyDurationLabel', () => {
     expect(
       contractedWarrantyDurationLabel(warrantyCountdown({ warrantyDays: null, anchorAt: anchor })),
     ).toBeNull();
+  });
+});
+
+describe('contractedWorkSection', () => {
+  const anchor = '2026-09-01T12:00:00.000Z';
+  const day = 24 * 60 * 60 * 1000;
+
+  it('separa trabajos en garantía del historial', () => {
+    const active = warrantyCountdown({
+      warrantyDays: 30,
+      anchorAt: anchor,
+      now: new Date(new Date(anchor).getTime() + 6 * day),
+    });
+    expect(contractedWorkSection({ estadoTrabajo: 'finalizado', warranty: active })).toBe('garantia');
+
+    const pending = warrantyCountdown({ warrantyDays: 24, anchorAt: null });
+    expect(contractedWorkSection({ estadoTrabajo: 'en_curso', warranty: pending })).toBe('garantia');
+
+    const expired = warrantyCountdown({
+      warrantyDays: 30,
+      anchorAt: anchor,
+      now: new Date(new Date(anchor).getTime() + 30 * day),
+    });
+    expect(contractedWorkSection({ estadoTrabajo: 'finalizado', warranty: expired })).toBe('historial');
+    expect(contractedWorkSection({ estadoTrabajo: 'cancelado', warranty: active })).toBe('historial');
+    expect(
+      contractedWorkSection({
+        estadoTrabajo: 'finalizado',
+        warranty: warrantyCountdown({ warrantyDays: null, anchorAt: anchor }),
+      }),
+    ).toBe('historial');
+  });
+});
+
+describe('warrantyClaimAction', () => {
+  const anchor = '2026-09-01T12:00:00.000Z';
+  const active = warrantyCountdown({
+    warrantyDays: 30,
+    anchorAt: anchor,
+    now: new Date(anchor),
+  });
+
+  it('habilita el reclamo solo mientras la garantía corre', () => {
+    expect(
+      warrantyClaimAction({ estadoTrabajo: 'finalizado', warranty: active, isClaimOpen: false }),
+    ).toBe('start');
+    expect(warrantyClaimButtonLabel('start')).toBe('Iniciar reclamo');
+
+    expect(
+      warrantyClaimAction({
+        estadoTrabajo: 'finalizado',
+        warranty: active,
+        isClaimOpen: true,
+        claimStatus: 'open',
+      }),
+    ).toBe('resume');
+    expect(warrantyClaimButtonLabel('resume')).toBe('Ver reclamo');
+
+    const expired = warrantyCountdown({
+      warrantyDays: 30,
+      anchorAt: anchor,
+      now: new Date(new Date(anchor).getTime() + 30 * 24 * 60 * 60 * 1000),
+    });
+    expect(warrantyClaimAction({ estadoTrabajo: 'finalizado', warranty: expired })).toBe('none');
+    expect(
+      warrantyClaimAction({
+        estadoTrabajo: 'en_curso',
+        warranty: warrantyCountdown({ warrantyDays: 24, anchorAt: null }),
+      }),
+    ).toBe('none');
+    expect(warrantyClaimButtonLabel('none')).toBeNull();
   });
 });
