@@ -60,6 +60,7 @@ import {
   type ChatQuote,
   type QuoteStatus,
 } from '../../services/quotesSupabase';
+import { postPinWorkerChatCopy } from '../../utils/postPinWorkUi';
 import {
   quoteWarrantyLabel,
   WARRANTY_DAYS_MAX,
@@ -2091,11 +2092,8 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
         {isSupabaseConfigured() && showWorkerJobBar && job ? (
           <View style={styles.completeBar}>
             <View style={styles.payBarText}>
-              <Text style={styles.payTitle}>Trabajo en curso</Text>
               <Text style={styles.paySubtitle}>
-                {showWorkerSaldoRecibidoBar
-                  ? 'Cuando termines el trabajo, marcá como realizado. El cliente ya indicó el pago del saldo.'
-                  : 'Cuando termines el trabajo, marcá como realizado.'}
+                {postPinWorkerChatCopy(showWorkerSaldoRecibidoBar).body}
               </Text>
             </View>
             {workerJobPaid ? (
@@ -2111,7 +2109,9 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                 accessibilityLabel="Marcar realizado"
               >
                 <Text style={styles.payBtnText}>
-                  {quoteBusy !== 'none' ? '…' : 'Realizado'}
+                  {quoteBusy !== 'none'
+                    ? '…'
+                    : postPinWorkerChatCopy(showWorkerSaldoRecibidoBar).actionLabel}
                 </Text>
               </Pressable>
             ) : null}
