@@ -65,10 +65,9 @@ async function readInvokePayload(error: unknown): Promise<unknown> {
 export async function crearPreferenciaSeña(
   contratacionId: string,
 ): Promise<{ ok: true; data: MpCheckoutResult } | { ok: false; code: MpCheckoutErrorCode; message: string }> {
-  if (!isMercadoPagoEnabled()) {
-    return { ok: false, code: 'mp_not_configured', message: 'MercadoPago no está habilitado en la app.' };
-  }
-
+  // El flag de cliente (EXPO_PUBLIC_MP_ENABLED) no debe bloquear la seña del chat:
+  // el OTA de preview a veces no lo inyecta y el botón «Ver pago» quedaba sin checkout.
+  // Si falta el token, mp_crear_preferencia responde mp_not_configured.
   const { data, error } = await invokeEdge('mp_crear_preferencia', {
     contratacion_id: contratacionId,
   });
@@ -128,10 +127,6 @@ export async function confirmarSeñaMercadoPago(
   contratacionId: string,
   mpPaymentId?: string,
 ): Promise<ConfirmarSeñaResult> {
-  if (!isMercadoPagoEnabled()) {
-    return { ok: false, message: 'MercadoPago no está habilitado.' };
-  }
-
   let existing: Awaited<ReturnType<typeof fetchContratacionById>> = null;
   try {
     existing = await fetchContratacionById(contratacionId);
