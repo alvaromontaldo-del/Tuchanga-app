@@ -98,6 +98,7 @@ import {
   CHAT_CERRADO_POR_RECLAMO_DETALLE,
 } from '../../utils/claimChatVisibility';
 import { getSystemEvent, shouldRenderSystemMessageInChat } from '../../utils/chatSystemMessages';
+import { dedupeMaterialServiceFeePaidMessages } from '../../utils/materialFeePaidChat';
 import { newRandomUserId } from '../../utils/stableUserId';
 import { mapChatSendError } from '../../utils/chatErrors';
 import {
@@ -932,12 +933,14 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
 
     const keepIds = new Set(enrichedById.keys());
 
-    return filtered
-      .filter((m) => {
-        if (!isMaterialQuoteMessage(m)) return true;
-        return keepIds.has(m.id);
-      })
-      .map((m) => enrichedById.get(m.id) ?? m);
+    return dedupeMaterialServiceFeePaidMessages(
+      filtered
+        .filter((m) => {
+          if (!isMaterialQuoteMessage(m)) return true;
+          return keepIds.has(m.id);
+        })
+        .map((m) => enrichedById.get(m.id) ?? m),
+    );
   }, [messages, participants?.myRole]);
 
   const refreshAgendaOpciones = useCallback(async (contratacionId: string) => {
