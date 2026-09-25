@@ -11,6 +11,11 @@ import type {
   MaterialRequestStatus,
 } from '../types/materials';
 import { normalizeOrderCodeInput, normalizePinInput } from '../utils/orderCode';
+import {
+  buildMaterialCheckoutPayload,
+  parseIncludeFreightFlag,
+  quoteFreightDisplay,
+} from '../utils/quoteFreightTotal';
 
 function formatClientStoreAddress(address: string | null | undefined): string {
   const raw = (address ?? '').trim();
@@ -438,6 +443,7 @@ export async function fetchClientQuotesForRequest(
     depositStatus: string;
     /** null si la columna no vino (entorno sin la migración de flete opcional). */
     includeFreight: boolean | null;
+    acceptedTotal: number | null;
   };
   /** quote_id → orden pagada / revelada (nombre+dirección vía SECURITY DEFINER). */
   const paidOrderByQuote = new Map<string, RevealInfo>();
@@ -513,21 +519,22 @@ export async function fetchClientQuotesForRequest(
       deposit_status?: string;
       contact_revealed_at?: string | null;
       include_freight?: boolean | null;
+      accepted_total?: number | string | null;
     };
     const ordersWithFreight = await sb
       .from('orders')
       .select(
-        'id, quote_id, deposit_status, status, contact_revealed_at, include_freight',
+        'id, quote_id, deposit_status, status, contact_revealed_at, include_freight, accepted_total',
       )
       .in('quote_id', quoteIds);
     let paidOrders = (ordersWithFreight.data ?? null) as OrderSelectRow[] | null;
     if (
       ordersWithFreight.error &&
-      /include_freight|schema cache|column/i.test(ordersWithFreight.error.message ?? '')
+      /include_freight|accepted_total|schema cache|column/i.test(ordersWithFreight.error.message ?? '')
     ) {
       const legacyOrders = await sb
         .from('orders')
-        .select('id, quote_id, deposit_status, status, contact_revealed_at')
+        .select('id, quote_id, deposit_status, status, contact_revealed_at, accepted_total')
         .in('quote_id', quoteIds);
       paidOrders = (legacyOrders.data ?? null) as OrderSelectRow[] | null;
     }
@@ -536,7 +543,8 @@ export async function fetchClientQuotesForRequest(
       const oid = String((o as { id?: string }).id ?? '');
       const oStatus = String((o as { status?: string }).status ?? '');
       const dStatus = String((o as { deposit_status?: string }).deposit_status ?? '');
-      const rawInclude = (o as { include_freight?: boolean | null }).include_freight;
+      const rawInclude = (o as { include_freight?: unknown }).include_freight;
+      const rawAccepted = (o as { accepted_total?: number | string | null }).accepted_total;
       if (!qid || !oid) continue;
       if (oStatus === 'cancelled') continue;
       const prevBrief = orderByQuote.get(qid);
@@ -544,7 +552,9 @@ export async function fetchClientQuotesForRequest(
         orderId: oid,
         status: oStatus,
         depositStatus: dStatus,
-        includeFreight: typeof rawInclude === 'boolean' ? rawInclude : null,
+        includeFreight: parseIncludeFreightFlag(rawInclude),
+        acceptedTotal:
+          rawAccepted != null && Number.isFinite(Number(rawAccepted)) ? Number(rawAccepted) : null,
       };
       if (!prevBrief) {
         orderByQuote.set(qid, nextBrief);
@@ -573,6 +583,50 @@ export async function fetchClientQuotesForRequest(
       if (!paidOrderByQuote.has(qid)) markRevealed(qid, oid);
     }
   }
+
+  // SECURITY DEFINER: el flag es por orden/cotización aunque RLS oculte orders.
+  try {
+    const { data: freightFlags, error: freightErr } = await sb.rpc(
+      'list_material_quote_freight_flags',
+      { p_request_id: requestId },
+    );
+    if (!freightErr && Array.isArray(freightFlags)) {
+      for (const row of freightFlags as Array<{
+        quote_id?: string;
+        order_id?: string;
+        include_freight?: unknown;
+        accepted_total?: number | string | null;
+      }>) {
+        const qid = String(row.quote_id ?? '');
+        const oid = String(row.order_id ?? '');
+        if (!qid || !oid) continue;
+        const flag = parseIncludeFreightFlag(row.include_freight);
+        const accepted =
+          row.accepted_total != null && Number.isFinite(Number(row.accepted_total))
+            ? Number(row.accepted_total)
+            : null;
+        const prev = orderByQuote.get(qid);
+        if (!prev) {
+          orderByQuote.set(qid, {
+            orderId: oid,
+            status: '',
+            depositStatus: '',
+            includeFreight: flag,
+            acceptedTotal: accepted,
+          });
+          continue;
+        }
+        if (prev.includeFreight == null && flag != null) prev.includeFreight = flag;
+        if ((prev.acceptedTotal == null || prev.acceptedTotal <= 0) && accepted != null) {
+          prev.acceptedTotal = accepted;
+        }
+        if (!prev.orderId) prev.orderId = oid;
+      }
+    }
+  } catch {
+    // Migración aún no aplicada.
+  }
+
   const revealedQuoteIds = new Set(paidOrderByQuote.keys());
 
   const cards: ClientQuoteCard[] = [];
@@ -659,12 +713,29 @@ export async function fetchClientQuotesForRequest(
     const freightApplies =
       freightType === 'cost' && (!hasItemDecisions || billableItems.length > 0);
     const freightCost = freightApplies ? money(Number(row.freight_cost) || 0) : 0;
-    // Sin orden, el total cotizado incluye el flete ofrecido (el checkbox lo ajusta en la UI).
-    // Con orden, include_freight=false es retiro en local: no suma el flete.
-    const orderIncludeFreight = orderBrief?.includeFreight ?? null;
-    const freightInQuotedTotal =
-      freightCost > 0 && (orderIncludeFreight == null || orderIncludeFreight);
-    const total = money(materialsSubtotal + (freightInQuotedTotal ? freightCost : 0));
+    const explicitIncludeFreight = orderBrief?.includeFreight ?? null;
+    const orderAcceptedTotal =
+      orderBrief?.acceptedTotal != null && orderBrief.acceptedTotal > 0
+        ? money(orderBrief.acceptedTotal)
+        : null;
+    const selectionLocked = Boolean(orderBrief) || hasItemDecisions;
+    const freightDisplay = quoteFreightDisplay({
+      materialsSubtotal,
+      freightType,
+      quotedFreightCost: freightCost,
+      orderIncludeFreight: explicitIncludeFreight,
+      uiIncludeFreight: false,
+      canChooseFreight: false,
+      selectionLocked,
+      acceptedTotal: orderAcceptedTotal,
+    });
+    // Abierta: el total cotizado incluye el flete (el checkbox lo ajusta en la UI).
+    // Cerrada: solo el flete elegido en ESTA orden.
+    const orderIncludeFreight =
+      selectionLocked && freightType === 'cost' ? freightDisplay.freightIncluded : explicitIncludeFreight;
+    const total = selectionLocked
+      ? freightDisplay.total
+      : money(materialsSubtotal + freightCost);
 
     const revealedName =
       revealInfo?.storeName?.trim() ||
@@ -689,9 +760,10 @@ export async function fetchClientQuotesForRequest(
       storeAddress: contactRevealed ? formatClientStoreAddress(revealedAddress) : '',
       storePhone: contactRevealed ? revealedPhone : null,
       contactRevealed,
-      orderId: orderBrief?.orderId ?? null,
-      orderStatus: orderBrief?.status ?? null,
+      orderId: orderBrief?.orderId || null,
+      orderStatus: orderBrief?.status || null,
       orderIncludeFreight,
+      orderAcceptedTotal,
       orderCode: revealInfo?.orderCode ?? null,
       verificationPin: revealInfo?.verificationPin ?? null,
       groupRubroId: group.id,
@@ -1231,12 +1303,7 @@ export async function createMaterialCheckout(
     throw new Error('Seleccioná ítems de al menos un comercio.');
   }
 
-  const payload = selections.map((s) => ({
-    quote_id: s.quoteId,
-    item_ids: s.itemIds,
-    quote_item_ids: s.quoteItemIds ?? [],
-    include_freight: s.includeFreight,
-  }));
+  const payload = buildMaterialCheckoutPayload(selections);
 
   const { data, error } = await sb.rpc('create_material_checkout', {
     p_selections: payload,

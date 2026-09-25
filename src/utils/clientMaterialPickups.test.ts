@@ -87,6 +87,14 @@ describe('mapClientPickupOrders', () => {
       { id: 'qi-1', line: 'Cemento (Loma Negra) · 10 bolsas' },
     ]);
     expect(content.logistics).toBe('Retiro en local');
+    const withFreight = mapClientPickupOrders([
+      { ...cement, id: 'order-flete', include_freight: true },
+    ]);
+    expect(buildClientPickupCardContent(withFreight[0]).logistics).toBe('Flete incluido');
+    const unknownFreight = mapClientPickupOrders([
+      { ...cement, id: 'order-sin-flag', include_freight: null },
+    ]);
+    expect(buildClientPickupCardContent(unknownFreight[0]).logistics).not.toBe('Flete incluido');
     expect(content.pickedUpLabel).toBeNull();
   });
 

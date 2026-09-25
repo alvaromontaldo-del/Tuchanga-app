@@ -22,7 +22,7 @@ import {
   useClientCompareQuotes,
 } from '../../hooks/useClientQuotes';
 import { formatMoneyAr } from '../../services/clientQuotesSupabase';
-import { quoteFreightDisplay } from '../../utils/quoteFreightTotal';
+import { quoteFreightDisplay, shownIncludeFreight } from '../../utils/quoteFreightTotal';
 import { formatOrderCodeDisplay } from '../../utils/orderCode';
 import { normalizeDisplayAddress } from '../../utils/formatAddress';
 import {
@@ -125,18 +125,31 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
     if (selectionInitRef.current === initKey) return;
     selectionInitRef.current = initKey;
 
-    const nextSelected: Record<string, Set<string>> = {};
-    const nextFreight: Record<string, boolean> = {};
-    for (const g of groups) {
-      const bestId = bestQuoteIdByRubro.get(g.rubroId);
-      if (!bestId) continue;
-      const card = g.quotes.find((q) => q.quoteId === bestId);
-      if (!card) continue;
-      nextSelected[bestId] = defaultSelectedItemIds(card);
-      nextFreight[bestId] = defaultIncludeFreight(card);
-    }
-    setSelectedItems(nextSelected);
-    setIncludeFreight(nextFreight);
+    setSelectedItems((prev) => {
+      const next = { ...prev };
+      for (const g of groups) {
+        const bestId = bestQuoteIdByRubro.get(g.rubroId);
+        if (!bestId || next[bestId]) continue;
+        const card = g.quotes.find((q) => q.quoteId === bestId);
+        if (!card) continue;
+        next[bestId] = defaultSelectedItemIds(card);
+      }
+      return next;
+    });
+    setIncludeFreight((prev) => {
+      const next = { ...prev };
+      for (const g of groups) {
+        const bestId = bestQuoteIdByRubro.get(g.rubroId);
+        if (!bestId || next[bestId] != null) continue;
+        const card = g.quotes.find((q) => q.quoteId === bestId);
+        if (!card) continue;
+        next[bestId] =
+          card.orderIncludeFreight != null
+            ? card.orderIncludeFreight
+            : defaultIncludeFreight(card);
+      }
+      return next;
+    });
   }, [bestQuoteIdByRubro, groups, readOnly, requestId]);
 
   /** quoteId del más cercano por sección (solo uno por rubro). */
@@ -257,13 +270,17 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
       stores += 1;
       materials += lines.reduce((a, it) => a + it.lineTotal, 0);
       const freightOn =
-        includeFreight[card.quoteId] === true &&
+        shownIncludeFreight(
+          card,
+          includeFreight[card.quoteId],
+          bestQuoteIdByRubro.get(card.groupRubroId) === card.quoteId,
+        ) &&
         card.freightType === 'cost' &&
         card.freightCost > 0;
       if (freightOn) materials += card.freightCost;
     }
     return { materials, stores };
-  }, [selectableQuotes, selectedItems, includeFreight]);
+  }, [bestQuoteIdByRubro, selectableQuotes, selectedItems, includeFreight]);
 
   const goToSummary = useCallback(() => {
     if (readOnly || requestCompleted) return;
@@ -276,7 +293,11 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
       const hasFreight =
         card.freightType === 'cost' &&
         card.freightCost > 0 &&
-        includeFreight[card.quoteId] === true;
+        shownIncludeFreight(
+          card,
+          includeFreight[card.quoteId],
+          bestQuoteIdByRubro.get(card.groupRubroId) === card.quoteId,
+        );
       if (ids.length < 1) {
         if (hasFreight) freightOnlyAttempt = true;
         continue;
@@ -294,6 +315,8 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
       if (items.length < 1) continue;
       const materialsSubtotal = items.reduce((a, it) => a + it.lineTotal, 0);
       const freightQuoted = card.freightType === 'cost' && card.freightCost > 0;
+      const isBest = bestQuoteIdByRubro.get(card.groupRubroId) === card.quoteId;
+      const freightOn = shownIncludeFreight(card, includeFreight[card.quoteId], isBest);
       selections.push({
         quoteId: card.quoteId,
         storeLabel: card.contactRevealed
@@ -302,7 +325,7 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
         itemIds: items.map((it) => it.id),
         quoteItemIds: items.map((it) => it.quoteItemId),
         items,
-        includeFreight: freightQuoted ? includeFreight[card.quoteId] === true : false,
+        includeFreight: freightQuoted && freightOn,
         freightCost: freightQuoted ? card.freightCost : 0,
         materialsSubtotal,
       });
@@ -323,6 +346,7 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
       selections,
     });
   }, [
+    bestQuoteIdByRubro,
     ensureDefaults,
     includeFreight,
     navigation,
@@ -462,19 +486,18 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
                 ? defaultSelectedItemIds(item)
                 : new Set<string>())
             }
-            includeFreight={
-              includeFreight[item.quoteId] ??
-              (bestQuoteIdByRubro.get(section.rubroId) === item.quoteId
-                ? defaultIncludeFreight(item)
-                : false)
-            }
+            includeFreight={shownIncludeFreight(
+              item,
+              includeFreight[item.quoteId],
+              bestQuoteIdByRubro.get(section.rubroId) === item.quoteId,
+            )}
             onToggleFreight={() => {
               if (readOnly) return;
-              ensureDefaults(item, section.rubroId);
-              setIncludeFreight((prev) => ({
-                ...prev,
-                [item.quoteId]: !(prev[item.quoteId] ?? false),
-              }));
+              const isBest = bestQuoteIdByRubro.get(section.rubroId) === item.quoteId;
+              setIncludeFreight((prev) => {
+                const visible = shownIncludeFreight(item, prev[item.quoteId], isBest);
+                return { ...prev, [item.quoteId]: !visible };
+              });
             }}
             onToggleItem={(quoteItemId, requestItemId) => {
               if (readOnly) return;
@@ -583,6 +606,15 @@ const QuoteCard = memo(function QuoteCard({
     card.items.every((it) => it.inStock && Number.isFinite(it.unitPrice) && it.unitPrice >= 0);
   const hasFreight =
     card.freightType === 'free' || (card.freightType === 'cost' && card.freightCost > 0);
+  const hasItemDecisions = card.items.some(
+    (it) => it.clientDecision === 'accepted' || it.clientDecision === 'rejected',
+  );
+  const selectionLocked =
+    !canSelectItems &&
+    (hasItemDecisions ||
+      card.orderId != null ||
+      card.orderIncludeFreight != null ||
+      card.contactRevealed);
   const freightDisplay = quoteFreightDisplay({
     materialsSubtotal: card.materialsSubtotal,
     freightType: card.freightType,
@@ -590,6 +622,8 @@ const QuoteCard = memo(function QuoteCard({
     orderIncludeFreight: card.orderIncludeFreight,
     uiIncludeFreight: includeFreight,
     canChooseFreight: showFreightToggle,
+    selectionLocked,
+    acceptedTotal: card.orderAcceptedTotal,
   });
 
   return (

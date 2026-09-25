@@ -113,7 +113,8 @@ function logisticsLabel(
   const type = String(freightType ?? '').toLowerCase();
   if (includeFreight === false || type === 'pickup') return 'Retiro en local';
   if (type === 'free') return 'Flete gratis';
-  if (type === 'cost') return 'Flete incluido';
+  if (type === 'cost' && includeFreight === true) return 'Flete incluido';
+  if (type === 'cost') return 'Retiro en local';
   return null;
 }
 
