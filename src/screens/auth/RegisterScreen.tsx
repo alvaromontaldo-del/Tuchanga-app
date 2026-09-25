@@ -34,8 +34,10 @@ import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/
 import {
   activeStreetQuery,
   addressToPersist,
+  emptyAddressSearchMessage,
   isIgnorableAddressEcho,
   isNegligiblePinMove,
+  rejectedAddressMessage,
   retainHouseNumber,
   visibleSuggestionAddress,
 } from '../../utils/streetAddressQuery';
@@ -170,6 +172,7 @@ export function RegisterScreen({ navigation, route }: Props) {
   const [locationDetails, setLocationDetails] = useState('');
   const [searching, setSearching] = useState(false);
   const [addressResults, setAddressResults] = useState<GeoPoint[]>([]);
+  const [settledAddressQuery, setSettledAddressQuery] = useState('');
   const requestIdRef = useRef(0);
   const reverseReqRef = useRef(0);
   const skipGeocodeRef = useRef<string | null>(null);
@@ -495,6 +498,7 @@ export function RegisterScreen({ navigation, route }: Props) {
     const q = qRaw.trim();
     if (q.length < 4) {
       setAddressResults([]);
+      setSettledAddressQuery('');
       return;
     }
 
@@ -517,7 +521,10 @@ export function RegisterScreen({ navigation, route }: Props) {
     } catch {
       if (reqId === requestIdRef.current) setAddressResults([]);
     } finally {
-      if (reqId === requestIdRef.current) setSearching(false);
+      if (reqId === requestIdRef.current) {
+        setSearching(false);
+        setSettledAddressQuery(q);
+      }
     }
   }
 
@@ -592,6 +599,7 @@ export function RegisterScreen({ navigation, route }: Props) {
       pickedPointRef.current = { lat, lng };
       setGeo({ address: 'Ubicación actual', lat, lng });
       setAddressResults([]);
+      setSettledAddressQuery('');
       await runReverseGeocode(lat, lng);
     } finally {
       setLocating(false);
@@ -642,7 +650,11 @@ export function RegisterScreen({ navigation, route }: Props) {
     if (pwdErr) next.password = pwdErr;
     if (!passwordsMatch(password, confirm)) next.confirm = 'Las contraseñas no coinciden.';
 
-    if (!geo) next.location = 'Seleccioná una dirección para obtener latitud/longitud.';
+    if (!geo) {
+      next.location =
+        rejectedAddressMessage(addressQuery) ??
+        'Seleccioná una dirección para obtener latitud/longitud.';
+    }
 
     if (asCommerce) {
       if (!storeName.trim()) next.storeName = 'El nombre del comercio es obligatorio.';
@@ -1107,6 +1119,12 @@ export function RegisterScreen({ navigation, route }: Props) {
               </Pressable>
             </View>
             {errors.location ? <Text style={styles.error}>{errors.location}</Text> : null}
+            {!searching &&
+            settledAddressQuery === addressQuery.trim() &&
+            addressQuery.trim().length >= 4 &&
+            addressResults.length === 0 ? (
+              <Text style={styles.hintWarn}>{emptyAddressSearchMessage(addressQuery)}</Text>
+            ) : null}
 
             {addressResults.length > 0 ? (
               <View style={styles.results}>
@@ -1128,6 +1146,7 @@ export function RegisterScreen({ navigation, route }: Props) {
                       commitAddressQuery(label);
                       setGeo({ address: label, lat: r.lat, lng: r.lng });
                       setAddressResults([]);
+                      setSettledAddressQuery('');
                     }}
                   >
                     <Ionicons name="location-outline" size={18} color={colors.textSecondary} />

@@ -39,6 +39,10 @@ export type RankedAddress = {
 };
 
 const NEAR_RADIUS_M = 35_000;
+/** Misma calle y misma altura, más cerca que esto, es un solo lugar partido por barrios. */
+const SAME_PLACE_M = 8_000;
+/** Tope de una altura urbana en Argentina. Por encima, no se inventa un pin. */
+const MAX_PLAUSIBLE_HOUSE_NUMBER = 30_000;
 
 const UNIT_HEIGHT = /^\d{1,2}(?:[A-Za-z]{1,3})?$/;
 
@@ -123,6 +127,33 @@ export function houseNumbersMatch(a: string, b: string): boolean {
   return Boolean(da && db && da === db);
 }
 
+/**
+ * Altura que se puede apoyar en el eje de la calle cuando OSM no tiene el portal.
+ * 1140 y 148 entran. 123555 no: no es un domicilio y no hay que inventarle coordenadas.
+ */
+export function isPlausibleHouseNumber(houseNumber: string): boolean {
+  const digits = houseNumberDigits(houseNumber);
+  if (!/^[1-9]\d{0,4}$/.test(digits)) return false;
+  const value = Number(digits);
+  return value >= 1 && value <= MAX_PLAUSIBLE_HOUSE_NUMBER;
+}
+
+/** Aviso cuando el número tipeado no se puede tratar como una dirección real. */
+export function rejectedAddressMessage(query: string): string | null {
+  const parsed = parseStreetAddressQuery(query.trim());
+  if (!parsed || !houseNumberDigits(parsed.houseNumber)) return null;
+  if (isPlausibleHouseNumber(parsed.houseNumber)) return null;
+  return 'No encontramos esa altura en el mapa. Revisá el número: no se puede guardar una dirección inventada.';
+}
+
+/** Texto cuando la búsqueda de una dirección no devolvió sugerencias. */
+export function emptyAddressSearchMessage(query: string): string {
+  return (
+    rejectedAddressMessage(query) ??
+    'No encontramos esa dirección. Revisá calle y altura, o probá con la localidad.'
+  );
+}
+
 const STREET_PREFIX =
   /^(avenida|av|avda|calle|pasaje|pje|boulevard|bulevar|bv|bvd|ruta|camino|diagonal|diag)\s+/;
 const STOPWORDS = new Set(['de', 'del', 'la', 'las', 'los', 'el', 'y', 'e']);
@@ -155,6 +186,14 @@ function containsInOrder(hay: string[], needle: string[]): boolean {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function hitCityName(parts: NominatimAddressParts): string | null {
+  return parts.city?.trim() || parts.town?.trim() || parts.village?.trim() || null;
+}
+
+function hitBarrioName(parts: NominatimAddressParts): string | null {
+  return parts.neighbourhood?.trim() || parts.suburb?.trim() || null;
 }
 
 function localityTail(parts: NominatimAddressParts): string | null {
@@ -287,6 +326,13 @@ export function addressFromPick(typedQuery: string, suggestionLabel: string): st
   const label = suggestionLabel.trim();
   const parsed = parseStreetAddressQuery(typedQuery);
   if (!parsed || !houseNumberDigits(parsed.houseNumber)) return label;
+
+  // Un número imposible no se pega sobre una calle que el geocoder no numeró.
+  // Si el resultado ya trae esa altura, el geocoder la confirmó y se conserva.
+  if (!isPlausibleHouseNumber(parsed.houseNumber)) {
+    if (!label || !labelHasHouseDigits(label, parsed.houseNumber)) return label;
+    return ensureUnitOnFirstPiece(label, parsed.unit);
+  }
 
   if (!label) {
     const line = composeStreetLine(parsed.street, parsed.houseNumber, parsed.unit);
@@ -502,11 +548,64 @@ export function retainHouseNumber(selectedAddress: string, reversedAddress: stri
   return addressFromPick(selected, reversed);
 }
 
+type PlaceCandidate = RankedAddress & {
+  tier: number;
+  distance: number;
+  nameScore: number;
+  localityRank: number;
+  index: number;
+  streetKey: string;
+  houseDigits: string;
+  exact: boolean;
+  roadName: string;
+  cityName: string | null;
+  barrioName: string | null;
+  streetLine: string;
+};
+
+/**
+ * Varios tramos de la misma calle (Moreno, Suizo, Parque Sarmiento) con la misma
+ * altura son un solo lugar. Ciudades lejos entre sí se mantienen.
+ * Si los barrios no coinciden, el rótulo queda en la ciudad: el pin es el tramo
+ * más cercano, no un portal verificado en un barrio.
+ */
+function collapseNearDuplicatePlaces(items: PlaceCandidate[]): PlaceCandidate[] {
+  const clusters: PlaceCandidate[][] = [];
+  for (const item of items) {
+    const key = item.streetKey || `id:${item.id}`;
+    const cluster = clusters.find(
+      (group) =>
+        (group[0].streetKey || `id:${group[0].id}`) === key &&
+        group[0].houseDigits === item.houseDigits &&
+        group.some((member) => distanceMeters(member, item) <= SAME_PLACE_M),
+    );
+    if (cluster) cluster.push(item);
+    else clusters.push([item]);
+  }
+
+  return clusters.map((cluster) => {
+    const exacts = cluster.filter((item) => item.exact);
+    const pool = exacts.length ? exacts : cluster;
+    const best = pool.reduce((closest, item) => (item.distance < closest.distance ? item : closest));
+    const barrios = new Set(cluster.map((item) => fold(item.barrioName ?? '')).filter(Boolean));
+    if (best.exact || cluster.length < 2 || barrios.size < 2 || !best.cityName) return best;
+    const plain = [best.roadName, best.cityName].filter(Boolean).join(', ');
+    const address = [best.streetLine, best.cityName].filter(Boolean).join(', ');
+    return {
+      ...best,
+      address,
+      plainAddress: plain || best.plainAddress,
+    };
+  });
+}
+
 /**
  * Arma las sugerencias que ve el usuario.
- * Con altura: si hay portal cerca, usa ese punto. Si OSM solo tiene la calle,
- * la etiqueta y lo que se guarda llevan igual la altura tipeada (el pin queda en la calle).
- * Un portal en otra ciudad no reemplaza esa calle.
+ * Con altura creíble: si hay portal cerca, usa ese punto. Si OSM solo tiene la calle,
+ * la etiqueta lleva la altura tipeada y el pin queda sobre esa calle (Volta 1140).
+ * Tramos de la misma calle que solo cambian de barrio se muestran una sola vez.
+ * Una altura imposible (Garibaldi 123555) no fabrica coordenadas.
+ * Un portal en otra ciudad no reemplaza la calle de al lado.
  */
 export function rankGeocodeHits(
   hits: GeocodeHit[],
@@ -530,15 +629,7 @@ export function rankGeocodeHits(
       .slice(0, 6);
   }
 
-  type Candidate = RankedAddress & {
-    tier: number;
-    distance: number;
-    nameScore: number;
-    localityRank: number;
-    index: number;
-  };
-
-  const candidates: Candidate[] = [];
+  const candidates: PlaceCandidate[] = [];
   for (let index = 0; index < hits.length; index += 1) {
     const hit = hits[index];
     const road = hitStreetName(hit);
@@ -549,6 +640,8 @@ export function rankGeocodeHits(
       Boolean(hit.parts.house_number) &&
       houseNumbersMatch(hit.parts.house_number ?? '', parsed.houseNumber);
     if (!exact && !canUseAsStreetFallback(hit)) continue;
+    // Sin portal confirmado, una altura absurda no se estampa en el centro de la calle.
+    if (!exact && !isPlausibleHouseNumber(parsed.houseNumber)) continue;
 
     const distance = near ? distanceMeters(near, hit) : 0;
     const nearby = !near || distance <= NEAR_RADIUS_M;
@@ -571,10 +664,17 @@ export function rankGeocodeHits(
       nameScore,
       localityRank: localityMatches(hit.parts, parsed.locality) ? 0 : 1,
       index,
+      streetKey: streetTokens(road).join(' '),
+      houseDigits: houseNumberDigits(parsed.houseNumber),
+      exact,
+      roadName: road,
+      cityName: hitCityName(hit.parts),
+      barrioName: hitBarrioName(hit.parts),
+      streetLine: composeStreetLine(road, parsed.houseNumber, parsed.unit),
     });
   }
 
-  let filtered = candidates;
+  let filtered: PlaceCandidate[] = candidates;
   if (parsed.locality) {
     const inCity = candidates.filter((item) => item.localityRank === 0);
     if (inCity.length) filtered = inCity;
@@ -609,7 +709,7 @@ export function rankGeocodeHits(
 
   const seen = new Set<string>();
   const ranked: RankedAddress[] = [];
-  for (const item of filtered) {
+  for (const item of collapseNearDuplicatePlaces(filtered)) {
     const key = `${fold(item.address)}|${item.lat.toFixed(4)}|${item.lng.toFixed(4)}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -635,6 +735,14 @@ export function ensureTypedHeightSuggestion(
   parsed: ParsedStreetQuery,
   near?: { lat: number; lng: number } | null,
 ): RankedAddress[] {
+  if (!isPlausibleHouseNumber(parsed.houseNumber)) {
+    return ranked.filter(
+      (item) =>
+        labelHasHouseDigits(item.address, parsed.houseNumber) ||
+        labelHasHouseDigits(item.plainAddress ?? '', parsed.houseNumber),
+    );
+  }
+
   const withNumber = ranked.map((item) => {
     if (labelHasHouseDigits(item.address, parsed.houseNumber)) return item;
     const hit = hits.find((candidate) => candidate.id === item.id);
