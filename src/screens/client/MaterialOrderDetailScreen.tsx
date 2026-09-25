@@ -22,6 +22,7 @@ import {
   crearPreferenciaCostoServicioMateriales,
 } from '../../services/pagosMercadoPago';
 import { normalizeDisplayAddress } from '../../utils/formatAddress';
+import { describePaymentStartFailure } from '../../utils/paymentStartError';
 import { formatOrderCodeDisplay } from '../../utils/orderCode';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -99,10 +100,12 @@ export function MaterialOrderDetailScreen({ navigation, route }: Props) {
 
       toast.error('Mercado Pago no está habilitado. No se puede acreditar sin pago.', 'Pago');
     } catch (e) {
-      toast.error(
-        e instanceof Error ? e.message : 'No se pudo confirmar el costo de servicio.',
-        'Error',
+      const failure = describePaymentStartFailure(
+        e,
+        'No se pudo confirmar el costo de servicio.',
       );
+      console.error('[MaterialOrderDetail] iniciar pago', failure.cause, e);
+      toast.error(failure.userMessage, 'Error');
     } finally {
       setPaying(false);
     }

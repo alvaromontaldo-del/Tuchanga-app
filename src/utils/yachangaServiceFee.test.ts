@@ -19,6 +19,12 @@ describe('calculateServiceFee', () => {
     }
   });
 
+  it('$30 → mínimo $5.000 (8% daría $2,40)', () => {
+    const r = calculateServiceFee(30);
+    expect(r.serviceFee).toBe(5_000);
+    expect(r.isMinimumApplied).toBe(true);
+  });
+
   it('$10.000 → mínimo $5.000 (8% daría $800)', () => {
     const r = calculateServiceFee(10_000);
     expect(r.serviceFee).toBe(5_000);
