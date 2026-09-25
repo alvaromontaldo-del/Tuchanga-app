@@ -101,10 +101,6 @@ import { getSystemEvent, shouldRenderSystemMessageInChat } from '../../utils/cha
 import { dedupeMaterialServiceFeePaidMessages } from '../../utils/materialFeePaidChat';
 import { newRandomUserId } from '../../utils/stableUserId';
 import { mapChatSendError } from '../../utils/chatErrors';
-import {
-  CONTACT_MODERATION_POLICY_MESSAGE,
-  validateContactInfo,
-} from '../../utils/contactModeration';
 import { setActiveConversationForNotifications } from '../../services/chatFocus';
 
 export type ChatScreenParams = {
@@ -262,8 +258,6 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
   const myId = user?.id ?? '';
   const displayName = useMemo(() => firstNameOnly(otherDisplayName), [otherDisplayName]);
 
-  const inputModeration = useMemo(() => validateContactInfo(input), [input]);
-
   const otherUserId = useMemo(() => {
     if (!participants) return null;
     return participants.myRole === 'cliente' ? participants.workerId : participants.clientId;
@@ -412,7 +406,6 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
   const [quoteDetail, setQuoteDetail] = useState('');
   const [incluyeGarantia, setIncluyeGarantia] = useState(false);
   const [warrantyDaysText, setWarrantyDaysText] = useState('');
-  const quoteDetailModeration = useMemo(() => validateContactInfo(quoteDetail), [quoteDetail]);
   const warrantyDaysNum = useMemo(() => {
     const digits = warrantyDaysText.replace(/\D/g, '');
     if (!digits) return null;
@@ -1253,12 +1246,6 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
     const text = input.trim();
     if (!text || !myId) return;
     if (chatBlocked || chatClosedByClaim) return;
-    if (inputModeration.blocked) {
-      toast.warning(CONTACT_MODERATION_POLICY_MESSAGE, 'Mensaje bloqueado', {
-        durationMs: 5200,
-      });
-      return;
-    }
 
     if (isSupabaseConfigured()) {
       const clientMessageId = newRandomUserId();
@@ -2279,12 +2266,6 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
           </View>
         ) : null}
         <View style={styles.composer}>
-          {!composerDisabled && inputModeration.blocked ? (
-            <View style={styles.blockedBanner} accessibilityLiveRegion="polite">
-              <Ionicons name="shield-checkmark-outline" size={16} color={colors.textSecondary} />
-              <Text style={styles.blockedText}>{CONTACT_MODERATION_POLICY_MESSAGE}</Text>
-            </View>
-          ) : null}
           {showClientAttach ? (
             <Pressable
               onPress={openAttachImageMenu}
@@ -2324,15 +2305,13 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
             <Pressable
               style={[
                 styles.sendBtn,
-                (!input.trim() || sending || attachingImage || inputModeration.blocked) &&
-                  styles.sendBtnDisabled,
+                (!input.trim() || sending || attachingImage) && styles.sendBtnDisabled,
               ]}
               onPress={send}
               disabled={
                 !input.trim() ||
                 sending ||
                 attachingImage ||
-                inputModeration.blocked ||
                 (!isSupabaseConfigured() && !connected)
               }
             >
@@ -2351,7 +2330,6 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
     connected,
     handleUnblockUser,
     input,
-    inputModeration.blocked,
     openAttachImageMenu,
     participants?.myRole,
     scrollToLatest,
@@ -2460,11 +2438,6 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                       multiline
                       maxLength={1200}
                     />
-                    {quoteDetailModeration.blocked ? (
-                      <Text style={styles.quoteModerationWarning}>
-                        {CONTACT_MODERATION_POLICY_MESSAGE}
-                      </Text>
-                    ) : null}
 
                     <Pressable
                       onPress={() => setIncluyeGarantia((on) => !on)}
@@ -2521,7 +2494,6 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                           (quoteNetNum <= 0 ||
                             !quoteDetail.trim() ||
                             quoteSubmitting ||
-                            quoteDetailModeration.blocked ||
                             Boolean(warrantyError) ||
                             !participants ||
                             participants.myRole !== 'trabajador') &&
@@ -2576,7 +2548,6 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                           quoteNetNum <= 0 ||
                           !quoteDetail.trim() ||
                           quoteSubmitting ||
-                          quoteDetailModeration.blocked ||
                           Boolean(warrantyError) ||
                           !participants ||
                           participants.myRole !== 'trabajador'
@@ -3016,22 +2987,6 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     gap: spacing.sm,
   },
-  blockedBanner: {
-    position: 'absolute',
-    left: spacing.md,
-    right: spacing.md,
-    top: -34,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#F0F0F0',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  blockedText: { flex: 1, fontSize: 12, fontWeight: '700', color: colors.textSecondary },
   unblockRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',

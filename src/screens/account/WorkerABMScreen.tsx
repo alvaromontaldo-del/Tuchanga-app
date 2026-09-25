@@ -39,11 +39,6 @@ import {
 } from '../../services/supabaseUser';
 import { fetchSearchWorkerHitsFromSupabase } from '../../services/searchWorkersSupabase';
 import type { AuthUser } from '../../services/auth';
-import {
-  CONTACT_MODERATION_PROFILE_FIELD_MESSAGE,
-  validateContactInfo,
-  validateWorkerProfileTexts,
-} from '../../utils/contactModeration';
 
 type Props = AccountStackScreenProps<'WorkerABM'>;
 
@@ -175,24 +170,6 @@ function validateDetailed(
     });
   }
 
-  if (validateContactInfo(professionalDescription).blocked) {
-    issues.push({
-      field: 'professionalDescription',
-      scroll: 'professional',
-      msg: CONTACT_MODERATION_PROFILE_FIELD_MESSAGE,
-    });
-  }
-
-  for (const { t, i } of named) {
-    if (validateContactInfo(t.description).blocked) {
-      issues.push({
-        field: `trade_${i}_description`,
-        scroll: `trade_${i}`,
-        msg: CONTACT_MODERATION_PROFILE_FIELD_MESSAGE,
-      });
-    }
-  }
-
   const errors: Record<string, string> = {};
   for (const it of issues) {
     if (!errors[it.field]) errors[it.field] = it.msg;
@@ -204,12 +181,10 @@ function tradeCardHasError(
   idx: number,
   trades: WorkerTrade[],
   fieldErrors: Record<string, string>,
-  tradeContactBlocked?: boolean,
 ) {
   if (fieldErrors[`trade_${idx}_name`]) return true;
   if (fieldErrors[`trade_${idx}_years`]) return true;
   if (fieldErrors[`trade_${idx}_description`]) return true;
-  if (tradeContactBlocked) return true;
   const firstNamed = trades.findIndex((t) => t.name.trim().length > 0);
   if (fieldErrors.primary && idx === firstNamed && firstNamed >= 0) return true;
   return false;
@@ -237,15 +212,6 @@ export function WorkerABMScreen({ navigation }: Props) {
   const [deleteBanner, setDeleteBanner] = useState<string>('');
 
   const [tradeModal, setTradeModal] = useState<{ idx: number } | null>(null);
-
-  const contactModeration = useMemo(
-    () =>
-      validateWorkerProfileTexts(
-        professionalDescription,
-        trades.map((t) => t.description),
-      ),
-    [professionalDescription, trades],
-  );
 
   const scrollRef = useRef<ScrollView>(null);
   const layoutYs = useRef<Record<string, number>>({});
@@ -624,12 +590,7 @@ export function WorkerABMScreen({ navigation }: Props) {
             }}
             style={[
               styles.tradeCard,
-              tradeCardHasError(
-                idx,
-                trades,
-                fieldErrors,
-                contactModeration.tradeDescriptions[idx]?.blocked,
-              ) && styles.fieldGroupError,
+              tradeCardHasError(idx, trades, fieldErrors) && styles.fieldGroupError,
             ]}
           >
             <View style={styles.tradeTopRow}>
@@ -699,23 +660,18 @@ export function WorkerABMScreen({ navigation }: Props) {
             <Text style={styles.fieldLabel}>Descripción del oficio</Text>
             <ModeratedTextField
               variant="plain"
-              showIcon={false}
-              policyMessage={CONTACT_MODERATION_PROFILE_FIELD_MESSAGE}
               value={t.description}
               onChangeText={(v) => updateTrade(idx, { description: v })}
               style={[
                 styles.textArea,
-                fieldErrors[`trade_${idx}_description`] || contactModeration.tradeDescriptions[idx]?.blocked
-                  ? styles.inputError
-                  : null,
+                fieldErrors[`trade_${idx}_description`] ? styles.inputError : null,
               ]}
               placeholder="Qué hacés, qué te diferencia, herramientas, etc."
               placeholderTextColor={colors.textSecondary}
               multiline
               textAlignVertical="top"
             />
-            {fieldErrors[`trade_${idx}_description`] &&
-            !contactModeration.tradeDescriptions[idx]?.blocked ? (
+            {fieldErrors[`trade_${idx}_description`] ? (
               <Text style={styles.inlineError}>{fieldErrors[`trade_${idx}_description`]}</Text>
             ) : null}
 
@@ -816,8 +772,6 @@ export function WorkerABMScreen({ navigation }: Props) {
           </Text>
           <ModeratedTextField
             variant="plain"
-            showIcon={false}
-            policyMessage={CONTACT_MODERATION_PROFILE_FIELD_MESSAGE}
             value={professionalDescription}
             onChangeText={(v) => {
               setProfessionalDescription(v);
@@ -830,16 +784,14 @@ export function WorkerABMScreen({ navigation }: Props) {
             style={[
               styles.textArea,
               { minHeight: 120 },
-              fieldErrors.professionalDescription || contactModeration.professional.blocked
-                ? styles.inputError
-                : null,
+              fieldErrors.professionalDescription ? styles.inputError : null,
             ]}
             placeholder="Contá tu experiencia general, disponibilidad, garantías, etc."
             placeholderTextColor={colors.textSecondary}
             multiline
             textAlignVertical="top"
           />
-            {fieldErrors.professionalDescription && !contactModeration.professional.blocked ? (
+            {fieldErrors.professionalDescription ? (
               <Text style={styles.inlineError}>{fieldErrors.professionalDescription}</Text>
             ) : null}
             </View>
@@ -851,7 +803,6 @@ export function WorkerABMScreen({ navigation }: Props) {
                 title="Guardar"
                 onPress={() => void onSave()}
                 loading={saving}
-                disabled={contactModeration.hasViolation}
               />
               {workerProfile ? (
                 <Pressable

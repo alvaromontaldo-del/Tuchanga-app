@@ -51,11 +51,6 @@ import {
   validateNationalPhone,
 } from '../../utils/validation';
 import {
-  CONTACT_MODERATION_PROFILE_FIELD_MESSAGE,
-  validateContactInfo,
-  validateWorkerProfileTexts,
-} from '../../utils/contactModeration';
-import {
   birthDateIsoFromDate,
   calcAgeFromBirthDate,
   dateFromBirthDateIso,
@@ -222,15 +217,6 @@ export function RegisterScreen({ navigation, route }: Props) {
       cancelled = true;
     };
   }, [asCommerce, toast]);
-
-  const workerContactModeration = useMemo(
-    () =>
-      validateWorkerProfileTexts(
-        professionalDescription,
-        trades.map((t) => t.details ?? ''),
-      ),
-    [professionalDescription, trades],
-  );
 
   const selectedPhoneCountry = useMemo(
     () => getPhoneCountryById(phoneCountryId) ?? PHONE_COUNTRIES[0],
@@ -641,13 +627,6 @@ export function RegisterScreen({ navigation, route }: Props) {
         next.professionalDescription = `La descripción profesional es obligatoria (mínimo ${MIN_PROFESSIONAL_DESCRIPTION_LEN} caracteres).`;
       } else if (desc.length > MAX_PROFESSIONAL_DESCRIPTION_LEN) {
         next.professionalDescription = `Máximo ${MAX_PROFESSIONAL_DESCRIPTION_LEN} caracteres.`;
-      } else if (validateContactInfo(professionalDescription).blocked) {
-        next.professionalDescription = CONTACT_MODERATION_PROFILE_FIELD_MESSAGE;
-      }
-
-      const blockedTrade = trades.findIndex((t) => validateContactInfo(t.details ?? '').blocked);
-      if (blockedTrade >= 0) {
-        next.trades = CONTACT_MODERATION_PROFILE_FIELD_MESSAGE;
       }
 
       const km = clampInt(Number(coverageKm) || 0, 1, 300);
@@ -1220,14 +1199,10 @@ export function RegisterScreen({ navigation, route }: Props) {
                 </Text>
                 <ModeratedTextField
                   variant="plain"
-                  showIcon={false}
-                  policyMessage={CONTACT_MODERATION_PROFILE_FIELD_MESSAGE}
                   style={[
                     styles.textArea,
                     styles.workerFieldSurface,
-                    errors.professionalDescription || workerContactModeration.professional.blocked
-                      ? styles.textAreaError
-                      : null,
+                    errors.professionalDescription ? styles.textAreaError : null,
                   ]}
                   value={professionalDescription}
                   onChangeText={(t) => {
@@ -1239,7 +1214,7 @@ export function RegisterScreen({ navigation, route }: Props) {
                   placeholder="Ej.: Electricista matriculado con 10 años de experiencia en instalaciones y reparaciones…"
                   placeholderTextColor={colors.textSecondary}
                 />
-                {errors.professionalDescription && !workerContactModeration.professional.blocked ? (
+                {errors.professionalDescription ? (
                   <Text style={styles.error}>{errors.professionalDescription}</Text>
                 ) : null}
                 <Text style={styles.summaryCounter}>
@@ -1322,15 +1297,7 @@ export function RegisterScreen({ navigation, route }: Props) {
                     <Text style={styles.fieldLabel}>Detalles / experiencia</Text>
                     <ModeratedTextField
                       variant="plain"
-                      showIcon={false}
-                      policyMessage={CONTACT_MODERATION_PROFILE_FIELD_MESSAGE}
-                      style={[
-                        styles.textArea,
-                        styles.workerFieldSurface,
-                        workerContactModeration.tradeDescriptions[tradeIdx]?.blocked
-                          ? styles.textAreaError
-                          : null,
-                      ]}
+                      style={[styles.textArea, styles.workerFieldSurface]}
                       value={t.details}
                       onChangeText={(txt) => updateTrade(t.id, { details: txt })}
                       placeholder="Contá tu experiencia, herramientas, especialidad…"
@@ -1426,7 +1393,6 @@ export function RegisterScreen({ navigation, route }: Props) {
               title={asCommerce ? 'Crear cuenta de comercio' : 'Crear cuenta'}
               onPress={handleSubmit}
               loading={loading}
-              disabled={!asCommerce && offerServices && workerContactModeration.hasViolation}
               style={styles.submitButton}
             />
 

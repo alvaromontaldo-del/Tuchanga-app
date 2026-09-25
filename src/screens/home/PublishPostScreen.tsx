@@ -11,7 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { AppButton } from '../../components/common/AppButton';
 import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
-import { ModeratedTextField, useContactInfoValidation } from '../../components/common/ModeratedTextField';
+import { ModeratedTextField } from '../../components/common/ModeratedTextField';
 import { useAppToast } from '../../components/toast/toast';
 import { ImagePickerComponent } from '../../components/common/ImagePickerComponent';
 import { colors, radii, spacing } from '../../constants/theme';
@@ -44,7 +44,6 @@ export function PublishPostScreen({ navigation }: Props) {
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
   const MAX_DESC = 200;
-  const descriptionModeration = useContactInfoValidation(description);
 
   if (!isWorker) {
     return (
@@ -166,11 +165,7 @@ export function PublishPostScreen({ navigation }: Props) {
           title="Publicar"
           onPress={() => void handlePublish()}
           loading={loading}
-          disabled={
-            !description.trim() ||
-            description.trim().length > MAX_DESC ||
-            descriptionModeration.blocked
-          }
+          disabled={!description.trim() || description.trim().length > MAX_DESC}
         />
       </ScrollView>
     </AppKeyboardAvoidingView>

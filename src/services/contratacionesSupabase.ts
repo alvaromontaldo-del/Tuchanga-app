@@ -25,9 +25,7 @@ function throwContratacionRpcError(
   const raw = [error.message, error.details, error.hint].filter(Boolean).join(' ').toLowerCase();
 
   if (raw.includes('message_blocked_contact')) {
-    throw new Error(
-      'No se pudo avisar en el chat. Aplicá la migración 20260605120000_fix_disponibilidad_chat_system_messages.sql en Supabase.',
-    );
+    throw new Error('No se pudo avisar en el chat.');
   }
   if (raw.includes('proponer_disponibilidad_opciones') && raw.includes('does not exist')) {
     throw new Error(
