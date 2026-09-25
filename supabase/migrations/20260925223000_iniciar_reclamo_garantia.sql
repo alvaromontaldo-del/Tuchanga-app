@@ -2,8 +2,11 @@
 -- El cliente lo inicia mientras quedan días. No cambia estado_trabajo
 -- ni warranty_anchor_at: el plazo sigue corriendo.
 -- Reabre el chat del trabajo (o el hilo activo del mismo par) para coordinar.
+-- DROP primero: Postgres no deja cambiar el tipo de retorno con CREATE OR REPLACE.
 
-CREATE OR REPLACE FUNCTION public.iniciar_reclamo_garantia(p_contratacion_id uuid)
+DROP FUNCTION IF EXISTS public.iniciar_reclamo_garantia(uuid);
+
+CREATE FUNCTION public.iniciar_reclamo_garantia(p_contratacion_id uuid)
 RETURNS uuid
 LANGUAGE plpgsql
 SECURITY DEFINER
