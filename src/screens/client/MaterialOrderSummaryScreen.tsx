@@ -20,6 +20,7 @@ import {
   confirmarCostoServicioMaterialesMp,
   crearPreferenciaCostoServicioMateriales,
 } from '../../services/pagosMercadoPago';
+import { describePaymentStartFailure } from '../../utils/paymentStartError';
 import { calculateServiceFee } from '../../utils/yachangaServiceFee';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -112,7 +113,9 @@ export function MaterialOrderSummaryScreen({ navigation, route }: Props) {
 
       toast.error('Mercado Pago no está habilitado. No se puede acreditar sin pago.', 'Pago');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'No se pudo iniciar el pago.', 'Error');
+      const failure = describePaymentStartFailure(e);
+      console.error('[MaterialOrderSummary] iniciar pago', failure.cause, e);
+      toast.error(failure.userMessage, 'Error');
     } finally {
       setPaying(false);
     }

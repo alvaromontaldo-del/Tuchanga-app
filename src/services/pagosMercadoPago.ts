@@ -33,6 +33,23 @@ async function invokeEdge(
   }
 }
 
+function payloadFields(payload: unknown): { error: string; detail: string; message: string } {
+  if (!payload || typeof payload !== 'object') {
+    return { error: '', detail: '', message: '' };
+  }
+  const row = payload as Record<string, unknown>;
+  const text = (key: string) => (typeof row[key] === 'string' ? row[key].trim() : '');
+  return { error: text('error'), detail: text('detail'), message: text('message') };
+}
+
+function preferenceFailureMessage(payload: unknown, error: unknown): string {
+  const fields = payloadFields(payload);
+  const invoke = errorMessage(error, '');
+  const cause = [fields.error, fields.detail || fields.message, invoke].filter(Boolean).join(': ');
+  console.error('[mp_crear_preferencia]', { cause, payload, error });
+  return cause;
+}
+
 async function readInvokePayload(error: unknown): Promise<unknown> {
   const ctx = (error as { context?: Response }).context;
   if (ctx && typeof ctx.json === 'function') {
@@ -59,10 +76,7 @@ export async function crearPreferenciaSeña(
   if (error) {
     const payload = await readInvokePayload(error);
     const code = mapMpCheckoutError(payload);
-    const msg =
-      typeof payload === 'object' && payload && 'detail' in payload
-        ? String((payload as { detail?: string }).detail ?? errorMessage(error, ''))
-        : errorMessage(error, '');
+    const msg = preferenceFailureMessage(payload, error);
     return { ok: false, code, message: msg || 'No se pudo iniciar el pago.' };
   }
 
@@ -88,10 +102,7 @@ export async function crearPreferenciaCostoServicioMateriales(
   if (error) {
     const payload = await readInvokePayload(error);
     const code = mapMpCheckoutError(payload);
-    const msg =
-      typeof payload === 'object' && payload && 'detail' in payload
-        ? String((payload as { detail?: string }).detail ?? errorMessage(error, ''))
-        : errorMessage(error, '');
+    const msg = preferenceFailureMessage(payload, error);
     return { ok: false, code, message: msg || 'No se pudo iniciar el pago.' };
   }
 

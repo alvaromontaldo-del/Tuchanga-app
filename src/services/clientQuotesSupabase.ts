@@ -402,6 +402,7 @@ export async function fetchClientQuotesForRequest(
             )
           ),
           quote_items (
+            id,
             unit_price,
             request_items (
               id,
@@ -1330,7 +1331,8 @@ export async function createMaterialCheckout(
     if (/not_client/i.test(msg)) {
       throw new Error('Solo el cliente puede confirmar el pedido.');
     }
-    throw error;
+    console.error('[create_material_checkout]', error);
+    throw new Error(msg.trim() || 'No se pudo crear el resumen de pago.');
   }
 
   const row = Array.isArray(data) ? data[0] : data;
