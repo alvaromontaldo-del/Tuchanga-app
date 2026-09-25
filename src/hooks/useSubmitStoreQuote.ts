@@ -7,10 +7,6 @@ import {
   type SubmitStoreQuoteItemInput,
 } from '../services/storeQuotesSupabase';
 import type { FreightType, MaterialRequestItem } from '../types/materials';
-import {
-  CONTACT_MODERATION_POLICY_MESSAGE,
-  validateContactInfo,
-} from '../utils/contactModeration';
 
 export type QuoteVariantDraft = {
   label: string;
@@ -59,13 +55,6 @@ export function useSubmitStoreQuote() {
       throw new Error(msg);
     }
 
-    const notesMod = validateContactInfo(args.notes);
-    if (notesMod.blocked) {
-      const msg = notesMod.message ?? CONTACT_MODERATION_POLICY_MESSAGE;
-      setError(msg);
-      throw new Error(msg);
-    }
-
     const quoteItems: SubmitStoreQuoteItemInput[] = [];
     for (const item of args.items) {
       const draft = args.itemDrafts[item.id] ?? emptyQuoteItemDraft();
@@ -90,20 +79,6 @@ export function useSubmitStoreQuote() {
       let variantIndex = 0;
       for (const v of variants) {
         const label = v.label.trim();
-        const labelMod = label ? validateContactInfo(label) : null;
-        if (labelMod?.blocked) {
-          const msg = labelMod.message ?? CONTACT_MODERATION_POLICY_MESSAGE;
-          setError(msg);
-          throw new Error(msg);
-        }
-        const noteMod = draft.itemNote.trim()
-          ? validateContactInfo(draft.itemNote)
-          : null;
-        if (noteMod?.blocked) {
-          const msg = noteMod.message ?? CONTACT_MODERATION_POLICY_MESSAGE;
-          setError(msg);
-          throw new Error(msg);
-        }
 
         if (!draft.inStock && !label) {
           // Sin stock y sin etiqueta de alternativa: omitir esta fila vacía.

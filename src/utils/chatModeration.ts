@@ -1,6 +1,5 @@
-/** @deprecated Importá desde `contactModeration` — re-export por compatibilidad. */
+/** @deprecated Importá desde `contactModeration`. La moderación anti-contacto está desactivada. */
 export {
-  CONTACT_MODERATION_POLICY_MESSAGE,
   detectBlockedContact,
   validateContactInfo,
   type BlockedContactMatch,

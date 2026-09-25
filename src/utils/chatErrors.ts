@@ -1,5 +1,3 @@
-import { mapContentModerationError } from './contentModerationErrors';
-
 /** Texto legible desde Error, PostgrestError u objetos de Supabase (evita "[object Object]"). */
 export function extractErrorMessage(e: unknown): string {
   if (typeof e === 'string') return e.trim();
@@ -25,9 +23,10 @@ export function mapChatSendError(e: unknown): string {
 
   if (
     m.includes('message_blocked_contact') ||
-    m.includes('content_blocked_contact')
+    m.includes('content_blocked_contact') ||
+    m.includes('contact_info_blocked')
   ) {
-    return mapContentModerationError(e);
+    return 'No se pudo enviar el mensaje.';
   }
   if (m.includes('rate_limit_exceeded')) {
     return 'Enviaste demasiados mensajes seguidos. Esperá un momento e intentá de nuevo.';

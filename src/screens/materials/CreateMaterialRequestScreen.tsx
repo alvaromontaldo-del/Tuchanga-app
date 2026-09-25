@@ -33,10 +33,6 @@ import type {
 import { fetchRubrosWithActiveStores } from '../../services/materialRequestsSupabase';
 import { fetchProfileDeliveryAddress } from '../../services/supabaseUser';
 import type { MaterialItemDraft, StoreRubro } from '../../types/materials';
-import {
-  CONTACT_MODERATION_POLICY_MESSAGE,
-  validateContactInfo,
-} from '../../utils/contactModeration';
 
 type MaterialNavParamList =
   | MessagesStackParamList
@@ -193,14 +189,6 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
       const description = it.description.trim();
       if (!description) {
         toast.warning('Completá cada ítem.', 'Ítems');
-        return;
-      }
-      const moderation = validateContactInfo(description);
-      if (moderation.blocked) {
-        toast.warning(
-          moderation.message ?? CONTACT_MODERATION_POLICY_MESSAGE,
-          'Ítems',
-        );
         return;
       }
       cleaned.push({
