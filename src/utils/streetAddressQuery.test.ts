@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeDisplayAddress } from './formatAddress';
 import {
+  activeStreetQuery,
   addressFromPick,
   addressToPersist,
   ensureTypedHeightSuggestion,
@@ -11,6 +12,8 @@ import {
   parseStreetAddressQuery,
   rankGeocodeHits,
   retainHouseNumber,
+  stampSuggestions,
+  visibleSuggestionAddress,
   type GeocodeHit,
 } from './streetAddressQuery';
 
@@ -482,6 +485,118 @@ describe('eco del TextInput y move fantasma del mapa', () => {
     expect(isNegligiblePinMove(palermo, { lat: palermo.lat + 0.00005, lng: palermo.lng })).toBe(true);
     expect(isNegligiblePinMove(palermo, { lat: palermo.lat + 0.01, lng: palermo.lng })).toBe(false);
     expect(isNegligiblePinMove(null, palermo)).toBe(false);
+  });
+});
+
+describe('sugerencias Volta 1140 como en Mis datos', () => {
+  const sanNicolas = { lat: -33.33, lng: -60.22 };
+  const hits: GeocodeHit[] = [
+    hit({
+      id: 'alta',
+      lat: altaGracia.lat,
+      lng: altaGracia.lng,
+      displayName: '1140, Volta, General Bustos, Alta Gracia, Córdoba, Argentina',
+      osmClass: 'place',
+      parts: { house_number: '1140', road: 'Volta', neighbourhood: 'General Bustos', town: 'Alta Gracia' },
+    }),
+    hit({
+      id: 'alessandro',
+      lat: -33.29355,
+      lng: -60.25375,
+      displayName:
+        'Alessandro Volta, Barrancas del Yaguarón, San Nicolás de los Arroyos, Partido de San Nicolás, Buenos Aires, B2900, Argentina',
+      osmClass: 'highway',
+      parts: {
+        road: 'Alessandro Volta',
+        suburb: 'Barrancas del Yaguarón',
+        city: 'San Nicolás de los Arroyos',
+      },
+    }),
+    hit({
+      id: 'alejandro',
+      lat: -33.29208,
+      lng: -60.25571,
+      displayName:
+        'Alejandro Volta, Azopardo, San Nicolás de los Arroyos, Partido de San Nicolás, Buenos Aires, B2900, Argentina',
+      osmClass: 'highway',
+      parts: { road: 'Alejandro Volta', city: 'San Nicolás de los Arroyos' },
+    }),
+    hit({
+      id: 'castelli',
+      lat: -33.30278,
+      lng: -60.24263,
+      displayName:
+        'Alejandro Volta, Loteo Castelli, San Nicolás de los Arroyos, Partido de San Nicolás, Buenos Aires, B2900, Argentina',
+      osmClass: 'highway',
+      parts: {
+        road: 'Alejandro Volta',
+        neighbourhood: 'Loteo Castelli',
+        city: 'San Nicolás de los Arroyos',
+      },
+    }),
+    hit({
+      id: 'sarmiento',
+      lat: -33.30376,
+      lng: -60.24138,
+      displayName:
+        'Alejandro Volta, Parque Sarmiento, San Nicolás de los Arroyos, Partido de San Nicolás, Buenos Aires, B2900, Argentina',
+      osmClass: 'highway',
+      parts: {
+        road: 'Alejandro Volta',
+        suburb: 'Parque Sarmiento',
+        city: 'San Nicolás de los Arroyos',
+      },
+    }),
+  ];
+
+  const screenshotRows = [
+    'Alessandro Volta, San Nicolás de los Arroyos',
+    'Alejandro Volta, San Nicolás de los Arroyos',
+    'Alejandro Volta, Loteo Castelli',
+    'Alejandro Volta, Parque Sarmiento',
+  ];
+
+  it('cada sugerencia visible de Volta 1140 muestra la altura', () => {
+    const ranked = rankGeocodeHits(hits, 'Volta 1140', sanNicolas);
+    expect(ranked.length).toBeGreaterThan(0);
+    expect(ranked.every((item) => /\b1140\b/.test(item.address.split(',')[0] ?? ''))).toBe(true);
+    expect(ranked.some((item) => item.id === 'alta')).toBe(false);
+    for (const item of ranked) {
+      expect(item.plainAddress ?? '').not.toMatch(/\b1140\b/);
+      expect(visibleSuggestionAddress('Volta 1140', 'Volta', item)).toMatch(/\b1140\b/);
+      expect(visibleSuggestionAddress('Volta', 'Volta', item)).not.toMatch(/\b1140\b/);
+    }
+  });
+
+  it('las filas crudas del screenshot muestran 1140 aunque el recuerdo no tenga número', () => {
+    for (const raw of screenshotRows) {
+      const label = visibleSuggestionAddress('Volta 1140', 'Volta', {
+        address: raw,
+        plainAddress: raw,
+      });
+      expect(label.split(',')[0]).toMatch(/Volta 1140$/);
+      expect(visibleSuggestionAddress('Alejandro Volta 1140', null, { address: raw })).toMatch(
+        /\b1140\b/,
+      );
+    }
+    const stamped = stampSuggestions(
+      'Volta 1140',
+      screenshotRows.map((address) => ({ address })),
+    );
+    expect(stamped.every((item) => item.address.split(',')[0]?.endsWith('1140'))).toBe(true);
+    expect(stampSuggestions('Volta', screenshotRows.map((address) => ({ address })))).toEqual(
+      screenshotRows.map((address) => ({ address })),
+    );
+  });
+
+  it('el campo con altura gana y sin número no se inventa', () => {
+    expect(activeStreetQuery('Volta 1140', 'Volta')).toBe('Volta 1140');
+    expect(activeStreetQuery('Alejandro Volta 1140', 'Volta')).toBe('Alejandro Volta 1140');
+    expect(activeStreetQuery('Volta', null)).toBe('Volta');
+    expect(activeStreetQuery('', 'Volta 1140')).toBe('Volta 1140');
+    expect(visibleSuggestionAddress('Volta', 'Volta', { address: screenshotRows[0] })).toBe(
+      screenshotRows[0],
+    );
   });
 });
 
