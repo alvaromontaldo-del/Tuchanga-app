@@ -4,13 +4,16 @@ import {
   activeStreetQuery,
   addressFromPick,
   addressToPersist,
+  clearAddressHeightRejections,
   emptyAddressSearchMessage,
   ensureTypedHeightSuggestion,
   fallbackStreetNames,
   houseNumberDigits,
+  isHouseNumberAboveStreetEnd,
   isIgnorableAddressEcho,
   isNegligiblePinMove,
   isPlausibleHouseNumber,
+  noteAddressHeightRejection,
   parseStreetAddressQuery,
   rankGeocodeHits,
   rejectedAddressMessage,
@@ -679,17 +682,124 @@ describe('calidad de sugerencias: barrios repetidos y alturas inventadas', () =>
     chiclanaSegment('centro', centro, undefined),
   ];
 
-  it('colapsa los tramos de Chiclana 148 que solo cambian de barrio', () => {
-    const ranked = rankGeocodeHits(chiclanaSegments, 'Chiclana 148', moreno);
-    expect(ranked).toHaveLength(1);
-    expect(ranked[0]?.lat).toBe(moreno.lat);
-    expect(ranked[0]?.lng).toBe(moreno.lng);
-    const visible = visibleSuggestionAddress('Chiclana 148', null, ranked[0]!);
+  it('no junta los tramos de Chiclana en el pin más cercano al usuario', () => {
+    const desdeMoreno = rankGeocodeHits(chiclanaSegments, 'Chiclana 148', moreno);
+    const desdeParque = rankGeocodeHits(chiclanaSegments, 'Chiclana 148', parque);
+    expect(desdeMoreno.length).toBeGreaterThan(1);
+    expect(desdeParque.length).toBe(desdeMoreno.length);
+    expect(desdeMoreno.some((item) => item.address.includes('Moreno'))).toBe(true);
+    expect(desdeMoreno.some((item) => item.address.includes('Parque Sarmiento'))).toBe(true);
+    expect(desdeMoreno.every((item) => item.address.includes('148'))).toBe(true);
+    expect(desdeMoreno[0]?.plainAddress ?? '').not.toMatch(/\b148\b/);
+  });
+
+  it('Chiclana 148 queda en la cuadra del 200 aunque el usuario se mueva dentro de la ciudad', () => {
+    const anchor = hit({
+      id: 'georef-200',
+      lat: -33.30989,
+      lng: -60.24681,
+      displayName: 'CHICLANA 200, San Nicolás, Buenos Aires',
+      osmClass: 'place',
+      positionQuality: 'anchored',
+      streetId: '0676305001640',
+      parts: {
+        road: 'Felipe Chiclana',
+        suburb: 'Parque Sarmiento',
+        city: 'San Nicolás de los Arroyos',
+      },
+    });
+    const centroUser = { lat: -33.33, lng: -60.22 };
+    const surUser = { lat: -33.37, lng: -60.25 };
+    const hits = [anchor, ...chiclanaSegments];
+    const desdeCentro = rankGeocodeHits(hits, 'Chiclana 148', centroUser);
+    const desdeSur = rankGeocodeHits(hits, 'Chiclana 148', surUser);
+    expect(desdeCentro[0]?.id).toBe('georef-200');
+    expect(desdeSur[0]?.lat).toBe(desdeCentro[0]?.lat);
+    expect(desdeSur[0]?.lng).toBe(desdeCentro[0]?.lng);
+    expect(desdeCentro[0]?.lat).toBeCloseTo(-33.30989, 4);
+    expect(desdeCentro[0]?.lat).not.toBe(moreno.lat);
+    const visible = visibleSuggestionAddress('Chiclana 148', null, desdeCentro[0]!);
     expect(visible).toContain('148');
     expect(visible).toContain('Felipe Chiclana');
-    expect(visible).toContain('San Nicolás de los Arroyos');
-    expect(visible).not.toMatch(/Moreno|Suizo|Parque Sarmiento/);
-    expect(ranked[0]?.plainAddress ?? '').not.toMatch(/\b148\b/);
+    expect(visible).toMatch(/Parque Sarmiento|San Nicolás/);
+    expect(desdeCentro[0]?.plainAddress ?? '').not.toMatch(/\b148\b/);
+  });
+
+  it('colapsa dos puntos de la misma calle y altura a menos de 150 m', () => {
+    const ranked = rankGeocodeHits(
+      [
+        hit({
+          id: 'a',
+          lat: -34.60396,
+          lng: -58.38422,
+          displayName: '1234, Avenida Corrientes, San Nicolás, Buenos Aires',
+          osmClass: 'place',
+          parts: {
+            house_number: '1234',
+            road: 'Avenida Corrientes',
+            suburb: 'San Nicolás',
+            city: 'Buenos Aires',
+          },
+        }),
+        hit({
+          id: 'b',
+          lat: -34.6042,
+          lng: -58.3849,
+          displayName: '1234, Avenida Corrientes, San Nicolás, Buenos Aires',
+          osmClass: 'place',
+          parts: {
+            house_number: '1234',
+            road: 'Avenida Corrientes',
+            suburb: 'San Nicolás',
+            city: 'Buenos Aires',
+          },
+        }),
+      ],
+      'Corrientes 1234',
+      palermo,
+    );
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0]?.address).toContain('1234');
+    expect(ranked[0]?.address).toContain('San Nicolás');
+  });
+
+  it('mantiene Santa Fe 2500 en Recoleta y en Martínez, con el más cercano primero', () => {
+    const ranked = rankGeocodeHits(
+      [
+        hit({
+          id: 'recoleta',
+          lat: -34.59444,
+          lng: -58.40235,
+          displayName: 'AV SANTA FE 2500, Comuna 2, CABA',
+          osmClass: 'place',
+          positionQuality: 'interpolated',
+          streetId: '0201401001740',
+          parts: {
+            road: 'Avenida Santa Fe',
+            suburb: 'Recoleta',
+            city: 'Buenos Aires',
+          },
+        }),
+        hit({
+          id: 'martinez',
+          lat: -34.49386,
+          lng: -58.49808,
+          displayName: '2500, Avenida Santa Fe, Martínez',
+          osmClass: 'place',
+          parts: {
+            house_number: '2500',
+            road: 'Avenida Santa Fe',
+            town: 'Martínez',
+          },
+        }),
+      ],
+      'Santa Fe 2500',
+      palermo,
+    );
+    expect(ranked.map((item) => item.id)).toEqual(['recoleta', 'martinez']);
+    expect(ranked[0]?.address).toContain('Recoleta');
+    expect(ranked[1]?.address).toContain('Martínez');
+    expect(ranked[0]?.lat).toBeCloseTo(-34.59444, 4);
   });
 
   it('mantiene portales iguales cuando las ciudades están lejos', () => {
@@ -767,6 +877,79 @@ describe('calidad de sugerencias: barrios repetidos y alturas inventadas', () =>
     expect(rejectedAddressMessage('Garibaldi 123555')).toMatch(/altura/);
     expect(emptyAddressSearchMessage('Garibaldi 123555')).toMatch(/inventada/);
     expect(rejectedAddressMessage('Volta 1140')).toBeNull();
+  });
+
+  it('rechaza una altura por encima del final de la calle y no una que solo está debajo del mínimo', () => {
+    const chiclanaRange = { min: 0, max: 561 };
+    const garibaldiRange = { min: 0, max: 2799 };
+    const voltaLasCanitas = { min: 1801, max: 1900 };
+    expect(isHouseNumberAboveStreetEnd('9000', [chiclanaRange])).toBe(true);
+    expect(isHouseNumberAboveStreetEnd('148', [chiclanaRange])).toBe(false);
+    expect(isHouseNumberAboveStreetEnd('1140', [voltaLasCanitas])).toBe(false);
+    expect(rejectedAddressMessage('Chiclana 9000', [chiclanaRange])).toMatch(/tan alto/);
+    expect(rejectedAddressMessage('Garibaldi 5000', [garibaldiRange])).toMatch(/tan alto/);
+    expect(rejectedAddressMessage('Chiclana 148', [chiclanaRange])).toBeNull();
+    expect(rejectedAddressMessage('Volta 1140', [voltaLasCanitas])).toBeNull();
+    expect(rejectedAddressMessage('Chiclana 9000')).toBeNull();
+    expect(rejectedAddressMessage('Chiclana 9000', [])).toBeNull();
+    expect(emptyAddressSearchMessage('Chiclana 9000')).not.toMatch(/tan alto/);
+
+    const fueraDeRango = chiclanaSegments.map((segment) => ({
+      ...segment,
+      heightRange: chiclanaRange,
+    }));
+    expect(rankGeocodeHits(fueraDeRango, 'Chiclana 9000', sanNicolas)).toEqual([]);
+    expect(rankGeocodeHits(chiclanaSegments, 'Chiclana 9000', sanNicolas).length).toBeGreaterThan(0);
+    expect(
+      rankGeocodeHits(
+        [
+          ...chiclanaSegments.map((segment) => ({ ...segment, heightRange: chiclanaRange })),
+          hit({
+            id: 'lejos',
+            lat: -34.67651,
+            lng: -58.60641,
+            displayName: '9000, Chiclana, Villa Luzuriaga',
+            osmClass: 'place',
+            parts: { house_number: '9000', road: 'Chiclana', town: 'Villa Luzuriaga' },
+          }),
+        ],
+        'Chiclana 9000',
+        sanNicolas,
+      ),
+    ).toEqual([]);
+
+    const voltaConPadron = rankGeocodeHits(
+      [
+        hit({
+          id: 'street-palermo',
+          lat: palermo.lat,
+          lng: palermo.lng,
+          displayName: 'Volta, Las Cañitas, Palermo, Buenos Aires, Argentina',
+          osmClass: 'highway',
+          heightRange: voltaLasCanitas,
+          parts: {
+            road: 'Volta',
+            neighbourhood: 'Las Cañitas',
+            suburb: 'Palermo',
+            city: 'Buenos Aires',
+          },
+        }),
+      ],
+      'Volta 1140',
+      baNear,
+    );
+    expect(voltaConPadron).toHaveLength(1);
+    expect(voltaConPadron[0]?.address).toContain('Volta 1140');
+    expect(voltaConPadron[0]?.address).toContain('Las Cañitas');
+
+    noteAddressHeightRejection('Chiclana 9000', true);
+    expect(rejectedAddressMessage('Chiclana 9000')).toMatch(/tan alto/);
+    expect(emptyAddressSearchMessage('Chiclana 9000')).toMatch(/tan alto/);
+    expect(
+      addressFromPick('Chiclana 9000', 'Felipe Chiclana, Parque Sarmiento, San Nicolás de los Arroyos'),
+    ).toBe('Felipe Chiclana, Parque Sarmiento, San Nicolás de los Arroyos');
+    noteAddressHeightRejection('Chiclana 9000', false);
+    clearAddressHeightRejections();
   });
 
   it('si el geocoder confirma una altura rara, esa sugerencia sí se ofrece', () => {

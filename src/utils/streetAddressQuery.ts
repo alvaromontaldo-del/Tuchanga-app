@@ -23,6 +23,28 @@ export type GeocodeHit = {
   parts: NominatimAddressParts;
   /** class de Nominatim (highway, place, amenity, …). */
   osmClass?: string;
+  /**
+   * interpolated: Georef ubicó esa altura.
+   * anchored: no hay portal; el punto es la altura conocida más cercana (Chiclana 148 ≈ 200).
+   * portal: Nominatim trae house_number.
+   * approximate: centro de un tramo, sin numeración.
+   */
+  positionQuality?: 'interpolated' | 'anchored' | 'portal' | 'approximate';
+  /** Id de calle en Georef, para reconocer el mismo eje. */
+  streetId?: string;
+  /** Rango de alturas de esa calle en esa localidad, si lo conocemos. */
+  heightRange?: StreetHeightRange | null;
+};
+
+/** Altura inicial y final de una calle según el padrón (Georef / INDEC). */
+export type StreetHeightRange = { min: number; max: number };
+
+/** Rango de una calle en una localidad, para no aplicar el de San Nicolás a otra ciudad. */
+export type LocalityStreetRange = {
+  locality: string;
+  streetName: string;
+  streetId: string;
+  range: StreetHeightRange;
 };
 
 export type RankedAddress = {
@@ -39,8 +61,12 @@ export type RankedAddress = {
 };
 
 const NEAR_RADIUS_M = 35_000;
-/** Misma calle y misma altura, más cerca que esto, es un solo lugar partido por barrios. */
-const SAME_PLACE_M = 8_000;
+/**
+ * Dos puntos de la misma calle y la misma altura, más cerca que esto, son el mismo lugar
+ * (el padrón a veces parte un portal en varios vértices). Más lejos, son direcciones distintas:
+ * Volta 1140 en San Nicolás tiene dos tramos a ~1,5 km y hay que mostrar los dos.
+ */
+const SAME_PLACE_M = 180;
 /** Tope de una altura urbana en Argentina. Por encima, no se inventa un pin. */
 const MAX_PLAUSIBLE_HOUSE_NUMBER = 30_000;
 
@@ -138,12 +164,65 @@ export function isPlausibleHouseNumber(houseNumber: string): boolean {
   return value >= 1 && value <= MAX_PLAUSIBLE_HOUSE_NUMBER;
 }
 
+const IMPLAUSIBLE_HEIGHT_MESSAGE =
+  'No encontramos esa altura en el mapa. Revisá el número: no se puede guardar una dirección inventada.';
+const ABOVE_STREET_END_MESSAGE =
+  'No encontramos esa altura en el mapa. Revisá el número: esa calle no llega tan alto.';
+
+/** Consultas cuya altura quedó por encima del final de la calle en la zona del usuario. */
+const heightsAboveStreetEnd = new Set<string>();
+
+function rejectionKey(query: string): string {
+  return fold(query);
+}
+
+/** La última búsqueda marcó (o desmarcó) que esa altura se pasa del final de la calle. */
+export function noteAddressHeightRejection(query: string, rejected: boolean): void {
+  const key = rejectionKey(query);
+  if (!key) return;
+  if (rejected) heightsAboveStreetEnd.add(key);
+  else heightsAboveStreetEnd.delete(key);
+}
+
+export function clearAddressHeightRejections(): void {
+  heightsAboveStreetEnd.clear();
+}
+
+function heightRejectionNoted(query: string): boolean {
+  const key = rejectionKey(query);
+  return Boolean(key) && heightsAboveStreetEnd.has(key);
+}
+
+/**
+ * true si el número está por encima del final de todas las calles conocidas.
+ * Sin rangos no se rechaza: un mínimo alto (Volta en Las Cañitas arranca en 1801 en el padrón
+ * pero la calle sigue en el mapa) no alcanza para descartar la altura.
+ */
+export function isHouseNumberAboveStreetEnd(
+  houseNumber: string,
+  ranges: StreetHeightRange[] | null | undefined,
+): boolean {
+  if (!ranges || ranges.length === 0) return false;
+  const digits = houseNumberDigits(houseNumber);
+  const value = Number(digits);
+  if (!Number.isFinite(value)) return false;
+  const maxEnd = Math.max(...ranges.map((range) => range.max));
+  return value > maxEnd;
+}
+
 /** Aviso cuando el número tipeado no se puede tratar como una dirección real. */
-export function rejectedAddressMessage(query: string): string | null {
+export function rejectedAddressMessage(
+  query: string,
+  ranges?: StreetHeightRange[] | null,
+): string | null {
   const parsed = parseStreetAddressQuery(query.trim());
   if (!parsed || !houseNumberDigits(parsed.houseNumber)) return null;
-  if (isPlausibleHouseNumber(parsed.houseNumber)) return null;
-  return 'No encontramos esa altura en el mapa. Revisá el número: no se puede guardar una dirección inventada.';
+  if (!isPlausibleHouseNumber(parsed.houseNumber)) return IMPLAUSIBLE_HEIGHT_MESSAGE;
+  if (ranges && ranges.length > 0) {
+    return isHouseNumberAboveStreetEnd(parsed.houseNumber, ranges) ? ABOVE_STREET_END_MESSAGE : null;
+  }
+  if (heightRejectionNoted(query)) return ABOVE_STREET_END_MESSAGE;
+  return null;
 }
 
 /** Texto cuando la búsqueda de una dirección no devolvió sugerencias. */
@@ -327,9 +406,9 @@ export function addressFromPick(typedQuery: string, suggestionLabel: string): st
   const parsed = parseStreetAddressQuery(typedQuery);
   if (!parsed || !houseNumberDigits(parsed.houseNumber)) return label;
 
-  // Un número imposible no se pega sobre una calle que el geocoder no numeró.
-  // Si el resultado ya trae esa altura, el geocoder la confirmó y se conserva.
-  if (!isPlausibleHouseNumber(parsed.houseNumber)) {
+  // Un número imposible, o más alto que el final de la calle, no se pega sobre
+  // una calle que el geocoder no numeró. Si el resultado ya trae esa altura, se conserva.
+  if (rejectedAddressMessage(typedQuery)) {
     if (!label || !labelHasHouseDigits(label, parsed.houseNumber)) return label;
     return ensureUnitOnFirstPiece(label, parsed.unit);
   }
@@ -548,6 +627,8 @@ export function retainHouseNumber(selectedAddress: string, reversedAddress: stri
   return addressFromPick(selected, reversed);
 }
 
+type PositionQuality = NonNullable<GeocodeHit['positionQuality']>;
+
 type PlaceCandidate = RankedAddress & {
   tier: number;
   distance: number;
@@ -556,55 +637,87 @@ type PlaceCandidate = RankedAddress & {
   index: number;
   streetKey: string;
   houseDigits: string;
-  exact: boolean;
+  quality: PositionQuality;
+  streetId: string | null;
   roadName: string;
   cityName: string | null;
   barrioName: string | null;
   streetLine: string;
 };
 
+const QUALITY_RANK: Record<PositionQuality, number> = {
+  interpolated: 0,
+  portal: 1,
+  anchored: 2,
+  approximate: 3,
+};
+
+function sameCityName(a: string | null, b: string | null): boolean {
+  if (!a || !b) return false;
+  const fa = fold(a);
+  const fb = fold(b);
+  if (fa === fb) return true;
+  const caba = (value: string) =>
+    value === 'buenos aires' || value === 'caba' || value.includes('ciudad autonoma');
+  return caba(fa) && caba(fb);
+}
+
+function sameStreetCandidate(a: PlaceCandidate, b: PlaceCandidate): boolean {
+  if (a.streetId && b.streetId && a.streetId === b.streetId) return true;
+  if (a.streetKey && a.streetKey === b.streetKey) return true;
+  return roadMatchScore(a.roadName, b.roadName) >= 1;
+}
+
 /**
- * Varios tramos de la misma calle (Moreno, Suizo, Parque Sarmiento) con la misma
- * altura son un solo lugar. Ciudades lejos entre sí se mantienen.
- * Si los barrios no coinciden, el rótulo queda en la ciudad: el pin es el tramo
- * más cercano, no un portal verificado en un barrio.
+ * Solo junta copias del mismo lugar (vértices a ≤ 180 m).
+ * El pin no sigue al usuario: entre copias gana la posición interpolada
+ * y, si empatan, el punto más cercano al centro del grupo.
+ * El barrio del elegido se conserva.
  */
 function collapseNearDuplicatePlaces(items: PlaceCandidate[]): PlaceCandidate[] {
   const clusters: PlaceCandidate[][] = [];
   for (const item of items) {
-    const key = item.streetKey || `id:${item.id}`;
     const cluster = clusters.find(
       (group) =>
-        (group[0].streetKey || `id:${group[0].id}`) === key &&
         group[0].houseDigits === item.houseDigits &&
-        group.some((member) => distanceMeters(member, item) <= SAME_PLACE_M),
+        group.some(
+          (member) => sameStreetCandidate(member, item) && distanceMeters(member, item) <= SAME_PLACE_M,
+        ),
     );
     if (cluster) cluster.push(item);
     else clusters.push([item]);
   }
 
   return clusters.map((cluster) => {
-    const exacts = cluster.filter((item) => item.exact);
-    const pool = exacts.length ? exacts : cluster;
-    const best = pool.reduce((closest, item) => (item.distance < closest.distance ? item : closest));
-    const barrios = new Set(cluster.map((item) => fold(item.barrioName ?? '')).filter(Boolean));
-    if (best.exact || cluster.length < 2 || barrios.size < 2 || !best.cityName) return best;
-    const plain = [best.roadName, best.cityName].filter(Boolean).join(', ');
-    const address = [best.streetLine, best.cityName].filter(Boolean).join(', ');
-    return {
-      ...best,
-      address,
-      plainAddress: plain || best.plainAddress,
+    const bestRank = Math.min(...cluster.map((item) => QUALITY_RANK[item.quality]));
+    const pool = cluster.filter((item) => QUALITY_RANK[item.quality] === bestRank);
+    if (pool.length === 1) return pool[0];
+    const centroid = {
+      lat: pool.reduce((sum, item) => sum + item.lat, 0) / pool.length,
+      lng: pool.reduce((sum, item) => sum + item.lng, 0) / pool.length,
     };
+    return pool.reduce((best, item) =>
+      distanceMeters(item, centroid) < distanceMeters(best, centroid) ? item : best,
+    );
   });
+}
+
+function hitQuality(hit: GeocodeHit, exactPortal: boolean): PositionQuality {
+  if (hit.positionQuality) return hit.positionQuality;
+  return exactPortal ? 'portal' : 'approximate';
+}
+
+/** true si esta altura se pasa del final conocido de ESA calle. */
+function hitAboveStreetEnd(hit: GeocodeHit, houseNumber: string): boolean {
+  return isHouseNumberAboveStreetEnd(houseNumber, hit.heightRange ? [hit.heightRange] : null);
 }
 
 /**
  * Arma las sugerencias que ve el usuario.
- * Con altura creíble: si hay portal cerca, usa ese punto. Si OSM solo tiene la calle,
- * la etiqueta lleva la altura tipeada y el pin queda sobre esa calle (Volta 1140).
- * Tramos de la misma calle que solo cambian de barrio se muestran una sola vez.
- * Una altura imposible (Garibaldi 123555) no fabrica coordenadas.
+ * Si hay una posición interpolada o anclada a la altura (Georef), esa gana sobre el
+ * centro del tramo, y no se mueve cuando el usuario cambia de cuadra en la misma ciudad.
+ * Dos lugares de verdad (otra localidad, o a más de ~180 m) se listan los dos, con barrio.
+ * Una altura imposible (Garibaldi 123555) o más alta que el final de la calle no fabrica pin.
  * Un portal en otra ciudad no reemplaza la calle de al lado.
  */
 export function rankGeocodeHits(
@@ -636,19 +749,24 @@ export function rankGeocodeHits(
     const nameScore = roadMatchScore(road, parsed.street);
     if (nameScore < 1) continue;
 
-    const exact =
+    const exactPortal =
       Boolean(hit.parts.house_number) &&
       houseNumbersMatch(hit.parts.house_number ?? '', parsed.houseNumber);
-    if (!exact && !canUseAsStreetFallback(hit)) continue;
+    const quality = hitQuality(hit, exactPortal);
+    if (quality === 'approximate' && !canUseAsStreetFallback(hit)) continue;
     // Sin portal confirmado, una altura absurda no se estampa en el centro de la calle.
-    if (!exact && !isPlausibleHouseNumber(parsed.houseNumber)) continue;
+    if (quality === 'approximate' && !isPlausibleHouseNumber(parsed.houseNumber)) continue;
+    // Chiclana 9000 / Garibaldi 5000: la calle no llega. Volta 1140 con padrón 1801–1900 sí,
+    // porque el número no se pasa del final (el mínimo alto suele ser un hueco del padrón).
+    if (quality === 'approximate' && hitAboveStreetEnd(hit, parsed.houseNumber)) continue;
 
     const distance = near ? distanceMeters(near, hit) : 0;
     const nearby = !near || distance <= NEAR_RADIUS_M;
+    const positioned = quality !== 'approximate';
     let tier = 3;
-    if (exact && nearby) tier = 0;
-    else if (!exact && nearby) tier = 1;
-    else if (exact) tier = 2;
+    if (positioned && nearby) tier = 0;
+    else if (!positioned && nearby) tier = 1;
+    else if (positioned) tier = 2;
     if (tier === 3) continue;
 
     const address = formatNumberedHit(hit, parsed);
@@ -666,12 +784,40 @@ export function rankGeocodeHits(
       index,
       streetKey: streetTokens(road).join(' '),
       houseDigits: houseNumberDigits(parsed.houseNumber),
-      exact,
+      quality,
+      streetId: hit.streetId ?? null,
       roadName: road,
       cityName: hitCityName(hit.parts),
       barrioName: hitBarrioName(hit.parts),
       streetLine: composeStreetLine(road, parsed.houseNumber, parsed.unit),
     });
+  }
+
+  const positionedHits = candidates.filter((item) => item.quality !== 'approximate');
+  const withoutWorseCentroids = candidates.filter((item) => {
+    if (item.quality !== 'approximate') return true;
+    return !positionedHits.some(
+      (placed) =>
+        placed.houseDigits === item.houseDigits &&
+        sameStreetCandidate(placed, item) &&
+        (sameCityName(placed.cityName, item.cityName) || distanceMeters(placed, item) <= 450),
+    );
+  });
+  candidates.length = 0;
+  candidates.push(...withoutWorseCentroids);
+
+  // Si acá la calle no llega (Garibaldi termina en 2799), no rescatar un portal
+  // de otra provincia que Nominatim numeró con esa altura.
+  const localStreetEndsBeforeNumber = hits.some((hit) => {
+    if (roadMatchScore(hitStreetName(hit), parsed.street) < 1) return false;
+    if (!hitAboveStreetEnd(hit, parsed.houseNumber)) return false;
+    if (!near) return true;
+    return distanceMeters(near, hit) <= NEAR_RADIUS_M;
+  });
+  if (localStreetEndsBeforeNumber) {
+    const inZone = candidates.filter((item) => item.tier < 2);
+    candidates.length = 0;
+    candidates.push(...inZone);
   }
 
   let filtered: PlaceCandidate[] = candidates;
@@ -754,9 +900,20 @@ export function ensureTypedHeightSuggestion(
     return withNumber;
   }
 
-  const streets = hits.filter(
+  const matching = hits.filter(
     (hit) => canUseAsStreetFallback(hit) && roadMatchScore(hitStreetName(hit), parsed.street) >= 1,
   );
+  // Si la calle de al lado no llega a esa altura, no la inventamos en otro pueblo.
+  const nearbyBlocked = matching.some((hit) => {
+    const nearEnough = !near || distanceMeters(near, hit) <= NEAR_RADIUS_M;
+    return nearEnough && hitAboveStreetEnd(hit, parsed.houseNumber);
+  });
+  const streets = matching.filter((hit) => {
+    if (hitAboveStreetEnd(hit, parsed.houseNumber)) return false;
+    if (!nearbyBlocked) return true;
+    const nearEnough = !near || distanceMeters(near, hit) <= NEAR_RADIUS_M;
+    return nearEnough && Boolean(hit.heightRange);
+  });
   if (!streets.length) return withNumber;
 
   const best = [...streets].sort((a, b) => {
@@ -780,4 +937,66 @@ export function ensureTypedHeightSuggestion(
     },
     ...withNumber,
   ].slice(0, 6);
+}
+
+const ENRICH_RADIUS_M = 700;
+
+/**
+ * Completa barrio y nombre de calle (Felipe Chiclana, Alejandro Volta) con el tramo
+ * de OSM más cercano a cada punto interpolado, para que dos Volta 1140 se distingan.
+ */
+export function enrichPositionedHits(positioned: GeocodeHit[], osmHits: GeocodeHit[]): GeocodeHit[] {
+  const usedBarrios = new Set<string>();
+  return positioned.map((hit) => {
+    const road = hitStreetName(hit);
+    const options = osmHits
+      .map((osm) => ({ osm, distance: distanceMeters(hit, osm) }))
+      .filter(
+        ({ osm, distance }) =>
+          distance <= ENRICH_RADIUS_M && roadMatchScore(hitStreetName(osm), road) >= 1,
+      )
+      .sort((a, b) => a.distance - b.distance);
+    if (!options.length) return hit;
+    const picked =
+      options.find(({ osm }) => {
+        const barrio = fold(osm.parts.neighbourhood || osm.parts.suburb || '');
+        return Boolean(barrio) && !usedBarrios.has(barrio);
+      }) ?? options[0];
+    const barrioName = picked.osm.parts.neighbourhood || picked.osm.parts.suburb || '';
+    if (barrioName) usedBarrios.add(fold(barrioName));
+    const osmRoad = hitStreetName(picked.osm);
+    const useOsmRoad =
+      Boolean(osmRoad) &&
+      roadMatchScore(osmRoad, road) >= 1 &&
+      streetTokens(osmRoad).length >= streetTokens(road).length;
+    return {
+      ...hit,
+      parts: {
+        ...hit.parts,
+        road: useOsmRoad ? osmRoad : hit.parts.road,
+        neighbourhood: picked.osm.parts.neighbourhood ?? hit.parts.neighbourhood,
+        suburb: picked.osm.parts.suburb ?? picked.osm.parts.neighbourhood ?? hit.parts.suburb,
+        city: hit.parts.city || picked.osm.parts.city || picked.osm.parts.town,
+      },
+    };
+  });
+}
+
+/** Marca los tramos de OSM con el rango de SU localidad, para no ofrecer Chiclana 9000 ahí. */
+export function tagStreetHeightRanges(hits: GeocodeHit[], ranges: LocalityStreetRange[]): GeocodeHit[] {
+  if (!ranges.length) return hits;
+  return hits.map((hit) => {
+    if (hit.positionQuality === 'interpolated' || hit.positionQuality === 'anchored') return hit;
+    const city = hit.parts.city || hit.parts.town || hit.parts.village || '';
+    const match = ranges.find(
+      (range) =>
+        sameCityName(city, range.locality) && roadMatchScore(hitStreetName(hit), range.streetName) >= 1,
+    );
+    if (!match) return hit;
+    return {
+      ...hit,
+      heightRange: match.range,
+      streetId: hit.streetId ?? match.streetId,
+    };
+  });
 }
