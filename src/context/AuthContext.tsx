@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { AppState } from 'react-native';
 import { isSupabaseConfigured } from '../config/supabase';
-import { getSupabaseClient } from '../lib/supabase';
+import { getSupabaseClient, setAuthBannedListener } from '../lib/supabase';
 import type { AuthUser } from '../services/auth';
 import { tryApplyPendingProfileSignup } from '../services/pendingProfileSignup';
 import { fetchAuthUserFromSupabase } from '../services/supabaseUser';
@@ -28,6 +28,13 @@ import {
   validateRemoteAccount,
 } from '../services/sessionValidity';
 import { isPaymentSessionGuarded } from '../services/paymentSessionGuard';
+import {
+  genericDeactivationMessage,
+  isUserBannedAuthError,
+  loadDeactivationReason,
+  rememberDeactivationSignOut,
+  resolveSessionDeactivation,
+} from '../services/accountDeactivation';
 
 type AuthContextValue = {
   isAuthed: boolean;
@@ -35,6 +42,9 @@ type AuthContextValue = {
   user: AuthUser | null;
   flashMessage: string | null;
   setFlashMessage: (message: string | null) => void;
+  /** Aviso de baja administrativa. Lo muestra el login en un modal. */
+  deactivationMessage: string | null;
+  clearDeactivationMessage: () => void;
   signIn: (user: AuthUser, keepSignedIn: boolean) => Promise<void>;
   /** Combina con el usuario en memoria (evita perder perfil si un fetch devuelve solo id/email). */
   replaceOrMergeUser: (next: AuthUser) => void;
@@ -52,7 +62,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isRestoring, setRestoring] = useState(true);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [flashMessage, setFlashMessage] = useState<string | null>(null);
+  const [deactivationMessage, setDeactivationMessage] = useState<string | null>(null);
   const forcingOutRef = useRef(false);
+  const deactivationCheckRef = useRef(false);
   const userRef = useRef<AuthUser | null>(null);
   userRef.current = user;
 
@@ -101,6 +113,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser((prev) => mergeAuthUserProfile(prev, next));
   }, []);
 
+  const clearDeactivationMessage = useCallback(() => {
+    setDeactivationMessage(null);
+  }, []);
+
   const signOut = useCallback(async () => {
     if (isSupabaseConfigured()) {
       try {
@@ -147,6 +163,83 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [signOut],
   );
 
+  const forceDeactivatedAccount = useCallback(
+    async (message: string) => {
+      if (forcingOutRef.current) {
+        rememberDeactivationSignOut(message);
+        setDeactivationMessage(message);
+        return;
+      }
+      if (isPaymentSessionGuarded()) return;
+      forcingOutRef.current = true;
+      try {
+        rememberDeactivationSignOut(message);
+        setDeactivationMessage(message);
+        await signOut();
+        try {
+          const { openAuthModal } = await import('../navigation/openAuthModal');
+          openAuthModal('Login');
+        } catch {
+          /* la navegación puede no estar lista durante el splash */
+        }
+      } finally {
+        setTimeout(() => {
+          forcingOutRef.current = false;
+        }, 1500);
+      }
+    },
+    [signOut],
+  );
+
+  const runDeactivationCheck = useCallback(
+    async (opts?: { banSignal?: boolean }): Promise<boolean> => {
+      if (deactivationCheckRef.current) return false;
+      if (forcingOutRef.current) return false;
+      if (isPaymentSessionGuarded()) return false;
+      if (!isSupabaseConfigured()) return false;
+      deactivationCheckRef.current = true;
+      try {
+        const sb = getSupabaseClient();
+        const {
+          data: { session },
+          error: sessionError,
+        } = await sb.auth.getSession();
+        if (!session?.user) {
+          const revoked = isUserBannedAuthError(sessionError);
+          const hadUser = Boolean(userRef.current);
+          if ((revoked || opts?.banSignal) && hadUser) {
+            await forceDeactivatedAccount(genericDeactivationMessage());
+            return true;
+          }
+          return false;
+        }
+
+        const loaded = await loadDeactivationReason((fn, args) =>
+          args ? sb.rpc(fn, args) : sb.rpc(fn),
+        );
+        const resolved = resolveSessionDeactivation(loaded);
+        if (resolved.signOut && resolved.message) {
+          await forceDeactivatedAccount(resolved.message);
+          return true;
+        }
+        if (opts?.banSignal && loaded.transportError) {
+          await forceDeactivatedAccount(genericDeactivationMessage());
+          return true;
+        }
+        return false;
+      } catch (e) {
+        if (opts?.banSignal || isUserBannedAuthError(e)) {
+          await forceDeactivatedAccount(genericDeactivationMessage());
+          return true;
+        }
+        return false;
+      } finally {
+        deactivationCheckRef.current = false;
+      }
+    },
+    [forceDeactivatedAccount],
+  );
+
   const ensureActiveAccount = useCallback(
     async (options?: { redirectTo?: string }): Promise<boolean> => {
       if (!isSupabaseConfigured()) {
@@ -170,6 +263,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         return true;
       } catch (e) {
+        if (isUserBannedAuthError(e)) {
+          const blocked = await runDeactivationCheck({ banSignal: true });
+          if (blocked) return false;
+        }
         if (isDeletedOrInvalidAuthError(e)) {
           await forceAccountUnavailable(options);
           return false;
@@ -178,8 +275,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return Boolean(user?.id);
       }
     },
-    [forceAccountUnavailable, user?.id],
+    [forceAccountUnavailable, runDeactivationCheck, user?.id],
   );
+
+  useEffect(() => {
+    if (isRestoring || !deactivationMessage) return;
+    let attempts = 0;
+    const openLogin = () => {
+      attempts += 1;
+      void import('../navigation/openAuthModal')
+        .then(({ openAuthModal }) => {
+          openAuthModal('Login');
+        })
+        .catch(() => {
+          /* ignore */
+        });
+    };
+    openLogin();
+    const timer = setInterval(() => {
+      if (attempts >= 8) {
+        clearInterval(timer);
+        return;
+      }
+      openLogin();
+    }, 400);
+    return () => clearInterval(timer);
+  }, [isRestoring, deactivationMessage]);
 
   useEffect(() => {
     let mounted = true;
@@ -197,30 +318,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const AUTH_RESTORE_MS = 15_000;
 
+      setAuthBannedListener(() => {
+        void runDeactivationCheck({ banSignal: true });
+      });
+
       void (async () => {
         try {
           const restore = async () => {
             const {
               data: { session },
+              error: sessionError,
             } = await sb.auth.getSession();
             if (!mounted) return;
-            if (session?.user) {
-              const ok = await validateRemoteAccount(session.user.id);
-              if (!ok) {
-                if (mounted) await forceAccountUnavailable();
-                return;
+            if (!session?.user) {
+              if (isUserBannedAuthError(sessionError)) {
+                await forceDeactivatedAccount(genericDeactivationMessage());
               }
-              const minimal: AuthUser = {
-                id: session.user.id,
-                email: session.user.email ?? '',
-              };
-              try {
-                await tryApplyPendingProfileSignup(session.user.id);
-                const u = await fetchAuthUserFromSupabase(session.user);
-                if (mounted) setUser((prev) => mergeAuthUserProfile(prev, u));
-              } catch {
-                if (mounted) setUser((prev) => mergeAuthUserProfile(prev, minimal));
-              }
+              return;
+            }
+            const loaded = await loadDeactivationReason((fn, args) =>
+              args ? sb.rpc(fn, args) : sb.rpc(fn),
+            );
+            const resolved = resolveSessionDeactivation(loaded);
+            if (!mounted) return;
+            if (resolved.signOut && resolved.message) {
+              await forceDeactivatedAccount(resolved.message);
+              return;
+            }
+            const ok = await validateRemoteAccount(session.user.id);
+            if (!ok) {
+              if (mounted) await forceAccountUnavailable();
+              return;
+            }
+            const minimal: AuthUser = {
+              id: session.user.id,
+              email: session.user.email ?? '',
+            };
+            try {
+              await tryApplyPendingProfileSignup(session.user.id);
+              const u = await fetchAuthUserFromSupabase(session.user);
+              if (mounted) setUser((prev) => mergeAuthUserProfile(prev, u));
+            } catch {
+              if (mounted) setUser((prev) => mergeAuthUserProfile(prev, minimal));
             }
           };
 
@@ -247,7 +386,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 // Solo en sign-in inicial validamos borrado. En TOKEN_REFRESHED
                 // no hay que revalidar agresivo (en iOS dispara falsos positivos).
                 if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-                  const ok = await validateRemoteAccount(session.user.id);
+                  const blocked = await runDeactivationCheck();
+                  if (blocked) return;
+                  const {
+                    data: { session: fresh },
+                  } = await sb.auth.getSession();
+                  if (!fresh?.user) return;
+                  const ok = await validateRemoteAccount(fresh.user.id);
                   if (!ok) {
                     await forceAccountUnavailable();
                     return;
@@ -275,6 +420,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (mounted) setRestoring(false);
         return () => {
           mounted = false;
+          setAuthBannedListener(null);
         };
       }
 
@@ -287,6 +433,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (isPaymentSessionGuarded()) return;
             const uid = userRef.current?.id;
             if (!uid) return;
+            const blocked = await runDeactivationCheck();
+            if (blocked || !mounted) return;
             const {
               data: { session },
             } = await sb.auth.getSession();
@@ -301,6 +449,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       return () => {
         mounted = false;
+        setAuthBannedListener(null);
         try {
           subscription?.unsubscribe();
         } catch {
@@ -329,8 +478,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       mounted = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- user se lee en revalidate vía closure fresca en interval; forceAccountUnavailable es estable
-  }, [forceAccountUnavailable]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- user se lee en revalidate vía closure fresca; los callbacks de expulsión son estables
+  }, [forceAccountUnavailable, runDeactivationCheck]);
 
   const value = useMemo(
     () => ({
@@ -339,12 +488,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       flashMessage,
       setFlashMessage,
+      deactivationMessage,
+      clearDeactivationMessage,
       signIn,
       replaceOrMergeUser,
       signOut,
       ensureActiveAccount,
     }),
-    [isRestoring, user, flashMessage, signIn, replaceOrMergeUser, signOut, ensureActiveAccount],
+    [
+      isRestoring,
+      user,
+      flashMessage,
+      deactivationMessage,
+      clearDeactivationMessage,
+      signIn,
+      replaceOrMergeUser,
+      signOut,
+      ensureActiveAccount,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

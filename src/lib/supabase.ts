@@ -2,12 +2,34 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
 import { getSupabaseAnonKey, getSupabaseUrl, isSupabaseConfigured } from '../config/supabase';
+import { payloadIndicatesUserBanned } from '../services/accountDeactivation';
 
 /**
  * fetch() sin tope puede quedar colgado minutos si el firewall no corta bien el TCP.
  * Abortamos y fallamos en un tiempo acotado (mejor UX y coincide con timeouts de auth).
  */
 const SUPABASE_FETCH_TIMEOUT_MS = 32_000;
+
+type AuthBannedListener = () => void;
+let authBannedListener: AuthBannedListener | null = null;
+
+/**
+ * AuthProvider la usa para, a mitad de sesión, volver a consultar la baja
+ * si GoTrue responde `user_banned`.
+ */
+export function setAuthBannedListener(listener: AuthBannedListener | null) {
+  authBannedListener = listener;
+}
+
+function notifyIfBannedResponse(status: number, body: string) {
+  if (status !== 400 && status !== 401 && status !== 403) return;
+  if (!payloadIndicatesUserBanned(body)) return;
+  try {
+    authBannedListener?.();
+  } catch {
+    /* ignore */
+  }
+}
 
 export async function supabaseFetch(
   input: RequestInfo | URL,
@@ -21,10 +43,19 @@ export async function supabaseFetch(
     else upstream.addEventListener('abort', () => controller.abort(), { once: true });
   }
   try {
-    return await fetch(input, {
+    const response = await fetch(input, {
       ...init,
       signal: controller.signal,
     });
+    if (response.status === 400 || response.status === 401 || response.status === 403) {
+      try {
+        const text = await response.clone().text();
+        notifyIfBannedResponse(response.status, text);
+      } catch {
+        /* no bloquear la respuesta original */
+      }
+    }
+    return response;
   } finally {
     clearTimeout(timer);
   }
