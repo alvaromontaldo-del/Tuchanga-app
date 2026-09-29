@@ -21,16 +21,30 @@ import {
   useAcceptClientQuote,
   useClientCompareQuotes,
 } from '../../hooks/useClientQuotes';
+import { openPagoCheckout } from '../../navigation/openPagoCheckout';
 import { formatMoneyAr } from '../../services/clientQuotesSupabase';
+import {
+  confirmarCostoServicioMaterialesMp,
+  crearPreferenciaCostoServicioMateriales,
+} from '../../services/pagosMercadoPago';
 import { quoteFreightDisplay, shownIncludeFreight } from '../../utils/quoteFreightTotal';
 import { formatOrderCodeDisplay } from '../../utils/orderCode';
 import { normalizeDisplayAddress } from '../../utils/formatAddress';
+import { describePaymentStartFailure } from '../../utils/paymentStartError';
 import {
   defaultIncludeFreight,
   defaultSelectedItemIds,
+  duplicateSelectedMaterials,
   groupQuoteItemsByRequest,
+  initialSelectedItemIdsByQuote,
+  isClientSelectableQuote,
   isClientSelectableQuoteItem,
+  materialGroupHeader,
+  pendingFeePayLabel,
+  pendingServiceFeeGroups,
   pickBestQuoteId,
+  variantOptionLabel,
+  variantSelectionControl,
 } from '../../utils/pickBestQuote';
 import type { ClientQuoteCard } from '../../types/materials';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -81,6 +95,7 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
   const [selectedItems, setSelectedItems] = useState<Record<string, Set<string>>>({});
   /** Flete opcional por quoteId (solo si freight_cost > 0) */
   const [includeFreight, setIncludeFreight] = useState<Record<string, boolean>>({});
+  const [payingGroupId, setPayingGroupId] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -119,34 +134,40 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
   useEffect(() => {
     if (readOnly || groups.length === 0) return;
     const signature = groups
-      .map((g) => `${g.rubroId}:${pickBestQuoteId(g.quotes) ?? '-'}`)
+      .map((g) =>
+        g.quotes
+          .filter((q) => isClientSelectableQuote(q))
+          .map((q) => q.quoteId)
+          .sort()
+          .join(','),
+      )
       .join('|');
     const initKey = `${requestId}:${signature}`;
     if (selectionInitRef.current === initKey) return;
     selectionInitRef.current = initKey;
 
+    const defaults = initialSelectedItemIdsByQuote(groups.flatMap((g) => g.quotes));
     setSelectedItems((prev) => {
       const next = { ...prev };
-      for (const g of groups) {
-        const bestId = bestQuoteIdByRubro.get(g.rubroId);
-        if (!bestId || next[bestId]) continue;
-        const card = g.quotes.find((q) => q.quoteId === bestId);
-        if (!card) continue;
-        next[bestId] = defaultSelectedItemIds(card);
+      for (const [quoteId, ids] of Object.entries(defaults)) {
+        if (next[quoteId]) continue;
+        next[quoteId] = ids;
       }
       return next;
     });
     setIncludeFreight((prev) => {
       const next = { ...prev };
       for (const g of groups) {
-        const bestId = bestQuoteIdByRubro.get(g.rubroId);
-        if (!bestId || next[bestId] != null) continue;
-        const card = g.quotes.find((q) => q.quoteId === bestId);
-        if (!card) continue;
-        next[bestId] =
-          card.orderIncludeFreight != null
-            ? card.orderIncludeFreight
-            : defaultIncludeFreight(card);
+        for (const card of g.quotes) {
+          if (!isClientSelectableQuote(card) || next[card.quoteId] != null) continue;
+          const isBest = bestQuoteIdByRubro.get(g.rubroId) === card.quoteId;
+          next[card.quoteId] =
+            card.orderIncludeFreight != null
+              ? card.orderIncludeFreight
+              : isBest
+                ? defaultIncludeFreight(card)
+                : false;
+        }
       }
       return next;
     });
@@ -185,83 +206,90 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
       ),
     [groups],
   );
-  const hasAnyPendingFee = useMemo(
-    () =>
-      groups.some((g) =>
-        g.quotes.some(
-          (q) =>
-            q.orderId != null &&
-            (q.orderStatus === 'pending_deposit' || q.orderStatus === 'pending') &&
-            !q.contactRevealed,
-        ),
-      ),
+  const pendingFeeGroups = useMemo(
+    () => pendingServiceFeeGroups(groups.flatMap((g) => g.quotes)),
     [groups],
   );
+  const hasAnyPendingFee = pendingFeeGroups.length > 0;
 
   const toggleExpand = useCallback((quoteId: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setExpandedId((prev) => (prev === quoteId ? null : quoteId));
   }, []);
 
-  const toggleItem = useCallback((quoteId: string, quoteItemId: string, requestItemId: string) => {
-    setSelectedItems((prev) => {
-      const card = selectableQuotes.find((q) => q.quoteId === quoteId);
-      const current = new Set(prev[quoteId] ?? []);
-      if (current.has(quoteItemId)) {
-        current.delete(quoteItemId);
-      } else {
-        // Una sola variante por ítem pedido.
-        if (card) {
-          for (const it of card.items) {
-            if (it.requestItemId === requestItemId) current.delete(it.quoteItemId);
+  const selectableQuotes = useMemo(
+    () => groups.flatMap((g) => g.quotes.filter((q) => isClientSelectableQuote(q))),
+    [groups],
+  );
+
+  const effectiveSelected = useMemo(() => {
+    if (readOnly) return selectedItems;
+    const defaults = initialSelectedItemIdsByQuote(selectableQuotes);
+    const out: Record<string, Set<string>> = { ...defaults };
+    for (const [quoteId, ids] of Object.entries(selectedItems)) {
+      out[quoteId] = ids;
+    }
+    return out;
+  }, [readOnly, selectableQuotes, selectedItems]);
+
+  const duplicateSelection = useMemo(
+    () => duplicateSelectedMaterials(selectableQuotes, effectiveSelected),
+    [effectiveSelected, selectableQuotes],
+  );
+
+  const toggleItem = useCallback(
+    (quoteId: string, quoteItemId: string, requestItemId: string) => {
+      setSelectedItems((prev) => {
+        const card = selectableQuotes.find((q) => q.quoteId === quoteId);
+        const current = new Set(prev[quoteId] ?? (card ? defaultSelectedItemIds(card) : []));
+        if (current.has(quoteItemId)) {
+          current.delete(quoteItemId);
+        } else {
+          // Una sola variante por material dentro de la tarjeta.
+          if (card) {
+            for (const it of card.items) {
+              if (it.requestItemId === requestItemId) current.delete(it.quoteItemId);
+            }
           }
+          current.add(quoteItemId);
         }
-        current.add(quoteItemId);
-      }
-      return { ...prev, [quoteId]: current };
-    });
-  }, [selectableQuotes]);
+        return { ...prev, [quoteId]: current };
+      });
+    },
+    [selectableQuotes],
+  );
 
   const ensureDefaults = useCallback(
     (card: ClientQuoteCard, rubroId: string) => {
       const isBest = bestQuoteIdByRubro.get(rubroId) === card.quoteId;
       setSelectedItems((prev) => {
-        if (prev[card.quoteId]) return prev;
+        if (prev[card.quoteId] || !isClientSelectableQuote(card)) return prev;
         return {
           ...prev,
-          [card.quoteId]: isBest ? defaultSelectedItemIds(card) : new Set<string>(),
+          [card.quoteId]: defaultSelectedItemIds(card),
         };
       });
       setIncludeFreight((prev) => {
         if (prev[card.quoteId] != null) return prev;
         return {
           ...prev,
-          [card.quoteId]: isBest ? defaultIncludeFreight(card) : false,
+          [card.quoteId]:
+            card.orderIncludeFreight != null
+              ? card.orderIncludeFreight
+              : isBest
+                ? defaultIncludeFreight(card)
+                : false,
         };
       });
     },
     [bestQuoteIdByRubro],
   );
 
-  const selectableQuotes = useMemo(() => {
-    return groups.flatMap((g) =>
-      g.quotes.filter(
-        (q) =>
-          q.status === 'sent' &&
-          !q.contactRevealed &&
-          !(
-            q.orderId &&
-            (q.orderStatus === 'pending_deposit' || q.orderStatus === 'pending')
-          ),
-      ),
-    );
-  }, [groups]);
-
   const cartPreview = useMemo(() => {
     let materials = 0;
     let stores = 0;
     for (const card of selectableQuotes) {
-      const ids = selectedItems[card.quoteId];
+      const ids = effectiveSelected[card.quoteId];
       if (!ids || ids.size === 0) continue;
       const lines = card.items.filter(
         (it) => ids.has(it.quoteItemId) && isClientSelectableQuoteItem(it),
@@ -280,7 +308,7 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
       if (freightOn) materials += card.freightCost;
     }
     return { materials, stores };
-  }, [bestQuoteIdByRubro, selectableQuotes, selectedItems, includeFreight]);
+  }, [bestQuoteIdByRubro, effectiveSelected, selectableQuotes, includeFreight]);
 
   const goToSummary = useCallback(() => {
     if (readOnly || requestCompleted) return;
@@ -289,7 +317,7 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
 
     for (const card of selectableQuotes) {
       ensureDefaults(card, card.groupRubroId);
-      const ids = Array.from(selectedItems[card.quoteId] ?? []);
+      const ids = Array.from(effectiveSelected[card.quoteId] ?? []);
       const hasFreight =
         card.freightType === 'cost' &&
         card.freightCost > 0 &&
@@ -347,6 +375,7 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
     });
   }, [
     bestQuoteIdByRubro,
+    effectiveSelected,
     ensureDefaults,
     includeFreight,
     navigation,
@@ -354,17 +383,44 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
     requestCompleted,
     requestId,
     selectableQuotes,
-    selectedItems,
     toast,
   ]);
 
-  const handlePendingPay = useCallback(
-    (card: ClientQuoteCard) => {
-      if (card.orderId) {
-        (navigation as any).navigate('MaterialOrderDetail', { orderId: card.orderId });
+  const payPendingGroup = useCallback(
+    async (group: (typeof pendingFeeGroups)[number]) => {
+      if (payingGroupId) return;
+      const orderId = group.primaryOrderId;
+      setPayingGroupId(group.groupKey);
+      try {
+        const synced = await confirmarCostoServicioMaterialesMp(orderId);
+        if (synced.ok || synced.already_paid) {
+          toast.success('Costo de servicio acreditado.', 'Pago');
+          refresh();
+          return;
+        }
+        const result = await crearPreferenciaCostoServicioMateriales(orderId);
+        if (!result.ok) {
+          throw new Error(
+            result.code === 'mp_not_configured'
+              ? 'Mercado Pago no está configurado. No se puede acreditar sin pago.'
+              : result.message,
+          );
+        }
+        openPagoCheckout({
+          materialOrderId: orderId,
+          checkoutUrl: result.data.checkout_url,
+          sandbox: Boolean(result.data.sandbox),
+        });
+        toast.success(`Costo de servicio: ${formatMoneyAr(group.serviceFee)}`, 'Ir a pagar');
+      } catch (e) {
+        const failure = describePaymentStartFailure(e);
+        console.error('[ClientCompareQuotes] iniciar pago', failure.cause, e);
+        toast.error(failure.userMessage, 'Error');
+      } finally {
+        setPayingGroupId(null);
       }
     },
-    [navigation],
+    [payingGroupId, refresh, toast],
   );
 
   const handleReject = useCallback(
@@ -423,7 +479,9 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
         stickySectionHeadersEnabled
         contentContainerStyle={[
           styles.list,
-          !readOnly && cartPreview.stores > 0 ? { paddingBottom: 120 } : null,
+          !readOnly && cartPreview.stores > 0
+            ? { paddingBottom: duplicateSelection.labels.length > 0 ? 156 : 120 }
+            : null,
         ]}
         ListHeaderComponent={
           <View style={styles.header}>
@@ -436,10 +494,40 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
                 : 'Elegí ítems de uno o varios comercios (y el flete si aplica). Vas a un resumen con un solo pago del costo de servicio YaChanga.'}
             </Text>
             {isClientView && hasAnyPendingFee ? (
-              <Text style={styles.acceptedBanner}>
-                Tenés órdenes con costo de servicio pendiente. Pagalo para confirmar la
-                cotización y ver los datos del comercio.
-              </Text>
+              <View style={styles.pendingFeeBox}>
+                <Text style={styles.acceptedBanner}>
+                  Tenés órdenes con costo de servicio pendiente. Pagalo para confirmar la
+                  cotización y ver los datos del comercio.
+                </Text>
+                {pendingFeeGroups.map((group) => {
+                  const label = pendingFeePayLabel(
+                    formatMoneyAr(group.serviceFee),
+                    group.storeCount,
+                    pendingFeeGroups.length,
+                  );
+                  const busy = payingGroupId === group.groupKey;
+                  return (
+                    <Pressable
+                      key={group.groupKey}
+                      onPress={() => void payPendingGroup(group)}
+                      disabled={payingGroupId != null}
+                      style={({ pressed }) => [
+                        styles.pendingPayBtn,
+                        payingGroupId != null && styles.acceptBtnDisabled,
+                        pressed && payingGroupId == null && styles.acceptBtnPressed,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={label}
+                    >
+                      {busy ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={styles.acceptBtnText}>{label}</Text>
+                      )}
+                    </Pressable>
+                  );
+                })}
+              </View>
             ) : null}
             {isClientView && hasAnyFeePaid ? (
               <Text style={styles.acceptedBanner}>
@@ -480,12 +568,8 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
               ensureDefaults(item, section.rubroId);
               toggleExpand(item.quoteId);
             }}
-            selectedItemIds={
-              selectedItems[item.quoteId] ??
-              (bestQuoteIdByRubro.get(section.rubroId) === item.quoteId
-                ? defaultSelectedItemIds(item)
-                : new Set<string>())
-            }
+            selectedItemIds={effectiveSelected[item.quoteId] ?? new Set<string>()}
+            duplicatedRequestItemIds={duplicateSelection.requestItemIds}
             includeFreight={shownIncludeFreight(
               item,
               includeFreight[item.quoteId],
@@ -504,7 +588,6 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
               ensureDefaults(item, section.rubroId);
               toggleItem(item.quoteId, quoteItemId, requestItemId);
             }}
-            onPayPending={() => handlePendingPay(item)}
             onOpenOrder={() => {
               if (item.orderId) {
                 (navigation as any).navigate('MaterialOrderDetail', { orderId: item.orderId });
@@ -526,8 +609,14 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
       {!readOnly && !requestCompleted && cartPreview.stores > 0 ? (
         <View style={styles.cartBar}>
           <Text style={styles.cartMeta}>
-            {cartPreview.stores} comercio{cartPreview.stores === 1 ? '' : 's'}
+            {cartPreview.stores} comercio{cartPreview.stores === 1 ? '' : 's'} · Total materiales{' '}
+            {formatMoneyAr(cartPreview.materials)}
           </Text>
+          {duplicateSelection.labels.length > 0 ? (
+            <Text style={styles.cartHint}>
+              {duplicateSelection.labels.join(' · ')}: seleccionado en más de un comercio
+            </Text>
+          ) : null}
           <Pressable
             onPress={goToSummary}
             style={({ pressed }) => [styles.cartBtn, pressed && styles.acceptBtnPressed]}
@@ -549,12 +638,12 @@ const QuoteCard = memo(function QuoteCard({
   isClosest,
   expanded,
   onToggleDetail,
-  onPayPending,
   onOpenOrder,
   onReject,
   accepting,
   disabledActions,
   selectedItemIds,
+  duplicatedRequestItemIds,
   onToggleItem,
   includeFreight,
   onToggleFreight,
@@ -565,12 +654,12 @@ const QuoteCard = memo(function QuoteCard({
   isClosest: boolean;
   expanded: boolean;
   onToggleDetail: () => void;
-  onPayPending: () => void;
   onOpenOrder: () => void;
   onReject: () => void;
   accepting: boolean;
   disabledActions: boolean;
   selectedItemIds: Set<string>;
+  duplicatedRequestItemIds: Set<string>;
   onToggleItem: (quoteItemId: string, requestItemId: string) => void;
   includeFreight: boolean;
   onToggleFreight: () => void;
@@ -709,6 +798,12 @@ const QuoteCard = memo(function QuoteCard({
           <Text style={styles.distanceText}>{distanceText}</Text>
         </View>
       ) : null}
+      <View style={styles.hoursRow}>
+        <Text style={styles.distancePin}>🕐</Text>
+        <Text style={styles.hoursText}>
+          {card.openingHoursLabel ? `Horario: ${card.openingHoursLabel}` : 'Horario no informado'}
+        </Text>
+      </View>
 
       <View style={styles.totalsBox}>
         <RowLine label="Materiales" value={formatMoneyAr(card.materialsSubtotal)} />
@@ -762,23 +857,22 @@ const QuoteCard = memo(function QuoteCard({
         <View style={styles.detailPanel}>
           {groupQuoteItemsByRequest(card.items).map((group) => {
             const variants = group.variants;
-            const multi = variants.length > 1;
+            const control = variantSelectionControl(variants.length);
+            const selectedHere = variants.some((it) => selectedItemIds.has(it.quoteItemId));
             return (
               <View key={group.requestItemId} style={styles.detailGroup}>
-                {multi ? (
-                  <Text style={styles.detailDesc} numberOfLines={3}>
-                    {group.description}
-                  </Text>
+                <Text style={styles.detailDesc} numberOfLines={3}>
+                  {materialGroupHeader(group)}
+                </Text>
+                {selectedHere && duplicatedRequestItemIds.has(group.requestItemId) ? (
+                  <Text style={styles.duplicateHint}>También seleccionado en otro comercio</Text>
                 ) : null}
                 {variants.map((it) => {
                   const selected = selectedItemIds.has(it.quoteItemId);
                   const decided =
                     it.clientDecision === 'accepted' || it.clientDecision === 'rejected';
                   const itemSelectable = canSelectItems && isClientSelectableQuoteItem(it);
-                  const label =
-                    it.variantLabel?.trim() ||
-                    (!it.inStock ? it.alternativeDescription?.trim() : '') ||
-                    (multi ? `Opción ${it.variantIndex}` : it.description);
+                  const label = variantOptionLabel(it);
                   return (
                     <Pressable
                       key={it.quoteItemId}
@@ -796,7 +890,7 @@ const QuoteCard = memo(function QuoteCard({
                           name={
                             !itemSelectable
                               ? 'close-circle-outline'
-                              : multi
+                              : control === 'radio'
                                 ? selected
                                   ? 'radio-button-on'
                                   : 'radio-button-off'
@@ -891,25 +985,7 @@ const QuoteCard = memo(function QuoteCard({
           >
             <Text style={styles.rejectBtnText}>Rechazar toda</Text>
           </Pressable>
-          {awaitsFeePayment ? (
-            <Pressable
-              onPress={onPayPending}
-              disabled={accepting}
-              style={({ pressed }) => [
-                styles.acceptBtn,
-                accepting && styles.acceptBtnDisabled,
-                pressed && !accepting && styles.acceptBtnPressed,
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="Pagar costo de servicio"
-            >
-              {accepting ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.acceptBtnText}>Pagar costo de servicio</Text>
-              )}
-            </Pressable>
-          ) : (
+          {awaitsFeePayment ? null : (
             <View style={styles.acceptBtnHint}>
               <Text style={styles.acceptBtnHintText}>
                 Marcá ítems y usá Continuar al resumen
@@ -1127,7 +1203,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     marginTop: 10,
-    marginBottom: 12,
   },
   distancePin: { fontSize: 14 },
   distanceText: {
@@ -1135,6 +1210,41 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.primary,
     fontVariant: ['tabular-nums'],
+  },
+  hoursRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 4,
+    marginTop: 6,
+    marginBottom: 12,
+  },
+  hoursText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  duplicateHint: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#92400E',
+  },
+  pendingFeeBox: {
+    gap: 8,
+  },
+  pendingPayBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: radii.button,
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  cartHint: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#92400E',
+    textAlign: 'center',
   },
   totalsBox: {
     backgroundColor: colors.background,

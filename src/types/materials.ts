@@ -232,6 +232,18 @@ export type ClientQuoteCard = {
   notes: string;
   items: ClientQuoteLineItem[];
   createdAt: string;
+  /** Horario de atención ya formateado. null si el comercio no lo cargó. */
+  openingHoursLabel: string | null;
+  /** `orders.payment_group_id` (id de material_checkouts). null si la orden es suelta. */
+  paymentGroupId: string | null;
+  /**
+   * `orders.deposit_amount` de ESTA orden.
+   * En un grupo cada hermana guarda el fee completo: no sumarlas.
+   */
+  depositAmount: number | null;
+  orderCreatedAt: string | null;
+  /** `material_checkouts.service_fee` del grupo. null si no se pudo leer. */
+  checkoutServiceFee: number | null;
 };
 
 export type ClientQuoteRubroGroup = {
