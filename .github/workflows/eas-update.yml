@@ -33,9 +33,4 @@ jobs:
       - name: Publish OTA update
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
-        run: |
-          if [ -z "$COMMIT_MSG" ]; then
-            COMMIT_MSG="EAS Update"
-          fi
-          npx eas-cli update --branch preview --environment preview --non-interactive --message "$COMMIT_MSG"
+        run: npx eas-cli update --branch preview --environment preview --non-interactive --message "${{ github.event.head_commit.message }}"

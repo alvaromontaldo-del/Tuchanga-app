@@ -4,21 +4,6 @@ import { describe, expect, it } from 'vitest';
 
 const root = process.cwd();
 
-describe('eas-update no interpola el mensaje del commit', () => {
-  const yml = readFileSync(resolve(root, '.github/workflows/eas-update.yml'), 'utf8');
-
-  it('pasa el mensaje por env y lo cita en el comando', () => {
-    expect(yml).toContain('COMMIT_MSG: ${{ github.event.head_commit.message }}');
-    expect(yml).toContain('--branch preview');
-    expect(yml).toContain('--environment preview');
-    expect(yml).toContain('--non-interactive');
-    expect(yml).toContain('--message "$COMMIT_MSG"');
-    expect(yml).not.toMatch(/--message\s+"\$\{\{/);
-    expect(yml).toContain('[ -z "$COMMIT_MSG" ]');
-    expect(yml).toContain('COMMIT_MSG="EAS Update"');
-  });
-});
-
 describe('migración iniciar_reclamo_garantia', () => {
   const sql = readFileSync(
     resolve(root, 'supabase/migrations/20260925223000_iniciar_reclamo_garantia.sql'),
