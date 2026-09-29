@@ -84,12 +84,7 @@ import {
   obtenerPinCliente,
   rechazarDisponibilidad,
 } from '../../services/contratacionesSupabase';
-import {
-  fetchClosedClaimChatIds,
-  subscribeClaimChatLock,
-} from '../../services/claimChatSupabase';
 import type { DisponibilidadOpcion } from '../../types/contrataciones';
-import { isMercadoPagoEnabled } from '../../config/mercadoPago';
 import { openPagoCheckout } from '../../navigation/openPagoCheckout';
 import { crearPreferenciaSeña, sincronizarSeñaSiPendiente } from '../../services/pagosMercadoPago';
 import { computeSaldoPendiente } from '../../types/contrataciones';
@@ -287,8 +282,9 @@ export function ChatScreen({
   }, [participants]);
 
   const chatBlocked = blockStatus.iBlockedThem || blockStatus.theyBlockedMe;
-  const [chatClosedByClaim, setChatClosedByClaim] = useState(false);
-  const [claimLockLoading, setClaimLockLoading] = useState(() => isSupabaseConfigured());
+  // El hilo sale de Mensajes cuando el servidor pone deleted_at. No se aplica acá la regla vieja de #55.
+  const chatClosedByClaim = false;
+  const claimLockLoading = false;
 
   const refreshBlockStatus = useCallback(async () => {
     if (!otherUserId || !isSupabaseConfigured()) {
@@ -309,33 +305,6 @@ export function ChatScreen({
   useEffect(() => {
     void refreshBlockStatus();
   }, [refreshBlockStatus]);
-
-  useEffect(() => {
-    if (!isSupabaseConfigured() || !conversationId) {
-      setChatClosedByClaim(false);
-      setClaimLockLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setClaimLockLoading(true);
-    void fetchClosedClaimChatIds([conversationId])
-      .then((ids) => {
-        if (!cancelled) setChatClosedByClaim(ids.has(conversationId));
-      })
-      .catch(() => {
-        if (!cancelled) setChatClosedByClaim(false);
-      })
-      .finally(() => {
-        if (!cancelled) setClaimLockLoading(false);
-      });
-    const unsub = subscribeClaimChatLock(conversationId, (closed) => {
-      if (!cancelled) setChatClosedByClaim(closed);
-    });
-    return () => {
-      cancelled = true;
-      unsub();
-    };
-  }, [conversationId]);
 
   const handleBlockUser = useCallback(() => {
     if (!otherUserId) return;
@@ -2007,8 +1976,8 @@ export function ChatScreen({
               onPress={() => {
                 if (quoteBusy !== 'none') return;
                 // Checkout de la seña de esta contratación (PagoCheckout / Mercado Pago).
-                // Sin EXPO_PUBLIC_MP_ENABLED el botón decía «Ver pago» y abría Detalle del servicio,
-                // que no tiene CTA de pago. No es el flujo de materiales ni «Ver servicio».
+                // La etiqueta es fija y no depende del flag de Mercado Pago de la OTA.
+                // No es el flujo de materiales ni «Ver servicio».
                 setQuoteBusy('paid');
                 void (async () => {
                   try {
@@ -2047,9 +2016,7 @@ export function ChatScreen({
               accessibilityRole="button"
               accessibilityLabel="Pagar costo de servicio de YaChanga"
             >
-              <Text style={styles.payBtnText}>
-                {isMercadoPagoEnabled() ? 'Pagar costo de servicio' : 'Ver pago'}
-              </Text>
+              <Text style={styles.payBtnText}>Pagar</Text>
             </Pressable>
           </View>
         ) : null}
@@ -2715,7 +2682,7 @@ export function ChatScreen({
             </Pressable>
 
             <View style={styles.headerIdentity}>
-              <View style={styles.headerNameChipsRow}>
+              <View style={styles.headerNameColumn}>
                 {profileWorkerId ? (
                   <Pressable
                     onPress={openWorkerProfile}
@@ -2737,68 +2704,66 @@ export function ChatScreen({
                     {displayName}
                   </Text>
                 )}
-                {isSupabaseConfigured() && participants?.myRole === 'trabajador' && !chatBlocked ? (
-                  <View style={styles.headerChipsContainer}>
-                    <View style={styles.headerChipsInline}>
-                      <Pressable
-                        onPress={() => {
-                          if (hasActiveJob) {
-                            toast.warning('Ya hay un trabajo activo en este chat.', 'Trabajo');
-                            return;
-                          }
-                          setQuoteModalOpen(true);
-                          setReplacesQuoteId(null);
-                          setQuoteNetAmount(0);
-                          setQuoteNetText('');
-                          setQuoteDetail('');
-                          setIncluyeGarantia(false);
-                          setWarrantyDaysText('');
-                        }}
-                        accessibilityRole="button"
-                        accessibilityLabel="Cotizar"
-                        hitSlop={4}
-                        style={({ pressed }) => [
-                          styles.headerActionChip,
-                          hasActiveJob && styles.modalBtnDisabled,
-                          pressed && styles.pressed,
-                        ]}
-                        disabled={hasActiveJob}
-                      >
-                        <Ionicons name="calculator-outline" size={14} color={colors.text} />
-                        <Text style={styles.headerActionChipText}>Cotizar</Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => {
-                          if (!participants.clientId) {
-                            toast.warning('No se pudo identificar al cliente de este chat.', 'Materiales');
-                            return;
-                          }
-                          (navigation as any).navigate('CreateMaterialRequest', {
-                            clientId: participants.clientId,
-                            conversationId,
-                          });
-                        }}
-                        accessibilityRole="button"
-                        accessibilityLabel="Cotizaciones de materiales"
-                        hitSlop={4}
-                        style={({ pressed }) => [styles.headerActionChip, pressed && styles.pressed]}
-                      >
-                        <Ionicons name="clipboard-outline" size={14} color={colors.text} />
-                        <Text style={styles.headerActionChipText}>Materiales</Text>
-                      </Pressable>
-                    </View>
-                  </View>
+                {headerSubtitle ? (
+                  <Text style={styles.headerTrade} numberOfLines={1} ellipsizeMode="tail">
+                    {headerSubtitle}
+                  </Text>
+                ) : null}
+                {!isSupabaseConfigured() && !connected ? (
+                  <Text style={styles.headerWarn} numberOfLines={1}>
+                    Reconectando…
+                  </Text>
                 ) : null}
               </View>
-              {headerSubtitle ? (
-                <Text style={styles.headerTrade} numberOfLines={1} ellipsizeMode="tail">
-                  {headerSubtitle}
-                </Text>
-              ) : null}
-              {!isSupabaseConfigured() && !connected ? (
-                <Text style={styles.headerWarn} numberOfLines={1}>
-                  Reconectando…
-                </Text>
+              {isSupabaseConfigured() && participants?.myRole === 'trabajador' && !chatBlocked ? (
+                <View style={styles.headerChipsInline}>
+                  <Pressable
+                    onPress={() => {
+                      if (hasActiveJob) {
+                        toast.warning('Ya hay un trabajo activo en este chat.', 'Trabajo');
+                        return;
+                      }
+                      setQuoteModalOpen(true);
+                      setReplacesQuoteId(null);
+                      setQuoteNetAmount(0);
+                      setQuoteNetText('');
+                      setQuoteDetail('');
+                      setIncluyeGarantia(false);
+                      setWarrantyDaysText('');
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cotizar"
+                    hitSlop={4}
+                    style={({ pressed }) => [
+                      styles.headerActionChip,
+                      hasActiveJob && styles.modalBtnDisabled,
+                      pressed && styles.pressed,
+                    ]}
+                    disabled={hasActiveJob}
+                  >
+                    <Ionicons name="calculator-outline" size={14} color={colors.text} />
+                    <Text style={styles.headerActionChipText}>Cotizar</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      if (!participants.clientId) {
+                        toast.warning('No se pudo identificar al cliente de este chat.', 'Materiales');
+                        return;
+                      }
+                      (navigation as any).navigate('CreateMaterialRequest', {
+                        clientId: participants.clientId,
+                        conversationId,
+                      });
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cotizaciones de materiales"
+                    hitSlop={4}
+                    style={({ pressed }) => [styles.headerActionChip, pressed && styles.pressed]}
+                  >
+                    <Ionicons name="clipboard-outline" size={14} color={colors.text} />
+                    <Text style={styles.headerActionChipText}>Materiales</Text>
+                  </Pressable>
+                </View>
               ) : null}
             </View>
 
@@ -2928,36 +2893,31 @@ const styles = StyleSheet.create({
     width: '100%',
     minHeight: 44,
   },
+  /** Fila: [columna nombre + subtítulo] [chips centrados en vertical]. */
   headerIdentity: {
     flex: 1,
     minWidth: 0,
     marginHorizontal: spacing.xs,
-    justifyContent: 'center',
-  },
-  headerNameChipsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'nowrap',
-    gap: 6,
+  },
+  headerNameColumn: {
+    flex: 1,
     minWidth: 0,
+    justifyContent: 'center',
   },
   headerNamePressable: {
     flexShrink: 1,
     minWidth: 0,
-    maxWidth: '42%',
-  },
-  /** Contenedor: centrado vertical + chips hacia la derecha. */
-  headerChipsContainer: {
-    flex: 1,
-    minWidth: 0,
-    justifyContent: 'center',
-    alignItems: 'flex-end',
+    alignSelf: 'stretch',
   },
   headerChipsInline: {
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'center',
     gap: 4,
     flexShrink: 0,
+    marginLeft: 6,
   },
   headerIconCluster: {
     flexDirection: 'row',

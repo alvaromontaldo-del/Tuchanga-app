@@ -43,9 +43,8 @@ async function loadClaimRows(conversationIds: string[]): Promise<Map<string, Cla
 }
 
 /**
- * Hilos que salen de Mensajes por la regla de #55: hubo reclamo, todos
- * terminaron con conformidad y ninguna contratación vinculada sigue en
- * curso o con reclamo abierto o pendiente. Si la consulta falla, no oculta.
+ * Quedó de la regla anterior de #55. La lista de Mensajes no la usa:
+ * el servidor borra el hilo con hide_pair_chats_if_done.
  */
 export async function fetchClosedClaimChatIds(conversationIds: string[]): Promise<Set<string>> {
   const grouped = await loadClaimRows(conversationIds);

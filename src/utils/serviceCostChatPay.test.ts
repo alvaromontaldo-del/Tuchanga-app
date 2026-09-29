@@ -9,7 +9,7 @@ function exportBody(src: string, name: string): string {
 }
 
 describe('pago del costo de servicio desde el chat', () => {
-  it('«Ver pago» abre el checkout de la seña y no el detalle ni materiales', () => {
+  it('«Pagar» abre el checkout de la seña y no el detalle ni materiales', () => {
     const src = readFileSync('src/screens/chat/ChatScreen.tsx', 'utf8');
     const start = src.indexOf('Costo de servicio pendiente');
     expect(start).toBeGreaterThan(-1);
@@ -17,7 +17,12 @@ describe('pago del costo de servicio desde el chat', () => {
     expect(end).toBeGreaterThan(start);
     const card = src.slice(start, end);
 
-    expect(card).toContain('Ver pago');
+    expect(card).toContain('Pagar');
+    expect(card).not.toContain('Ver pago');
+    expect(card).toContain('>Pagar</Text>');
+    expect(card).not.toContain('isMercadoPagoEnabled');
+    expect(card).toContain('accessibilityLabel="Pagar costo de servicio de YaChanga"');
+    expect(card).toContain('sincronizarSeñaSiPendiente(job.id)');
     expect(card).toContain('crearPreferenciaSeña(job.id)');
     expect(card).toContain('openPagoCheckout(');
     expect(card).toContain('contratacionId: job.id');

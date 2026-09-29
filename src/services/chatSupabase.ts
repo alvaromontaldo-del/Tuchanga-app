@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../lib/supabase';
 import { removeSupabaseRealtimeTopic, removeSupabaseRealtimeTopicAsync } from '../lib/supabaseRealtime';
-import { fetchClosedClaimChatIds } from './claimChatSupabase';
 import { jobKeepsChatOpen } from '../utils/claimChatVisibility';
 import { claimInboxRowLabel, warrantyClaimEventFecha } from '../utils/warrantyClaimChat';
 import { dedupeInboxByPeer } from '../utils/inboxPeers';
@@ -207,7 +206,6 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
 
   if (!activeConvs.length) return [];
 
-  const closedClaimIds = await fetchClosedClaimChatIds(activeConvs.map((c) => c.id));
   const claimLabelByConversation = await loadClaimRowLabels(
     sb,
     activeConvs
@@ -263,7 +261,7 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
   }
 
   for (const c of activeConvs) {
-    if (hiddenIds.has(c.id) || closedClaimIds.has(c.id)) continue;
+    if (hiddenIds.has(c.id)) continue;
 
     const myRole: ConversationRole = c.cliente_id === user.id ? 'cliente' : 'trabajador';
     const otherId = myRole === 'cliente' ? c.trabajador_id : c.cliente_id;

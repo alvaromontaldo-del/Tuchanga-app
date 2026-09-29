@@ -1052,33 +1052,6 @@ export type MaterialOrderReveal = {
   contactRevealed: boolean;
 };
 
-export async function confirmarSenaMaterialOrden(orderId: string): Promise<MaterialOrderReveal> {
-  const sb = getSupabaseClient();
-  await sb.auth.getSession();
-  const { data, error } = await sb.rpc('confirmar_sena_material_orden', {
-    p_order_id: orderId,
-  });
-  if (error) throw error;
-  const row = Array.isArray(data) ? data[0] : data;
-  if (!row) throw new Error('No se pudo confirmar el costo de servicio.');
-  const fee = Number(row.deposit_amount) || 0;
-  return {
-    orderId: String(row.order_id),
-    orderCode: row.order_code != null ? String(row.order_code) : null,
-    status: 'deposit_paid',
-    depositStatus: 'paid',
-    serviceFee: fee,
-    depositAmount: fee,
-    acceptedTotal: 0,
-    verificationPin: row.verification_pin != null ? String(row.verification_pin) : null,
-    storeName: String(row.store_name ?? 'Comercio'),
-    storePhone: row.store_phone != null ? String(row.store_phone) : null,
-    storeAddress:
-      row.store_address != null ? formatClientStoreAddress(String(row.store_address)) : null,
-    contactRevealed: true,
-  };
-}
-
 function mapMaterialOrderRevealError(error: { message?: string }): Error {
   const msg = String(error.message ?? '');
   if (/not_authenticated/i.test(msg)) {

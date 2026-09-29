@@ -11,7 +11,53 @@ import {
 import { normalizeDisplayAddress } from '../utils/formatAddress';
 import { assertWarrantyDays } from '../utils/warrantyDays';
 
-const CONTRATACION_SELECT = '*';
+/**
+ * Todas las columnas actuales de `contrataciones` menos `verification_pin`.
+ * El PIN del cliente sale de `obtener_pin_cliente` / `verificar_pin`.
+ * Tiene que coincidir con el GRANT de fase 2 en
+ * `supabase/20260929_p0_pii_pin_card_62_64.sql`.
+ */
+const CONTRATACION_SELECT = [
+  'id',
+  'conversation_id',
+  'worker_id',
+  'client_id',
+  'precio_trabajador',
+  'precio_final',
+  'comision_app',
+  'service_detail',
+  'estado_trabajo',
+  'estado_pago',
+  'fecha_trabajo',
+  'hora_inicio',
+  'hora_fin',
+  'pin_intentos_fallidos',
+  'pin_bloqueado_hasta',
+  'recotizacion_precio_trabajador',
+  'recotizacion_precio_final',
+  'recotizacion_comision_app',
+  'paid_at',
+  'seña_pagada_at',
+  'completed_by_worker_at',
+  'finalizado_at',
+  'cancelado_at',
+  'conformidad_solicitada_at',
+  'conformidad_respondida_at',
+  'conformidad_aceptada',
+  'is_claim_open',
+  'claim_status',
+  'claim_opened_at',
+  'claim_marked_done_at',
+  'claim_resolved_at',
+  'offline_pago_notificado_at',
+  'offline_pago_confirmado_at',
+  'disputa_motivo',
+  'chat_archived_at',
+  'warranty_days',
+  'warranty_anchor_at',
+  'created_at',
+  'updated_at',
+].join(',');
 
 function toNum(v: unknown): number {
   const n = typeof v === 'number' ? v : Number(v);
@@ -54,7 +100,16 @@ function throwContratacionRpcError(
   throw new Error(msg && msg.length > 0 ? msg : fallback);
 }
 
+function contratacionRows(data: unknown): Record<string, unknown>[] {
+  return data as Record<string, unknown>[];
+}
+
+function contratacionRow(data: unknown): Record<string, unknown> {
+  return data as Record<string, unknown>;
+}
+
 function mapContratacionRow(r: Record<string, unknown>): Contratacion {
+  // No leer verification_pin: ni el select ni el payload de realtime lo usan.
   return {
     id: String(r.id),
     conversation_id: String(r.conversation_id),
@@ -153,7 +208,7 @@ export async function fetchContratacionesByConversation(
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: true });
   if (error || !data) return [];
-  return (data as Record<string, unknown>[]).map(mapContratacionRow);
+  return contratacionRows(data).map(mapContratacionRow);
 }
 
 export async function fetchContratacionById(id: string): Promise<Contratacion | null> {
@@ -164,7 +219,7 @@ export async function fetchContratacionById(id: string): Promise<Contratacion | 
     .eq('id', id)
     .maybeSingle();
   if (error || !data) return null;
-  return mapContratacionRow(data as Record<string, unknown>);
+  return mapContratacionRow(contratacionRow(data));
 }
 
 /** Contratación activa (no finalizada, cancelada ni en disputa) del hilo. */
@@ -181,7 +236,7 @@ export async function fetchContratacionActivaByConversation(
     .limit(1)
     .maybeSingle();
   if (error || !data) return null;
-  return mapContratacionRow(data as Record<string, unknown>);
+  return mapContratacionRow(contratacionRow(data));
 }
 
 /** Última contratación “en curso de servicio” (post aceptación de precio). */
@@ -198,7 +253,7 @@ export async function fetchLatestContratacionServicioByConversation(
     .limit(1)
     .maybeSingle();
   if (error || !data) return null;
-  return mapContratacionRow(data as Record<string, unknown>);
+  return mapContratacionRow(contratacionRow(data));
 }
 
 export async function fetchContratacionesByUser(params: {
@@ -224,7 +279,7 @@ export async function fetchContratacionesByUser(params: {
 
   const { data, error } = await query;
   if (error || !data) return [];
-  return (data as Record<string, unknown>[]).map(mapContratacionRow);
+  return contratacionRows(data).map(mapContratacionRow);
 }
 
 export type AgendaClienteInfo = {
@@ -233,28 +288,71 @@ export type AgendaClienteInfo = {
   detallesUbicacion: string | null;
 };
 
+type JobClientLocationRow = {
+  direccion_texto?: string | null;
+  detalles_ubicacion?: string | null;
+};
+
+function firstLocationRow(data: unknown): JobClientLocationRow | null {
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || typeof row !== 'object') return null;
+  return row as JobClientLocationRow;
+}
+
+/**
+ * Nombre del cliente desde `profiles` (no es PII revocada).
+ * Domicilio solo vía `get_job_client_location`: el RPC lo devuelve si
+ * auth.uid() es el trabajador y la seña o el total ya está pago.
+ */
 export async function fetchAgendaClienteInfoByIds(
-  clientIds: string[],
+  jobs: Array<Pick<Contratacion, 'id' | 'client_id'>>,
 ): Promise<Record<string, AgendaClienteInfo>> {
-  const uniqueIds = Array.from(new Set(clientIds.filter(Boolean)));
-  if (!uniqueIds.length) return {};
+  const uniqueClientIds = Array.from(new Set(jobs.map((job) => job.client_id).filter(Boolean)));
+  if (!uniqueClientIds.length) return {};
 
   const sb = getSupabaseClient();
-  const { data, error } = await sb
-    .from('profiles')
-    .select('id,nombre,direccion_texto,detalles_ubicacion')
-    .in('id', uniqueIds);
-  if (error || !data) return {};
-
   const map: Record<string, AgendaClienteInfo> = {};
-  for (const row of data as Record<string, unknown>[]) {
-    const id = String(row.id);
-    map[id] = {
-      firstName: String(row.nombre ?? '').trim() || 'Cliente',
-      direccionTexto: normalizeDisplayAddress(String(row.direccion_texto ?? '')) || null,
-      detallesUbicacion: String(row.detalles_ubicacion ?? '').trim() || null,
-    };
+  for (const id of uniqueClientIds) {
+    map[id] = { firstName: 'Cliente', direccionTexto: null, detallesUbicacion: null };
   }
+
+  const { data, error } = await sb.from('profiles').select('id,nombre').in('id', uniqueClientIds);
+  if (!error && data) {
+    for (const row of data as Record<string, unknown>[]) {
+      const id = String(row.id);
+      const info = map[id];
+      if (!info) continue;
+      info.firstName = String(row.nombre ?? '').trim() || 'Cliente';
+    }
+  }
+
+  const seen = new Set<string>();
+  let warned = false;
+  await Promise.all(
+    jobs.map(async (job) => {
+      if (!job.id || !job.client_id || seen.has(job.id)) return;
+      seen.add(job.id);
+      const { data: loc, error: locError } = await sb.rpc('get_job_client_location', {
+        p_contratacion_id: job.id,
+      });
+      if (locError) {
+        if (!warned) {
+          warned = true;
+          console.warn('[get_job_client_location]', locError.message);
+        }
+        return;
+      }
+      const row = firstLocationRow(loc);
+      if (!row) return;
+      const info = map[job.client_id];
+      if (!info) return;
+      const address = normalizeDisplayAddress(String(row.direccion_texto ?? '')) || null;
+      if (address) info.direccionTexto = address;
+      const details = String(row.detalles_ubicacion ?? '').trim() || null;
+      if (details) info.detallesUbicacion = details;
+    }),
+  );
+
   return map;
 }
 
@@ -274,7 +372,7 @@ export async function fetchContratacionesAgendaWorkerProgramadas(
     .order('fecha_trabajo', { ascending: true })
     .order('hora_inicio', { ascending: true });
   if (error || !data) return [];
-  return (data as Record<string, unknown>[]).map(mapContratacionRow);
+  return contratacionRows(data).map(mapContratacionRow);
 }
 
 /** @deprecated Usar fetchContratacionesAgendaWorkerProgramadas */
