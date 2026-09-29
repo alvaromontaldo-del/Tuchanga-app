@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppScreen } from '../../components/layout/AppScreen';
 import { colors, radii, spacing } from '../../constants/theme';
 import { openAuthModal } from '../../navigation/openAuthModal';
+import { registerAuthTarget } from '../../navigation/registerEntry';
 import { accountUi } from './accountUi';
 
 /**
@@ -31,7 +32,10 @@ export function AccountGuestScreen() {
 
         <Pressable
           style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}
-          onPress={() => openAuthModal('Register')}
+          onPress={() => {
+            const target = registerAuthTarget('particular');
+            openAuthModal(target.screen, target.params);
+          }}
           accessibilityRole="button"
           accessibilityLabel="Crear cuenta particular"
         >
@@ -45,7 +49,10 @@ export function AccountGuestScreen() {
         </Text>
         <Pressable
           style={({ pressed }) => [styles.commerceBtn, pressed && styles.pressed]}
-          onPress={() => openAuthModal('RegisterCommerce')}
+          onPress={() => {
+            const target = registerAuthTarget('commerce');
+            openAuthModal(target.screen, target.params);
+          }}
           accessibilityRole="button"
           accessibilityLabel="Registrarme como comercio"
         >

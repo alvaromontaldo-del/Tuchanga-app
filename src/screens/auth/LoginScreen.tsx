@@ -21,6 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useCommerceShell, COMMERCE_SHELL_STATUSES } from '../../context/CommerceShellContext';
 import { showPendingCommerceNoticeOnce } from '../../context/pendingCommerceNotice';
 import { closeAuthModalAndGoToInicio, closeAuthModalAndRedirect } from '../../navigation/openAuthModal';
+import { registerAuthTarget } from '../../navigation/registerEntry';
 import type { AuthStackScreenProps } from '../../navigation/types';
 import { signIn } from '../../services/auth';
 import { isValidEmail } from '../../utils/validation';
@@ -239,7 +240,10 @@ export function LoginScreen({ navigation, route }: Props) {
               <View style={styles.registerChoices}>
                 <Pressable
                   style={({ pressed }) => [styles.registerChip, pressed && styles.pressed]}
-                  onPress={() => navigation.navigate('Register', { asCommerce: false })}
+                  onPress={() => {
+                    const target = registerAuthTarget('particular');
+                    navigation.navigate(target.screen, target.params);
+                  }}
                   accessibilityRole="button"
                   accessibilityLabel="Registrate como particular"
                 >
@@ -248,7 +252,10 @@ export function LoginScreen({ navigation, route }: Props) {
                 </Pressable>
                 <Pressable
                   style={({ pressed }) => [styles.registerChip, pressed && styles.pressed]}
-                  onPress={() => navigation.navigate('RegisterCommerce')}
+                  onPress={() => {
+                    const target = registerAuthTarget('commerce');
+                    navigation.navigate(target.screen, target.params);
+                  }}
                   accessibilityRole="button"
                   accessibilityLabel="Registrate como comercio"
                 >

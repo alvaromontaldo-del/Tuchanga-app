@@ -8,6 +8,7 @@ import { getSupabaseClient } from '../lib/supabase';
 import { newRandomUserId, stableUserIdFromEmail } from '../utils/stableUserId';
 import { userAuthDisplayName } from '../utils/storageOwnerFolder';
 import { calcAgeFromBirthDate, parseBirthDateParts } from '../utils/birthDate';
+import type { StoreDaySchedule, StoreHoursSlot } from '../utils/storeOpeningHours';
 import {
   clearPendingProfileSignup,
   savePendingProfileSignup,
@@ -320,7 +321,9 @@ export type SignUpPayload = {
     latitude: number;
     longitude: number;
     rubroIds: string[];
-    openingHours?: { open: string; close: string }[];
+    openingHours?: StoreDaySchedule[] | StoreHoursSlot[];
+    /** Foto o logo local. Se sube en el alta o en el primer login. */
+    avatarUri?: string;
   };
 };
 

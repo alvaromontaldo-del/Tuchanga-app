@@ -1,8 +1,10 @@
 import { getSupabaseClient } from '../lib/supabase';
 import type { MyStoreSummary, StoreRubro } from '../types/materials';
 import {
-  normalizeStoreOpeningHours,
-  validateStoreOpeningHours,
+  normalizeStoreWeekSchedule,
+  storeWeekScheduleToJson,
+  validateStoreWeekSchedule,
+  type StoreDaySchedule,
   type StoreHoursSlot,
 } from '../utils/storeOpeningHours';
 
@@ -15,7 +17,8 @@ export type RegisterStoreInput = {
   /** @deprecated Ya no se usa en UI; BD mantiene default. */
   coverageRadiusKm?: number;
   rubroIds: string[];
-  openingHours?: StoreHoursSlot[];
+  /** Grilla semanal o el formato viejo de una o dos franjas. */
+  openingHours?: StoreDaySchedule[] | StoreHoursSlot[];
 };
 
 export type RegisteredStore = {
@@ -63,8 +66,8 @@ export async function registerMyStore(input: RegisterStoreInput): Promise<Regist
   }
   if (rubroIds.length === 0) throw new Error('Seleccioná al menos un rubro.');
 
-  const openingHours = normalizeStoreOpeningHours(input.openingHours ?? []);
-  const hoursErr = validateStoreOpeningHours(openingHours);
+  const openingHours = normalizeStoreWeekSchedule(input.openingHours ?? []);
+  const hoursErr = validateStoreWeekSchedule(openingHours);
   if (hoursErr) throw new Error(hoursErr);
 
   // Evitar altas duplicadas mientras hay una pendiente / activa.
@@ -98,7 +101,7 @@ export async function registerMyStore(input: RegisterStoreInput): Promise<Regist
           : 10,
       status: 'pending_approval',
       trial_ends_at: null,
-      opening_hours: openingHours,
+      opening_hours: storeWeekScheduleToJson(openingHours),
     })
     .select('id, name, status')
     .single();
@@ -177,7 +180,7 @@ export type UpdateStoreInput = {
   latitude: number;
   longitude: number;
   rubroIds: string[];
-  openingHours?: StoreHoursSlot[];
+  openingHours?: StoreDaySchedule[] | StoreHoursSlot[];
 };
 
 /**
@@ -203,8 +206,8 @@ export async function updateMyStore(input: UpdateStoreInput): Promise<void> {
   }
   if (rubroIds.length === 0) throw new Error('Seleccioná al menos un rubro.');
 
-  const openingHours = normalizeStoreOpeningHours(input.openingHours ?? []);
-  const hoursErr = validateStoreOpeningHours(openingHours);
+  const openingHours = normalizeStoreWeekSchedule(input.openingHours ?? []);
+  const hoursErr = validateStoreWeekSchedule(openingHours);
   if (hoursErr) throw new Error(hoursErr);
 
   const { data: owned, error: ownErr } = await sb
@@ -224,7 +227,7 @@ export async function updateMyStore(input: UpdateStoreInput): Promise<void> {
       address,
       latitude: input.latitude,
       longitude: input.longitude,
-      opening_hours: openingHours,
+      opening_hours: storeWeekScheduleToJson(openingHours),
       updated_at: new Date().toISOString(),
     })
     .eq('id', input.storeId)
@@ -258,7 +261,7 @@ export async function fetchMyStoreForEdit(storeId: string): Promise<{
   latitude: number;
   longitude: number;
   rubroIds: string[];
-  openingHours: StoreHoursSlot[];
+  openingHours: StoreDaySchedule[];
 } | null> {
   const sb = getSupabaseClient();
   await sb.auth.getSession();
@@ -285,7 +288,7 @@ export async function fetchMyStoreForEdit(storeId: string): Promise<{
     latitude: Number(data.latitude),
     longitude: Number(data.longitude),
     rubroIds,
-    openingHours: normalizeStoreOpeningHours(
+    openingHours: normalizeStoreWeekSchedule(
       (data as { opening_hours?: unknown }).opening_hours,
     ),
   };

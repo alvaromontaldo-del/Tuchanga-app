@@ -27,8 +27,8 @@ import {
 } from '../../services/storeRegistrationSupabase';
 import type { StoreRubro } from '../../types/materials';
 import {
-  defaultStoreOpeningHours,
-  type StoreHoursSlot,
+  defaultStoreWeekSchedule,
+  type StoreDaySchedule,
 } from '../../utils/storeOpeningHours';
 import { getHighAccuracyPosition } from '../../utils/deviceGeolocation';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -50,7 +50,7 @@ export function RegisterStoreScreen({ navigation }: Props) {
   const [lng, setLng] = useState<number | null>(user?.baseLocation?.lng ?? null);
   const [rubros, setRubros] = useState<StoreRubro[]>([]);
   const [selectedRubros, setSelectedRubros] = useState<string[]>([]);
-  const [openingHours, setOpeningHours] = useState<StoreHoursSlot[]>(defaultStoreOpeningHours());
+  const [openingHours, setOpeningHours] = useState<StoreDaySchedule[]>(defaultStoreWeekSchedule());
   const [rubrosLoading, setRubrosLoading] = useState(true);
   const [locating, setLocating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -197,7 +197,7 @@ export function RegisterStoreScreen({ navigation }: Props) {
           maxLength={200}
         />
 
-        <StoreOpeningHoursEditor slots={openingHours} onChange={setOpeningHours} />
+        <StoreOpeningHoursEditor days={openingHours} onChange={setOpeningHours} />
 
         <View style={styles.locationCard}>
           <View style={styles.locationHeader}>
