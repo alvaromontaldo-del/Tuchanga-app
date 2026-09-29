@@ -7,12 +7,12 @@ import {
   useState,
   type ReactElement,
 } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import {
   ActivityIndicator,
   FlatList,
   Pressable,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -52,6 +52,13 @@ function formatDraftPrice(priceText: string): string {
   const n = Number(String(priceText).replace(',', '.'));
   if (!Number.isFinite(n) || n < 0) return '—';
   return formatMoneyAr(n);
+}
+
+function formatItemQty(item: MaterialRequestItem): string {
+  const q = Number(item.quantity);
+  const qty = Number.isFinite(q) && q > 0 ? String(q) : '1';
+  const unit = (item.unit ?? '').trim() || 'u';
+  return `${qty} ${unit}`;
 }
 
 type Props = NativeStackScreenProps<CommerceStackParamList, 'StoreQuoteRequest'>;
@@ -257,8 +264,8 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
                   </Text>
                 ) : (
                   <Text style={styles.lead}>
-                    Precio por ítem. Podés abrir hasta 3 opciones (marcas). Si no tenés stock,
-                    marcá “Sin stock” y, si querés, proponé alternativas con precio.
+                    Indicá la marca y el precio unitario de cada ítem. Podés agregar hasta 3 marcas.
+                    Si no lo tenés, marcá “No tengo este material”.
                   </Text>
                 )}
               </View>
@@ -271,7 +278,8 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
                 ?.clientDecision ?? 'pending';
             return (
               <QuoteItemRow
-                key={`qi-${row.item.id}-${draftTick}`}
+                // draftTick re-renderiza la fila; la key no puede incluirlo o el TextInput se remonta y se cierra el teclado.
+                key={`qi-${row.item.id}`}
                 item={row.item}
                 editable={!locked}
                 draft={draft}
@@ -298,7 +306,7 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
           if (row.type === 'notes') {
             return (
               <NotesBlock
-                key={`notes-${draftTick}`}
+                key="notes"
                 editable={!locked}
                 initialValue={notesInitial}
                 onChange={(t) => {
@@ -373,9 +381,12 @@ const QuoteItemRow = memo(function QuoteItemRow({
         ]}
       >
         <View style={styles.roTitleRow}>
-          <Text style={[styles.itemDesc, { flex: 1 }]} numberOfLines={4}>
-            {item.description}
-          </Text>
+          <View style={styles.itemTitleCol}>
+            <Text style={styles.itemDesc} numberOfLines={4}>
+              {item.description}
+            </Text>
+            <Text style={styles.itemQty}>{formatItemQty(item)}</Text>
+          </View>
           {decisionLabel ? (
             <Text
               style={[
@@ -416,72 +427,95 @@ const QuoteItemRow = memo(function QuoteItemRow({
 
   return (
     <View style={[styles.itemCard, !inStock && styles.itemCardAlt]}>
-      <Text style={styles.itemDesc} numberOfLines={4}>
-        {item.description}
-      </Text>
-
-      <View style={styles.stockRow}>
-        <Text style={[styles.stockLabel, !inStock && styles.stockLabelOff]}>
-          {inStock ? 'Con stock' : 'Sin stock'}
+      <View style={styles.itemHeader}>
+        <Text style={styles.itemDesc} numberOfLines={4}>
+          {item.description}
         </Text>
-        <Switch
-          value={!inStock}
-          disabled={!editable}
-          onValueChange={(noStock) => {
-            onPatch({ inStock: !noStock });
-          }}
-          trackColor={{ false: colors.border, true: '#F5A9A9' }}
-          thumbColor={!inStock ? colors.primary : '#f4f3f4'}
-          accessibilityLabel="Sin stock"
-        />
+        <Text style={styles.itemQty}>{formatItemQty(item)}</Text>
       </View>
 
-      <Text style={styles.altTitle}>
-        {inStock ? 'Opciones / marcas (hasta 3)' : 'Alternativas (opcional, hasta 3)'}
-      </Text>
-      <Text style={styles.altHint}>
-        {inStock
-          ? 'Podés cotizar hasta 3 marcas o presentaciones. El cliente elige una.'
-          : 'Sin alternativa podés dejarlo vacío. Si cargás alternativa, el precio es obligatorio.'}
-      </Text>
+      <Pressable
+        onPress={() => onPatch({ inStock: !inStock })}
+        disabled={!editable}
+        style={styles.stockCheckRow}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: !inStock }}
+        accessibilityLabel="No tengo este material"
+      >
+        <Ionicons
+          name={!inStock ? 'checkbox' : 'square-outline'}
+          size={22}
+          color={!inStock ? colors.primary : colors.textSecondary}
+        />
+        <Text style={[styles.stockLabel, !inStock && styles.stockLabelOff]}>
+          No tengo este material
+        </Text>
+      </Pressable>
+      {!inStock ? (
+        <Text style={styles.altHint}>
+          Si cargás una marca alternativa, el precio es obligatorio. Sin alternativa podés dejarlo vacío.
+        </Text>
+      ) : null}
 
-      {variants.map((v, index) => (
-        <View key={`var-${index}`} style={styles.variantRow}>
-          <TextInput
-            value={v.label}
-            editable={editable}
-            onChangeText={(t) => updateVariant(index, { label: t })}
-            placeholder={
-              inStock
-                ? `Marca / opción ${index + 1} (opcional)`
-                : `Alternativa ${index + 1} (opcional)`
-            }
-            placeholderTextColor={colors.textSecondary}
-            style={[styles.altInput, { flex: 1 }]}
-            maxLength={120}
-          />
-          <TextInput
-            value={v.priceText}
-            editable={editable}
-            onChangeText={(raw) => updateVariant(index, { priceText: sanitizePriceText(raw) })}
-            keyboardType="decimal-pad"
-            placeholder="$"
-            placeholderTextColor={colors.textSecondary}
-            style={[styles.priceInput, styles.variantPrice]}
-            selectTextOnFocus
-            maxLength={12}
-          />
-          {variants.length > 1 ? (
-            <Pressable onPress={() => removeVariant(index)} hitSlop={8}>
-              <Text style={styles.variantRemove}>✕</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ))}
+      {variants.map((v, index) => {
+        const preview = formatDraftPrice(v.priceText);
+        return (
+          <View key={`var-${index}`} style={styles.variantBlock}>
+            <View style={styles.variantFields}>
+              <View style={styles.brandField}>
+                <Text style={styles.fieldLabel}>Marca</Text>
+                <TextInput
+                  value={v.label}
+                  editable={editable}
+                  onChangeText={(t) => updateVariant(index, { label: t })}
+                  placeholder="Ej. Tigre"
+                  placeholderTextColor={colors.textSecondary}
+                  style={styles.altInput}
+                  maxLength={120}
+                  accessibilityLabel="Marca"
+                />
+              </View>
+              <View style={styles.unitPriceField}>
+                <Text style={styles.fieldLabel}>Precio unitario $</Text>
+                <TextInput
+                  value={v.priceText}
+                  editable={editable}
+                  onChangeText={(raw) =>
+                    updateVariant(index, { priceText: sanitizePriceText(raw) })
+                  }
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                  placeholderTextColor={colors.textSecondary}
+                  style={styles.priceInput}
+                  maxLength={12}
+                  accessibilityLabel="Precio unitario"
+                />
+                <Text style={styles.pricePreview}>{preview === '—' ? '\u00a0' : preview}</Text>
+              </View>
+            </View>
+            {variants.length > 1 ? (
+              <Pressable
+                onPress={() => removeVariant(index)}
+                hitSlop={8}
+                style={styles.variantRemoveBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Quitar marca"
+              >
+                <Text style={styles.variantRemove}>✕</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        );
+      })}
 
       {variants.length < 3 ? (
-        <Pressable onPress={addVariant} style={styles.addVariantBtn}>
-          <Text style={styles.addVariantText}>+ Agregar opción</Text>
+        <Pressable
+          onPress={addVariant}
+          style={styles.addVariantBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Agregar otra marca"
+        >
+          <Text style={styles.addVariantText}>+ Agregar otra marca</Text>
         </Pressable>
       ) : null}
 
@@ -722,6 +756,13 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   itemInfo: { flex: 1, gap: 4 },
+  itemHeader: {
+    gap: 2,
+  },
+  itemTitleCol: {
+    flex: 1,
+    gap: 2,
+  },
   itemDesc: {
     fontSize: 15,
     fontWeight: '600',
@@ -730,6 +771,30 @@ const styles = StyleSheet.create({
   itemQty: {
     fontSize: 13,
     color: colors.textSecondary,
+    fontVariant: ['tabular-nums'],
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    marginBottom: 4,
+  },
+  brandField: {
+    flexGrow: 1,
+    flexBasis: 140,
+    minWidth: 140,
+  },
+  unitPriceField: {
+    flexGrow: 1,
+    flexBasis: 140,
+    minWidth: 140,
+  },
+  pricePreview: {
+    marginTop: 4,
+    minHeight: 18,
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.text,
     fontVariant: ['tabular-nums'],
   },
   roMetaList: {
@@ -791,17 +856,16 @@ const styles = StyleSheet.create({
     borderRadius: radii.input,
     backgroundColor: colors.background,
     paddingVertical: 10,
-    paddingHorizontal: 8,
-    fontSize: 18,
+    paddingHorizontal: 10,
+    fontSize: 16,
     fontWeight: '700',
     color: colors.text,
-    textAlign: 'center',
     fontVariant: ['tabular-nums'],
   },
-  stockRow: {
+  stockCheckRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 10,
   },
   stockLabel: {
     fontSize: 14,
@@ -852,20 +916,26 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.text,
   },
-  variantRow: {
+  variantBlock: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
+    alignItems: 'flex-start',
+    gap: 4,
   },
-  variantPrice: {
-    width: 88,
+  variantFields: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  variantRemoveBtn: {
+    marginTop: 18,
+    paddingHorizontal: 4,
+    paddingVertical: 8,
   },
   variantRemove: {
     color: colors.textSecondary,
     fontSize: 16,
     fontWeight: '700',
-    paddingHorizontal: 4,
   },
   addVariantBtn: {
     alignSelf: 'flex-start',
