@@ -5,9 +5,9 @@ import {
   contractedWorkMoneyDisplay,
   contractedWorkSection,
   professionalPayoutAmount,
-  resumeClaimConversationId,
   warrantyClaimAction,
   warrantyClaimButtonLabel,
+  warrantyClaimRequiresConfirmation,
   workerGivenName,
   yachangaServiceFeeAmount,
 } from './contractedWorkDisplay';
@@ -154,10 +154,9 @@ describe('warrantyClaimAction', () => {
       }),
     ).toBe('resume');
     expect(warrantyClaimButtonLabel('resume')).toBe('Ver reclamo');
-    expect(resumeClaimConversationId('  conv-propia  ')).toBe('conv-propia');
-    expect(resumeClaimConversationId('')).toBe('');
-    expect(resumeClaimConversationId(null)).toBe('');
-    expect(resumeClaimConversationId(undefined)).toBe('');
+    expect(warrantyClaimRequiresConfirmation('start')).toBe(true);
+    expect(warrantyClaimRequiresConfirmation('resume')).toBe(false);
+    expect(warrantyClaimRequiresConfirmation('none')).toBe(false);
 
     const expired = warrantyCountdown({
       warrantyDays: 30,
