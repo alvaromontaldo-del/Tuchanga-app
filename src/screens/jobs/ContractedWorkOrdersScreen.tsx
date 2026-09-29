@@ -15,6 +15,7 @@ import {
   contractedWarrantyDurationLabel,
   contractedWorkMoneyDisplay,
   contractedWorkSection,
+  resumeClaimConversationId,
   warrantyClaimAction,
   warrantyClaimButtonLabel,
   workerGivenName,
@@ -210,7 +211,12 @@ export function ContractedWorkOrdersScreen({ navigation }: Props) {
 
   function onClaimPress(row: OrderRow, action: 'start' | 'resume') {
     if (action === 'resume') {
-      void startClaim(row);
+      const conversationId = resumeClaimConversationId(row.conversation_id);
+      if (conversationId) {
+        openClaimChat(row, conversationId);
+      } else {
+        void startClaim(row);
+      }
       return;
     }
     Alert.alert(

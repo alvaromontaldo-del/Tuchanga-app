@@ -1,7 +1,8 @@
 -- Reclamo de garantía desde Trabajos contratados.
 -- El cliente lo inicia mientras quedan días. No cambia estado_trabajo
 -- ni warranty_anchor_at: el plazo sigue corriendo.
--- Reabre el chat del trabajo (o el hilo activo del mismo par) para coordinar.
+-- Reabre siempre el chat propio de la contratación, aunque esté soft-deleted.
+-- No cambia a otro hilo activo del mismo cliente y profesional.
 -- DROP primero: Postgres no deja cambiar el tipo de retorno con CREATE OR REPLACE.
 
 DROP FUNCTION IF EXISTS public.iniciar_reclamo_garantia(uuid);
@@ -20,7 +21,6 @@ DECLARE
   v_cliente uuid;
   v_trabajador uuid;
   v_deleted timestamptz;
-  v_active uuid;
 BEGIN
   v_row := public._assert_contratacion_participante(p_contratacion_id);
 
@@ -71,22 +71,22 @@ BEGIN
     RAISE EXCEPTION 'No hay chat para este trabajo';
   END IF;
 
+  -- Siempre el chat de esta contratación (v_row.conversation_id).
+  -- ux_conversations_active_pair admite un solo hilo activo por par: si este
+  -- está soft-deleted, se cierra el otro activo del mismo cliente+profesional
+  -- y se reabre el propio. No se elige un chat al azar con LIMIT 1.
+  -- Corre también si el reclamo ya estaba abierto (v_already).
   IF v_deleted IS NOT NULL THEN
-    SELECT c.id INTO v_active
-    FROM public.conversations c
-    WHERE c.cliente_id = v_cliente
-      AND c.trabajador_id = v_trabajador
-      AND c.deleted_at IS NULL
-      AND c.id <> v_conv_id
-    LIMIT 1;
+    UPDATE public.conversations
+    SET deleted_at = now(), updated_at = now()
+    WHERE cliente_id = v_cliente
+      AND trabajador_id = v_trabajador
+      AND deleted_at IS NULL
+      AND id <> v_conv_id;
 
-    IF v_active IS NOT NULL THEN
-      v_conv_id := v_active;
-    ELSE
-      UPDATE public.conversations
-      SET deleted_at = NULL, updated_at = now()
-      WHERE id = v_conv_id;
-    END IF;
+    UPDATE public.conversations
+    SET deleted_at = NULL, updated_at = now()
+    WHERE id = v_conv_id;
   END IF;
 
   DELETE FROM public.conversation_hides
@@ -114,4 +114,4 @@ REVOKE ALL ON FUNCTION public.iniciar_reclamo_garantia(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.iniciar_reclamo_garantia(uuid) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.iniciar_reclamo_garantia(uuid) IS
-  'El cliente abre un reclamo de garantía y reabre el chat. No mueve el ancla ni el estado del trabajo.';
+  'El cliente abre un reclamo de garantía y reabre el chat propio de la contratación. No cambia a otro hilo del mismo par ni mueve el ancla ni el estado del trabajo.';
