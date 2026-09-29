@@ -13,6 +13,7 @@ export type WorkerResultCardModel = {
   avatarUrl: string;
   ratingAverage: number;
   reviewCount: number;
+  totalJobsDone?: number;
   distanceLabel?: string;
 };
 
@@ -85,6 +86,7 @@ export function WorkerResultCard({
           <StarRating
             score={worker.ratingAverage}
             reviewCount={worker.reviewCount}
+            completedJobs={worker.totalJobsDone}
             size={16}
             textSize={13}
           />

@@ -15,6 +15,7 @@ import type {
 import type { WorkerReview } from '../../types/feed';
 import { formatPostDate } from '../../utils/formatDate';
 import { listKey } from '../../utils/safeAsync';
+import { canShowWorkerReputation, completedJobsFromPayload } from '../../utils/workerReputation';
 
 type Props =
   | FeedStackScreenProps<'WorkerReviews'>
@@ -55,6 +56,7 @@ export function WorkerReviewsScreen({ route }: Props) {
   const [loading, setLoading] = useState(false);
   const [remoteReviews, setRemoteReviews] = useState<WorkerReview[] | null>(null);
   const [remoteWorkerName, setRemoteWorkerName] = useState<string | null>(null);
+  const [completedJobs, setCompletedJobs] = useState<number | undefined>(mockWorker?.totalJobsDone);
 
   const reviews = useMemo(() => {
     if (remoteReviews) return remoteReviews;
@@ -67,6 +69,7 @@ export function WorkerReviewsScreen({ route }: Props) {
     if (!isSupabaseConfigured() || !backendWorkerId) {
       setRemoteReviews(null);
       setRemoteWorkerName(null);
+      setCompletedJobs(mockWorker?.totalJobsDone);
       setLoading(false);
       return () => {
         cancelled = true;
@@ -79,12 +82,22 @@ export function WorkerReviewsScreen({ route }: Props) {
         const sb = getSupabaseClient();
 
         // Nombre para header (perfiles reales UUID)
+        const { data: p } = await sb
+          .from('profiles')
+          .select('nombre,total_jobs_done')
+          .eq('id', backendWorkerId)
+          .maybeSingle();
+        const profileRow = (p ?? {}) as { nombre?: string | null; total_jobs_done?: unknown };
+        const jobs = completedJobsFromPayload(profileRow, 'total_jobs_done');
+        if (!cancelled) {
+          if (jobs != null) setCompletedJobs(jobs);
+          else if (mockWorker) setCompletedJobs(mockWorker.totalJobsDone);
+        }
         if (!mockWorker) {
-          const { data: p } = await sb.from('profiles').select('nombre').eq('id', backendWorkerId).maybeSingle();
-          const first = String((p as any)?.nombre ?? '').trim().split(/\s+/)[0] || '';
+          const first = String(profileRow.nombre ?? '').trim().split(/\s+/)[0] || '';
           if (!cancelled) setRemoteWorkerName(first || null);
-        } else {
-          if (!cancelled) setRemoteWorkerName(null);
+        } else if (!cancelled) {
+          setRemoteWorkerName(null);
         }
 
         const { data, error } = await sb
@@ -133,6 +146,8 @@ export function WorkerReviewsScreen({ route }: Props) {
   }, [backendWorkerId, mockWorker, workerId]);
 
   const displayName = mockWorker?.firstName ?? remoteWorkerName ?? 'Profesional';
+  const reputationLocked =
+    completedJobs !== undefined && !canShowWorkerReputation(completedJobs);
 
   if (loading) {
     return (
@@ -151,6 +166,17 @@ export function WorkerReviewsScreen({ route }: Props) {
         </View>
       );
     }
+  }
+
+  if (reputationLocked) {
+    return (
+      <View style={styles.emptyWrap}>
+        <Text style={styles.empty}>
+          Este profesional es nuevo. Las reseñas se muestran a partir del segundo trabajo
+          finalizado.
+        </Text>
+      </View>
+    );
   }
 
   if (reviews.length === 0) {

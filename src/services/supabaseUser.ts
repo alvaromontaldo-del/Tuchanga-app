@@ -4,6 +4,7 @@ import { getSupabaseClient } from '../lib/supabase';
 import type { AuthUser, SignUpPayload } from './auth';
 import { normalizeDisplayAddress } from '../utils/formatAddress';
 import { storageOwnerFolder, userAuthDisplayName } from '../utils/storageOwnerFolder';
+import { completedJobsFromPayload } from '../utils/workerReputation';
 
 /**
  * Mapeo registro (app) → Supabase `public.profiles` (vía RPC `insert_profile_with_location`):
@@ -19,7 +20,7 @@ import { storageOwnerFolder, userAuthDisplayName } from '../utils/storageOwnerFo
  */
 
 const PROFILE_CORE =
-  'id,nombre,apellido,dni,telefono,direccion_texto,detalles_ubicacion,avatar_url,coverage_km,created_at,rating_average,review_count,birth_date,professional_description' as const;
+  'id,nombre,apellido,dni,telefono,direccion_texto,detalles_ubicacion,avatar_url,coverage_km,created_at,rating_average,review_count,total_jobs_done,birth_date,professional_description' as const;
 const PROFILE_WITH_LOC = `${PROFILE_CORE},location` as const;
 const PROFILE_FULL = `${PROFILE_WITH_LOC},bio` as const;
 
@@ -38,6 +39,7 @@ type ProfileRow = {
   bio?: string | null;
   rating_average?: number | null;
   review_count?: number | null;
+  total_jobs_done?: number | null;
   birth_date?: string | null;
   professional_description?: string | null;
 };
@@ -702,6 +704,7 @@ export async function fetchAuthUserFromSupabase(user: User): Promise<AuthUser> {
       typeof profile.review_count === 'number'
         ? Math.max(0, Math.floor(Number(profile.review_count) || 0))
         : undefined,
+    totalJobsDone: completedJobsFromPayload(profile, 'total_jobs_done'),
     birthDate:
       typeof profile.birth_date === 'string' && profile.birth_date.trim()
         ? profile.birth_date.trim()

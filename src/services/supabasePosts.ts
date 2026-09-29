@@ -1,6 +1,8 @@
 import { File as ExpoFsFile } from 'expo-file-system';
 import { getSupabaseClient } from '../lib/supabase';
 import { mapContentModerationError } from '../utils/contentModerationErrors';
+import { completedJobsFromPayload } from '../utils/workerReputation';
+import { fetchCompletedJobsByProfileIds } from './workerCompletedJobs';
 
 function guessMime(uri: string): string {
   const lower = uri.toLowerCase();
@@ -117,6 +119,7 @@ type PostRow = {
     avatar_url?: string | null;
     rating_average?: number | null;
     review_count?: number | null;
+    total_jobs_done?: number | null;
   } | null;
 };
 
@@ -133,6 +136,7 @@ type PostFeedRow = {
   worker_avatar_url: string | null;
   worker_rating_average?: number | null;
   worker_review_count?: number | null;
+  worker_total_jobs_done?: number | null;
   like_count?: number | null;
   liked_by_me?: boolean | null;
 };
@@ -156,6 +160,7 @@ function mapPostFeedRow(x: PostFeedRow) {
       typeof x.worker_review_count === 'number'
         ? Math.max(0, Math.floor(Number(x.worker_review_count) || 0))
         : undefined,
+    workerTotalJobsDone: completedJobsFromPayload(x, 'worker_total_jobs_done'),
     trade: (x.trade ?? '').trim() || 'Servicios',
     workImageUrls: urls.filter(Boolean),
     description: (x.description ?? '').trim(),
@@ -163,6 +168,20 @@ function mapPostFeedRow(x: PostFeedRow) {
     likeCount: Math.max(0, Number(x.like_count ?? 0) || 0),
     likedByMe: Boolean(x.liked_by_me),
   };
+}
+
+async function enrichWorkerTotalJobsDone<
+  T extends { workerId: string; workerTotalJobsDone?: number },
+>(rows: T[]): Promise<T[]> {
+  const missing = rows.filter((r) => r.workerTotalJobsDone == null).map((r) => r.workerId);
+  if (missing.length === 0) return rows;
+  const byId = await fetchCompletedJobsByProfileIds(missing);
+  if (!byId) return rows;
+  return rows.map((r) => {
+    if (r.workerTotalJobsDone != null) return r;
+    const n = byId.get(r.workerId);
+    return n == null ? r : { ...r, workerTotalJobsDone: n };
+  });
 }
 
 export async function togglePostLikeInSupabase(
@@ -191,6 +210,7 @@ export async function fetchFeedPostsFromSupabase(params?: {
     workerAvatarUrl: string;
     workerRatingAverage?: number;
     workerReviewCount?: number;
+    workerTotalJobsDone?: number;
     trade: string;
     workImageUrls: string[];
     description: string;
@@ -207,14 +227,14 @@ export async function fetchFeedPostsFromSupabase(params?: {
 
   const rpc = await supabase.rpc('fetch_feed_posts', { p_limit: limit });
   if (!rpc.error) {
-    return ((rpc.data ?? []) as PostFeedRow[]).map(mapPostFeedRow);
+    return enrichWorkerTotalJobsDone(((rpc.data ?? []) as PostFeedRow[]).map(mapPostFeedRow));
   } else {
     // Fallback compat: si la RPC no existe todavía, usamos el select legacy (sin filtro server-side).
     const msg = (rpc.error.message ?? '').toLowerCase();
     if (!msg.includes('fetch_feed_posts')) throw rpc.error;
     const { data, error } = await supabase
       .from('posts')
-      .select('id,worker_id,trade,description,image_urls,created_at,profiles(nombre,avatar_url,rating_average,review_count,coverage_km)')
+      .select('id,worker_id,trade,description,image_urls,created_at,profiles(nombre,avatar_url,rating_average,review_count,total_jobs_done,coverage_km)')
       .order('created_at', { ascending: false })
       .limit(limit);
     if (error) throw error;
@@ -234,6 +254,7 @@ export async function fetchFeedPostsFromSupabase(params?: {
         worker_avatar_url: r.profiles?.avatar_url ?? null,
         worker_rating_average: r.profiles?.rating_average ?? null,
         worker_review_count: r.profiles?.review_count ?? null,
+        worker_total_jobs_done: r.profiles?.total_jobs_done ?? null,
         like_count: 0,
         liked_by_me: false,
       }),
@@ -252,6 +273,8 @@ export async function fetchPostsByWorkerIdFromSupabase(
     workerFirstName: string;
     workerAvatarUrl: string;
     workerRatingAverage?: number;
+    workerReviewCount?: number;
+    workerTotalJobsDone?: number;
     trade: string;
     workImageUrls: string[];
     description: string;
@@ -265,7 +288,7 @@ export async function fetchPostsByWorkerIdFromSupabase(
 
   const rpc = await supabase.rpc('fetch_worker_posts', { p_worker_id: workerId, p_limit: limit });
   if (!rpc.error) {
-    return ((rpc.data ?? []) as PostFeedRow[]).map(mapPostFeedRow);
+    return enrichWorkerTotalJobsDone(((rpc.data ?? []) as PostFeedRow[]).map(mapPostFeedRow));
   } else {
     const msg = (rpc.error.message ?? '').toLowerCase();
     if (!msg.includes('fetch_worker_posts')) throw rpc.error;
@@ -273,7 +296,7 @@ export async function fetchPostsByWorkerIdFromSupabase(
 
   const { data, error } = await supabase
     .from('posts')
-    .select('id,worker_id,trade,description,image_urls,created_at,profiles(nombre,avatar_url,rating_average,review_count,coverage_km)')
+    .select('id,worker_id,trade,description,image_urls,created_at,profiles(nombre,avatar_url,rating_average,review_count,total_jobs_done,coverage_km)')
     .eq('worker_id', workerId)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -303,21 +326,24 @@ export async function fetchPostsByWorkerIdFromSupabase(
   }
 
   const rows = ((data ?? []) as PostRow[]).filter((r) => !hiddenIds.has(r.id));
-  return rows.map((r) =>
-    mapPostFeedRow({
-      id: r.id,
-      worker_id: r.worker_id,
-      trade: r.trade,
-      description: r.description,
-      image_urls: r.image_urls,
-      created_at: r.created_at,
-      worker_nombre: r.profiles?.nombre ?? null,
-      worker_avatar_url: r.profiles?.avatar_url ?? null,
-      worker_rating_average: r.profiles?.rating_average ?? null,
-      worker_review_count: r.profiles?.review_count ?? null,
-      like_count: 0,
-      liked_by_me: false,
-    }),
+  return enrichWorkerTotalJobsDone(
+    rows.map((r) =>
+      mapPostFeedRow({
+        id: r.id,
+        worker_id: r.worker_id,
+        trade: r.trade,
+        description: r.description,
+        image_urls: r.image_urls,
+        created_at: r.created_at,
+        worker_nombre: r.profiles?.nombre ?? null,
+        worker_avatar_url: r.profiles?.avatar_url ?? null,
+        worker_rating_average: r.profiles?.rating_average ?? null,
+        worker_review_count: r.profiles?.review_count ?? null,
+        worker_total_jobs_done: r.profiles?.total_jobs_done ?? null,
+        like_count: 0,
+        liked_by_me: false,
+      }),
+    ),
   );
 }
 
@@ -346,6 +372,8 @@ export async function fetchPostByIdFromSupabase(postId: string): Promise<{
   workerFirstName: string;
   workerAvatarUrl: string;
   workerRatingAverage?: number;
+  workerReviewCount?: number;
+  workerTotalJobsDone?: number;
   trade: string;
   workImageUrls: string[];
   description: string;
@@ -374,7 +402,7 @@ export async function fetchPostByIdFromSupabase(postId: string): Promise<{
   const { data, error } = await supabase
     .from('posts')
     .select(
-      'id,worker_id,trade,description,image_urls,created_at,profiles(nombre,avatar_url,rating_average,review_count)',
+      'id,worker_id,trade,description,image_urls,created_at,profiles(nombre,avatar_url,rating_average,review_count,total_jobs_done)',
     )
     .eq('id', id)
     .maybeSingle();
@@ -393,6 +421,7 @@ export async function fetchPostByIdFromSupabase(postId: string): Promise<{
     worker_avatar_url: r.profiles?.avatar_url ?? null,
     worker_rating_average: r.profiles?.rating_average ?? null,
     worker_review_count: r.profiles?.review_count ?? null,
+    worker_total_jobs_done: r.profiles?.total_jobs_done ?? null,
     like_count: 0,
     liked_by_me: false,
   });

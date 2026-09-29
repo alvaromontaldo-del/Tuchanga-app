@@ -99,6 +99,7 @@ export function PublishPostScreen({ navigation }: Props) {
         workerAvatarUrl: user?.avatarUri ?? DEFAULT_AVATAR,
         workerRatingAverage: user?.ratingAverage,
         workerReviewCount: user?.reviewCount,
+        workerTotalJobsDone: user?.totalJobsDone,
         trade: workerTrade,
         workImageUrls: imageUrls,
         description: trimmed,

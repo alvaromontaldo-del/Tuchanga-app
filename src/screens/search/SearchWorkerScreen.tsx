@@ -409,6 +409,7 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
               avatarUrl: item.worker.avatarUrl,
               ratingAverage: item.worker.ratingAverage,
               reviewCount: item.worker.reviewCount,
+              totalJobsDone: item.worker.totalJobsDone,
               distanceLabel: `A ${formatKm(item.distanceKm)}`,
             }}
             highlightQuery={query}

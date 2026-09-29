@@ -227,6 +227,7 @@ export const WORKERS_BY_ID: Record<string, WorkerPublicProfile> = {
     bio: 'Tu perfil público. Completá rubros y zona cuando conectemos el backend.',
     ratingAverage: 0,
     reviewCount: 0,
+    totalJobsDone: 0,
     trades: [
       {
         title: 'Profesional',
@@ -244,6 +245,7 @@ export const WORKERS_BY_ID: Record<string, WorkerPublicProfile> = {
     bio: 'Electricidad, albañilería ligera y paseos responsables con mascotas en CABA y GBA.',
     ratingAverage: averageRating(r1),
     reviewCount: r1.length,
+    totalJobsDone: r1.length,
     trades: [
       {
         title: 'Electricista',
@@ -273,6 +275,7 @@ export const WORKERS_BY_ID: Record<string, WorkerPublicProfile> = {
     bio: 'Destapaciones, pérdidas y refacciones de baño y cocina.',
     ratingAverage: averageRating(r2),
     reviewCount: r2.length,
+    totalJobsDone: r2.length,
     trades: [
       {
         title: 'Plomería general',
@@ -308,6 +311,7 @@ export const WORKERS_BY_ID: Record<string, WorkerPublicProfile> = {
     bio: 'Paseos diarios, refuerzo de hábitos y cuidado responsable.',
     ratingAverage: averageRating(r3),
     reviewCount: r3.length,
+    totalJobsDone: r3.length,
     trades: [
       {
         title: 'Paseos individuales',
@@ -337,6 +341,7 @@ export const WORKERS_BY_ID: Record<string, WorkerPublicProfile> = {
     bio: 'Matriculado. Revisiones, instalaciones y habilitaciones de gas.',
     ratingAverage: averageRating(r4),
     reviewCount: r4.length,
+    totalJobsDone: r4.length,
     trades: [
       {
         title: 'Gasista matriculado',
@@ -360,6 +365,7 @@ export const WORKERS_BY_ID: Record<string, WorkerPublicProfile> = {
     bio: 'Pintura de interiores y frentes; preparación de superficies.',
     ratingAverage: averageRating(r5),
     reviewCount: r5.length,
+    totalJobsDone: r5.length,
     trades: [
       {
         title: 'Pintura interior',
@@ -389,6 +395,7 @@ export const WORKERS_BY_ID: Record<string, WorkerPublicProfile> = {
     bio: 'Obras nuevas y refacciones eléctricas en zona costera.',
     ratingAverage: averageRating(r6),
     reviewCount: r6.length,
+    totalJobsDone: r6.length,
     trades: [
       {
         title: 'Electricista',
@@ -426,6 +433,7 @@ export const INITIAL_FEED_POSTS: FeedPost[] = [
     workerFirstName: 'María',
     workerRatingAverage: WORKERS_BY_ID.w1.ratingAverage,
     workerReviewCount: WORKERS_BY_ID.w1.reviewCount,
+    workerTotalJobsDone: WORKERS_BY_ID.w1.totalJobsDone,
     workerAvatarUrl: 'https://i.pravatar.cc/150?img=5',
     trade: 'Electricista',
     workImageUrls: [img.elec1, img.elec2, img.elec3],
@@ -440,6 +448,7 @@ export const INITIAL_FEED_POSTS: FeedPost[] = [
     workerFirstName: 'Lucas',
     workerRatingAverage: WORKERS_BY_ID.w2.ratingAverage,
     workerReviewCount: WORKERS_BY_ID.w2.reviewCount,
+    workerTotalJobsDone: WORKERS_BY_ID.w2.totalJobsDone,
     workerAvatarUrl: 'https://i.pravatar.cc/150?img=12',
     trade: 'Plomero',
     workImageUrls: [img.plom1, img.plom2],
@@ -454,6 +463,7 @@ export const INITIAL_FEED_POSTS: FeedPost[] = [
     workerFirstName: 'Ana',
     workerRatingAverage: WORKERS_BY_ID.w3.ratingAverage,
     workerReviewCount: WORKERS_BY_ID.w3.reviewCount,
+    workerTotalJobsDone: WORKERS_BY_ID.w3.totalJobsDone,
     workerAvatarUrl: 'https://i.pravatar.cc/150?img=9',
     trade: 'Paseadora de perros',
     workImageUrls: [img.dog1, img.dog2, img.dog3],

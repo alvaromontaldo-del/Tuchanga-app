@@ -1,5 +1,7 @@
 import { getSupabaseClient } from '../lib/supabase';
 import type { SearchWorkerHit, SearchableWorker } from '../data/mockSearchWorkers';
+import { completedJobsFromPayload } from '../utils/workerReputation';
+import { fetchCompletedJobsByProfileIds } from './workerCompletedJobs';
 
 type RpcRow = {
   profile_id: string;
@@ -15,6 +17,7 @@ type RpcRow = {
   summary_jobs: string | null;
   rating_average?: number | null;
   review_count?: number | null;
+  total_jobs_done?: number | null;
 };
 
 const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?u=worker';
@@ -45,7 +48,7 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
   if (error) throw error;
   const rows = (data ?? []) as RpcRow[];
 
-  return rows.map((r) => {
+  const hits = rows.map((r) => {
     const firstName = r.nombre?.trim() || 'Profesional';
     const categories = Array.isArray(r.all_trades) ? r.all_trades : [];
     const primary = r.primary_trade?.trim() || categories[0] || 'Servicios';
@@ -64,6 +67,7 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
         typeof r.review_count === 'number' && Number.isFinite(r.review_count)
           ? Math.max(0, Math.floor(Number(r.review_count) || 0))
           : 0,
+      totalJobsDone: completedJobsFromPayload(r, 'total_jobs_done'),
       avatarUrl: r.avatar_url?.trim() || `${DEFAULT_AVATAR}&id=${encodeURIComponent(r.profile_id)}`,
       categories,
       lat: r.lat,
@@ -75,5 +79,18 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
       worker,
       distanceKm: Math.max(0, Number(r.distance_km) || 0),
     };
+  });
+
+  const missing = hits.filter((h) => h.worker.totalJobsDone == null).map((h) => h.worker.id);
+  if (missing.length === 0) return hits;
+
+  const byId = await fetchCompletedJobsByProfileIds(missing);
+  if (!byId) return hits;
+
+  return hits.map((h) => {
+    if (h.worker.totalJobsDone != null) return h;
+    const n = byId.get(h.worker.id);
+    if (n == null) return h;
+    return { ...h, worker: { ...h.worker, totalJobsDone: n } };
   });
 }

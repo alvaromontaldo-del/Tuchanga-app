@@ -147,6 +147,7 @@ export function UserProfileScreen({ navigation }: Props) {
   const name = displayNameFromUser(displayUser);
   const ratingAverage = displayUser.ratingAverage ?? 0;
   const reviewCount = displayUser.reviewCount ?? 0;
+  const totalJobsDone = displayUser.totalJobsDone;
   const birthDateLabel = formatBirthDateDisplay(displayUser.birthDate);
 
   const uri = displayUser.avatarUri?.trim();
@@ -189,6 +190,7 @@ export function UserProfileScreen({ navigation }: Props) {
               <StarRating
                 score={ratingAverage}
                 reviewCount={reviewCount}
+                completedJobs={totalJobsDone}
                 size={14}
                 textSize={13}
               />

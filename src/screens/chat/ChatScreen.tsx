@@ -2181,14 +2181,20 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                       const sb = getSupabaseClient();
                       const { data: pr } = await sb
                         .from('profiles')
-                        .select('rating_average,review_count')
+                        .select('rating_average,review_count,total_jobs_done')
                         .eq('id', participants.workerId)
                         .maybeSingle();
                       if (pr) {
+                        const jobsRaw = (pr as { total_jobs_done?: unknown }).total_jobs_done;
+                        const jobs =
+                          typeof jobsRaw === 'number' && Number.isFinite(jobsRaw)
+                            ? Math.max(0, Math.floor(jobsRaw))
+                            : undefined;
                         updateWorkerRatings(
                           participants.workerId,
                           Number((pr as { rating_average?: number }).rating_average) || 0,
                           Number((pr as { review_count?: number }).review_count) || 0,
+                          jobs,
                         );
                       }
                     } catch {
