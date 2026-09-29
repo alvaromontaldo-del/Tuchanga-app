@@ -59,7 +59,7 @@ function MainScreen() {
 
 /**
  * La app principal está siempre montada; invitados exploran sin sesión.
- * Login/registro en modal. Comercio aprobado/pendiente → shell solo-comercio.
+ * Login/registro en modal. Solo un comercio ya habilitado entra al shell comercio.
  */
 export function RootNavigator() {
   const { isRestoring, signIn } = useAuth();

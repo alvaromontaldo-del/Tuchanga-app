@@ -308,6 +308,20 @@ export type SignUpPayload = {
   primaryTradeId?: string;
   /** Descripción profesional (obligatorio si ofrecés servicios), máx. 500 caracteres. Se persiste como bio en perfil. */
   bio?: string;
+  /**
+   * Datos del local cuando el alta es de comercio.
+   * Si Supabase pide confirmar el email, se guardan con el signup pendiente
+   * y el comercio se crea en el primer login.
+   */
+  pendingCommerce?: {
+    name: string;
+    phone: string;
+    address: string;
+    latitude: number;
+    longitude: number;
+    rubroIds: string[];
+    openingHours?: { open: string; close: string }[];
+  };
 };
 
 function validateSignUpPayload(payload: SignUpPayload): string | null {
@@ -636,7 +650,7 @@ export async function signUp(payload: SignUpPayload): Promise<AuthResult> {
       if (!authUser) {
         return { ok: false, message: 'No se pudo obtener el usuario recién creado.' };
       }
-      const { password: _p, email: _e, ...persistPayload } = payload;
+      const { password: _p, email: _e, pendingCommerce: _store, ...persistPayload } = payload;
       try {
         await persistSignUpToSupabase(persistPayload, uid);
         await clearPendingProfileSignup();

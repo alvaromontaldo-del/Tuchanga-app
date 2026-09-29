@@ -1,19 +1,27 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { isSupabaseConfigured } from '../config/supabase';
-import { getSupabaseClient } from '../lib/supabase';
 import type { SignUpPayload } from './auth';
+import { registerMyStore } from './storeRegistrationSupabase';
 import { persistSignUpToSupabase } from './supabaseUser';
 
 const KEY = '@tuchanga/pending_profile_signup_v1';
 
+type StoredProfile = Omit<SignUpPayload, 'password' | 'email' | 'pendingCommerce'>;
+
 type Stored = {
   userId: string;
-  profile: Omit<SignUpPayload, 'password' | 'email'>;
+  profile: StoredProfile;
+  /** Alta de comercio cargada en el registro, si el email todavía no estaba confirmado. */
+  store?: SignUpPayload['pendingCommerce'];
 };
 
 export async function savePendingProfileSignup(userId: string, payload: SignUpPayload): Promise<void> {
-  const { password: _pw, email: _em, ...profile } = payload;
-  const data: Stored = { userId, profile };
+  const { password: _pw, email: _em, pendingCommerce, ...profile } = payload;
+  const data: Stored = {
+    userId,
+    profile,
+    ...(pendingCommerce ? { store: pendingCommerce } : {}),
+  };
   await AsyncStorage.setItem(KEY, JSON.stringify(data));
 }
 
@@ -51,6 +59,15 @@ async function applyPendingInternal(userId: string): Promise<void> {
     // persistSignUpToSupabase ya maneja perfil existente (trigger / alta parcial)
     // y completa birth_date + avatar en vez de descartar el pending.
     await persistSignUpToSupabase(pending.profile, userId);
+    if (pending.store) {
+      try {
+        await registerMyStore(pending.store);
+      } catch (storeErr) {
+        const storeMsg = storeErr instanceof Error ? storeErr.message : String(storeErr);
+        // Ya existe: no hace falta reintentar ni pedir los datos de nuevo.
+        if (!/ya ten[eé]s un comercio/i.test(storeMsg)) throw storeErr;
+      }
+    }
     await clearPendingProfileSignup();
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

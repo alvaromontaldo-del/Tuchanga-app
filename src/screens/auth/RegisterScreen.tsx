@@ -69,6 +69,7 @@ import {
 import { colors, radii, spacing } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useCommerceShell } from '../../context/CommerceShellContext';
+import { showPendingCommerceNoticeOnce } from '../../context/pendingCommerceNotice';
 import { closeAuthModalAndGoToInicio, closeAuthModalAndRedirect } from '../../navigation/openAuthModal';
 import {
   fetchStoreRubrosCatalog,
@@ -743,6 +744,17 @@ export function RegisterScreen({ navigation, route }: Props) {
         coverageKm: wantWorker ? clampInt(Number(coverageKm) || 0, 1, 300) : undefined,
         trades: wantWorker ? trades : undefined,
         primaryTradeId: wantWorker ? primaryTradeId ?? undefined : undefined,
+        pendingCommerce: asCommerce
+          ? {
+              name: storeName.trim(),
+              phone,
+              address: savedAddress || storeName.trim(),
+              latitude: geo.lat,
+              longitude: geo.lng,
+              rubroIds: selectedStoreRubros,
+              openingHours: storeOpeningHours,
+            }
+          : undefined,
       });
 
       if (!result.ok) {
@@ -775,7 +787,7 @@ export function RegisterScreen({ navigation, route }: Props) {
         await enterCommerceIntent();
         await chooseSessionRole('commerce');
         try {
-          await registerMyStore({
+          const created = await registerMyStore({
             name: storeName.trim(),
             phone,
             address: savedAddress || storeName.trim(),
@@ -784,7 +796,11 @@ export function RegisterScreen({ navigation, route }: Props) {
             rubroIds: selectedStoreRubros,
             openingHours: storeOpeningHours,
           });
-          refreshCommerceShell();
+          await refreshCommerceShell();
+          if (created.status === 'pending_approval') {
+            showPendingCommerceNoticeOnce(result.user.id);
+            await chooseSessionRole('client');
+          }
         } catch (storeErr) {
           toast.warning(
             storeErr instanceof Error

@@ -18,6 +18,8 @@ import { isSupabaseConfigured } from '../../config/supabase';
 import { colors, radii, spacing } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useCommerceShell } from '../../context/CommerceShellContext';
+import { showPendingCommerceNoticeOnce } from '../../context/pendingCommerceNotice';
+import { navigateToInicioTab } from '../../navigation/openAuthModal';
 import type { CommerceStackParamList } from '../../navigation/mainTypes';
 import {
   fetchStoreRubrosCatalog,
@@ -39,7 +41,7 @@ type Props = NativeStackScreenProps<CommerceStackParamList, 'RegisterStore'>;
 export function RegisterStoreScreen({ navigation }: Props) {
   const toast = useAppToast();
   const { user } = useAuth();
-  const { refresh: refreshCommerceShell } = useCommerceShell();
+  const { refresh: refreshCommerceShell, chooseSessionRole } = useCommerceShell();
 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -120,7 +122,7 @@ export function RegisterStoreScreen({ navigation }: Props) {
     }
     setSubmitting(true);
     try {
-      await registerMyStore({
+      const created = await registerMyStore({
         name,
         phone,
         address,
@@ -129,15 +131,17 @@ export function RegisterStoreScreen({ navigation }: Props) {
         rubroIds: selectedRubros,
         openingHours,
       });
-      toast.success(
-        'Registro enviado. Cuando un admin lo apruebe vas a poder recibir cotizaciones.',
-        'Listo',
-      );
-      refreshCommerceShell();
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'StoreMaterialRequests' }],
-      });
+      await refreshCommerceShell();
+      if (created.status === 'pending_approval') {
+        showPendingCommerceNoticeOnce(user?.id);
+        await chooseSessionRole('client');
+        setTimeout(() => navigateToInicioTab(), 0);
+      } else {
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'StoreMaterialRequests' }],
+        });
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo registrar el comercio.', 'Error');
     } finally {
@@ -152,8 +156,10 @@ export function RegisterStoreScreen({ navigation }: Props) {
     selectedRubros,
     openingHours,
     toast,
-    navigation,
     refreshCommerceShell,
+    chooseSessionRole,
+    user?.id,
+    navigation,
   ]);
 
   return (
