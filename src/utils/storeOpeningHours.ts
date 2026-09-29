@@ -311,6 +311,34 @@ export function setStoreDayClosed(
   );
 }
 
+const SPLIT_AFTERNOON_SLOT: StoreHoursSlot = { open: '15:00', close: '19:00' };
+
+/**
+ * Corrido deja solo la primera franja. Cortado agrega la tarde (15:00–19:00)
+ * si ese día todavía no tenía segunda franja.
+ */
+export function setStoreDaySplit(
+  days: StoreDaySchedule[],
+  day: number,
+  split: boolean,
+): StoreDaySchedule[] {
+  return ensureStoreWeekShape(days).map((row) => {
+    if (row.day !== day) return row;
+    const first = row.slots[0] ?? defaultStoreOpeningHours()[0];
+    if (!split) {
+      return { ...row, slots: [{ open: first.open, close: first.close }] };
+    }
+    const second = row.slots[1] ?? SPLIT_AFTERNOON_SLOT;
+    return {
+      ...row,
+      slots: [
+        { open: first.open, close: first.close },
+        { open: second.open, close: second.close },
+      ],
+    };
+  });
+}
+
 export function patchStoreDaySlot(
   days: StoreDaySchedule[],
   day: number,

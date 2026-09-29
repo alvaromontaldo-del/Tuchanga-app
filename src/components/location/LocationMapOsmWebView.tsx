@@ -174,22 +174,24 @@ export function LocationMapOsmWebView({
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
       ) : null}
-      <View style={styles.overlay} pointerEvents="box-none">
-        <Pressable
-          onPress={onLocateMe}
-          disabled={!onLocateMe || locating}
-          style={[styles.locateBtn, (!onLocateMe || locating) && styles.locateBtnDisabled]}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel="Ubicarme"
-        >
-          {locating ? (
-            <ActivityIndicator color="#111827" />
-          ) : (
-            <Text style={styles.locateText}>Ubicarme</Text>
-          )}
-        </Pressable>
-      </View>
+      {onLocateMe ? (
+        <View style={styles.overlay} pointerEvents="box-none">
+          <Pressable
+            onPress={onLocateMe}
+            disabled={locating}
+            style={[styles.locateBtn, locating && styles.locateBtnDisabled]}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Ubicarme"
+          >
+            {locating ? (
+              <ActivityIndicator color="#111827" />
+            ) : (
+              <Text style={styles.locateText}>Ubicarme</Text>
+            )}
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }
