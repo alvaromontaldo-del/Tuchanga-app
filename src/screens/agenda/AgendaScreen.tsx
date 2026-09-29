@@ -200,10 +200,12 @@ export function AgendaScreen(_props: Props) {
       fetchContratacionesByUser({ role: 'trabajador', limit: 40 }),
     ]);
     const historialRows = allRows.filter(isHistorialContratacion).slice(0, 15);
-    const clientIds = Array.from(
-      new Set([...agendaRows, ...historialRows].map((row) => row.client_id)),
+    const clienteInfo = await fetchAgendaClienteInfoByIds(
+      [...agendaRows, ...historialRows].map((row) => ({
+        id: row.id,
+        client_id: row.client_id,
+      })),
     );
-    const clienteInfo = await fetchAgendaClienteInfoByIds(clientIds);
     setProgramadas(agendaRows);
     setHistorial(historialRows);
     setClienteInfoById(clienteInfo);
