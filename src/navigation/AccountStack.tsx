@@ -18,6 +18,16 @@ import { WorkerABMScreen } from '../screens/account/WorkerABMScreen';
 import { FavoritesScreen } from '../screens/account/FavoritesScreen';
 import { ChangePasswordScreen } from '../screens/account/ChangePasswordScreen';
 import { useAuth } from '../context/AuthContext';
+import { ChatConversationScreen } from '../screens/chat/ChatConversationScreen';
+import { WorkerProfileScreen } from '../screens/home/WorkerProfileScreen';
+import { WorkerPostsScreen } from '../screens/home/WorkerPostsScreen';
+import { WorkerReviewsScreen } from '../screens/home/WorkerReviewsScreen';
+import { DetalleServicioScreen } from '../screens/servicios/DetalleServicioScreen';
+import { CreateMaterialRequestScreen } from '../screens/materials/CreateMaterialRequestScreen';
+import { SelectMaterialStoresScreen } from '../screens/materials/SelectMaterialStoresScreen';
+import { ClientCompareQuotesScreen } from '../screens/client/ClientCompareQuotesScreen';
+import { MaterialOrderDetailScreen } from '../screens/client/MaterialOrderDetailScreen';
+import { MaterialOrderSummaryScreen } from '../screens/client/MaterialOrderSummaryScreen';
 
 const Stack = createNativeStackNavigator<AccountStackParamList>();
 
@@ -114,6 +124,56 @@ export function AccountStack() {
           ...profileChildHeader,
           title: 'Cambiar contraseña',
         }}
+      />
+      <Stack.Screen
+        name="ChatConversation"
+        component={ChatConversationScreen}
+        options={{ headerShown: false, title: 'Chat' }}
+      />
+      <Stack.Screen
+        name="WorkerProfile"
+        component={WorkerProfileScreen}
+        options={{ ...profileChildHeader, title: 'Perfil' }}
+      />
+      <Stack.Screen
+        name="WorkerPosts"
+        component={WorkerPostsScreen}
+        options={{ ...profileChildHeader, title: 'Publicaciones' }}
+      />
+      <Stack.Screen
+        name="WorkerReviews"
+        component={WorkerReviewsScreen}
+        options={{ ...profileChildHeader, title: 'Reseñas' }}
+      />
+      <Stack.Screen
+        name="DetalleServicio"
+        component={DetalleServicioScreen}
+        options={{ ...profileChildHeader, title: 'Detalle del servicio' }}
+      />
+      <Stack.Screen
+        name="CreateMaterialRequest"
+        component={CreateMaterialRequestScreen}
+        options={{ ...profileChildHeader, title: 'Pedido de materiales' }}
+      />
+      <Stack.Screen
+        name="SelectMaterialStores"
+        component={SelectMaterialStoresScreen}
+        options={{ ...profileChildHeader, title: 'Seleccionar comercios' }}
+      />
+      <Stack.Screen
+        name="ClientCompareQuotes"
+        component={ClientCompareQuotesScreen}
+        options={{ ...profileChildHeader, title: 'Cotizaciones de materiales' }}
+      />
+      <Stack.Screen
+        name="MaterialOrderDetail"
+        component={MaterialOrderDetailScreen}
+        options={{ ...profileChildHeader, title: 'Orden / costo de servicio' }}
+      />
+      <Stack.Screen
+        name="MaterialOrderSummary"
+        component={MaterialOrderSummaryScreen}
+        options={{ ...profileChildHeader, title: 'Resumen de Pedido' }}
       />
     </Stack.Navigator>
   );

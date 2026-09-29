@@ -1,14 +1,17 @@
 -- #55 Ocultar el chat a cliente y profesional cuando el reclamo de garantía
 -- ya se inició y las dos partes dieron conformidad.
 --
--- Detección (contratación más reciente del hilo):
+-- Se miran TODAS las contrataciones del hilo, no solo la más reciente.
+-- El chat sigue abierto si alguna no está cerrada o tiene reclamo abierto
+-- o pendiente. Cerrar una no bloquea el hilo mientras otra del par siga viva.
+--
+-- Conformidad de una contratación:
 --   reclamo iniciado     → claim_opened_at
 --   profesional conforme → claim_marked_done_at (marcar arreglo terminado)
 --   cliente conforme     → claim_resolved_at + claim_status = closed
 --                          + is_claim_open = false
 --                          (confirmación explícita o autoaprobación a las 72 h)
 --
--- Una cotización más nueva en el mismo hilo vuelve a habilitar el chat.
 -- Los mensajes system siguen permitidos para el aviso de cierre.
 
 ALTER TABLE public.contrataciones
@@ -19,7 +22,7 @@ ALTER TABLE public.contrataciones
   ADD COLUMN IF NOT EXISTS claim_resolved_at timestamptz;
 
 COMMENT ON COLUMN public.contrataciones.claim_opened_at IS
-  'Inicio del reclamo de garantía. Junto con claim_marked_done_at y claim_resolved_at cierra el chat para ambos.';
+  'Inicio del reclamo de garantía. El chat se cierra cuando todas las contrataciones del hilo están cerradas y alguna llegó a conformidad.';
 
 CREATE OR REPLACE FUNCTION public.chat_cerrado_por_reclamo_conformidad(p_conversation_id uuid)
 RETURNS boolean
@@ -28,29 +31,40 @@ STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
-  SELECT EXISTS (
-    SELECT 1
-    FROM (
-      SELECT
-        c.is_claim_open,
-        c.claim_status,
-        c.claim_opened_at,
-        c.claim_marked_done_at,
-        c.claim_resolved_at
+  SELECT
+    EXISTS (
+      SELECT 1
       FROM public.contrataciones c
       WHERE c.conversation_id = p_conversation_id
-      ORDER BY c.updated_at DESC NULLS LAST, c.created_at DESC NULLS LAST
-      LIMIT 1
-    ) latest
-    WHERE latest.claim_opened_at IS NOT NULL
-      AND latest.claim_marked_done_at IS NOT NULL
-      AND latest.claim_resolved_at IS NOT NULL
-      AND latest.is_claim_open = false
-      AND latest.claim_status = 'closed'
-  );
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.contrataciones c
+      WHERE c.conversation_id = p_conversation_id
+        AND (
+          (
+            c.estado_trabajo IS DISTINCT FROM 'finalizado'
+            AND c.estado_trabajo IS DISTINCT FROM 'cancelado'
+            AND c.estado_trabajo IS DISTINCT FROM 'disputa'
+          )
+          OR c.is_claim_open
+          OR c.claim_status IN ('open', 'pending_approval')
+        )
+    )
+    AND EXISTS (
+      SELECT 1
+      FROM public.contrataciones c
+      WHERE c.conversation_id = p_conversation_id
+        AND c.claim_opened_at IS NOT NULL
+        AND c.claim_marked_done_at IS NOT NULL
+        AND c.claim_resolved_at IS NOT NULL
+        AND c.is_claim_open = false
+        AND c.claim_status = 'closed'
+    );
 $$;
 
 REVOKE ALL ON FUNCTION public.chat_cerrado_por_reclamo_conformidad(uuid) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.chat_cerrado_por_reclamo_conformidad(uuid) FROM anon;
 GRANT EXECUTE ON FUNCTION public.chat_cerrado_por_reclamo_conformidad(uuid) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.enforce_message_rules()

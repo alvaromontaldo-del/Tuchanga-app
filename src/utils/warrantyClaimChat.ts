@@ -1,6 +1,10 @@
 /**
  * Decisión de chat del reclamo de garantía.
  * La función SQL `iniciar_reclamo_garantia` sigue estas mismas reglas.
+ *
+ * Un reclamo que comparte hilo con otro trabajo abre un chat propio
+ * (`conversations.contratacion_id`). No se cierra el chat de un trabajo
+ * en curso ni el de un reclamo abierto o pendiente.
  */
 
 export type PairJob = {
@@ -8,6 +12,17 @@ export type PairJob = {
   estadoTrabajo: string;
   isClaimOpen: boolean;
   claimStatus: string | null;
+};
+
+export type OwnClaimChat = {
+  id: string;
+  active: boolean;
+  /** Otra contratación sigue apuntando a este hilo. */
+  shared: boolean;
+  /** `conversations.contratacion_id` ya es esta contratación. */
+  markedForThisJob: boolean;
+  /** El hilo ya tiene un aviso de reclamo de otra contratación. */
+  foreignClaimMessages: boolean;
 };
 
 export type ClaimChatDecision = {
@@ -44,12 +59,18 @@ export function otherChatCanBeClosed(jobs: PairJob[], contratacionId: string): b
   );
 }
 
+function ownChatIsReusable(own: OwnClaimChat): boolean {
+  if (!own.active) return false;
+  if (own.markedForThisJob) return true;
+  return !own.shared && !own.foreignClaimMessages;
+}
+
 export function resolveWarrantyClaimChat(params: {
-  own: { id: string; active: boolean } | null;
+  own: OwnClaimChat | null;
   activePair: { id: string; jobs: PairJob[] } | null;
   contratacionId: string;
 }): ClaimChatDecision {
-  if (params.own?.active) {
+  if (params.own && ownChatIsReusable(params.own)) {
     return {
       kind: 'use',
       conversationId: params.own.id,
@@ -59,24 +80,22 @@ export function resolveWarrantyClaimChat(params: {
   }
 
   const active = params.activePair;
-  if (active && !otherChatCanBeClosed(active.jobs, params.contratacionId)) {
-    return {
-      kind: 'use',
-      conversationId: active.id,
-      closeConversationId: null,
-      nameJobInEvent: true,
-    };
-  }
+  const closeConversationId =
+    active &&
+    active.id !== params.own?.id &&
+    otherChatCanBeClosed(active.jobs, params.contratacionId)
+      ? active.id
+      : null;
 
   return {
     kind: 'create',
     conversationId: null,
-    closeConversationId: active ? active.id : null,
-    nameJobInEvent: false,
+    closeConversationId,
+    nameJobInEvent: true,
   };
 }
 
-/** Fecha del trabajo para el aviso cuando el evento cae en el chat de otro trabajo. */
+/** Fecha del trabajo para el aviso cuando el reclamo abre su propio hilo. */
 export function warrantyClaimEventFecha(params: {
   fechaTrabajo?: string | null;
   finalizadoAt?: string | null;

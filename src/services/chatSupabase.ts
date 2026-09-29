@@ -1,8 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../lib/supabase';
 import { removeSupabaseRealtimeTopic, removeSupabaseRealtimeTopicAsync } from '../lib/supabaseRealtime';
-import { fetchClosedClaimChatIds } from './claimChatSupabase';
-import { CHAT_CERRADO_POR_RECLAMO } from '../utils/claimChatVisibility';
+import { fetchClosedClaimChatIds, fetchSettledJobChatIds } from './claimChatSupabase';
+import { CHAT_CERRADO_POR_RECLAMO, jobKeepsChatOpen } from '../utils/claimChatVisibility';
+import { dedupeInboxByPeer } from '../utils/inboxPeers';
 import { mapChatSendError } from '../utils/chatErrors';
 import type { ApiConversation, ApiMessage, ConversationRole } from './chatApi';
 import type { InboxRealtimeEvent } from './inboxState';
@@ -14,25 +15,7 @@ function firstNameOnly(name: string): string {
   return parts[0] ?? 'Usuario';
 }
 
-/**
- * Inbox 1:1 por peer: conservar SOLO la conversación más reciente por otherUserId.
- * Clave = otherUserId (no myRole): evita vieja+nueva aunque el rol se lea mal.
- */
-export function dedupeInboxByPeer(rows: ApiConversation[]): ApiConversation[] {
-  const best = new Map<string, ApiConversation>();
-  for (const row of rows) {
-    const key = row.otherUserId || row.id;
-    const prev = best.get(key);
-    if (!prev) {
-      best.set(key, row);
-      continue;
-    }
-    const prevTs = new Date(prev.lastMessageAt ?? prev.updatedAt).getTime();
-    const nextTs = new Date(row.lastMessageAt ?? row.updatedAt).getTime();
-    if (nextTs >= prevTs) best.set(key, row);
-  }
-  return Array.from(best.values());
-}
+export { dedupeInboxByPeer };
 
 /** Soft-delete + hide ambos (fallback si la RPC falla o quedó a medias). */
 async function forceSoftDeleteConversation(
@@ -78,21 +61,39 @@ async function forceSoftDeleteConversation(
   await sb.from('conversation_hides').upsert(hides, { onConflict: 'conversation_id,user_id' });
 }
 
-/** Cierra TODOS los hilos activos del mismo par excepto `keepId` (si se pasa). */
+/** Cierra hilos generales duplicados. No toca un reclamo ni un trabajo que sigue en uso. */
 async function softDeleteSiblingConversations(
   sb: ReturnType<typeof getSupabaseClient>,
   clienteId: string,
   trabajadorId: string,
   keepId?: string | null,
 ): Promise<void> {
-  const { data: siblings } = await sb
+  const { data: siblings, error } = await sb
     .from('conversations')
-    .select('id')
+    .select('id, contratacion_id')
     .eq('cliente_id', clienteId)
     .eq('trabajador_id', trabajadorId)
     .is('deleted_at', null);
-  for (const s of (siblings ?? []) as Array<{ id: string }>) {
-    if (!s?.id || (keepId && s.id === keepId)) continue;
+  if (error || !siblings) return;
+  for (const s of siblings as Array<{ id: string; contratacion_id?: string | null }>) {
+    if (!s?.id || (keepId && s.id === keepId) || s.contratacion_id) continue;
+    const { data: jobs, error: jobErr } = await sb
+      .from('contrataciones')
+      .select('estado_trabajo, is_claim_open, claim_status')
+      .eq('conversation_id', s.id);
+    if (jobErr || !jobs) continue;
+    const keeps = (jobs as Array<{
+      estado_trabajo?: string | null;
+      is_claim_open?: boolean | null;
+      claim_status?: string | null;
+    }>).some((job) =>
+      jobKeepsChatOpen({
+        estado_trabajo: job.estado_trabajo,
+        is_claim_open: job.is_claim_open,
+        claim_status: job.claim_status,
+      }),
+    );
+    if (keeps) continue;
     await forceSoftDeleteConversation(sb, s.id);
   }
 }
@@ -125,6 +126,7 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
 
   if (!activeConvs.length) return [];
 
+  const settledJobChatIds = await fetchSettledJobChatIds(activeConvs.map((c) => c.id));
   const closedClaimIds = await fetchClosedClaimChatIds(activeConvs.map((c) => c.id));
 
   const results: ApiConversation[] = [];
@@ -175,7 +177,7 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
   }
 
   for (const c of activeConvs) {
-    if (hiddenIds.has(c.id)) continue;
+    if (hiddenIds.has(c.id) || settledJobChatIds.has(c.id)) continue;
 
     const myRole: ConversationRole = c.cliente_id === user.id ? 'cliente' : 'trabajador';
     const otherId = myRole === 'cliente' ? c.trabajador_id : c.cliente_id;

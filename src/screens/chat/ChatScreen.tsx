@@ -117,6 +117,8 @@ export type ChatScreenParams = {
   headerSubtitle: string;
   /** Si el otro participante es un profesional, su userId/UUID para abrir su perfil. */
   workerId?: string;
+  /** Abierto desde Trabajos contratados: volver a esa pantalla, no a Mensajes. */
+  backToContractedWork?: boolean;
 };
 
 type UiMessage = {
@@ -218,10 +220,24 @@ type Props = {
   otherDisplayName: string;
   headerSubtitle: string;
   workerId?: string;
+  backToContractedWork?: boolean;
 };
 
-export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, workerId }: Props) {
+export function ChatScreen({
+  conversationId,
+  otherDisplayName,
+  headerSubtitle,
+  workerId,
+  backToContractedWork,
+}: Props) {
   const navigation = useNavigation<any>();
+  const leaveChat = useCallback(() => {
+    if (backToContractedWork) {
+      navigation.navigate('ContractedWorkOrders');
+      return;
+    }
+    navigation.goBack();
+  }, [backToContractedWork, navigation]);
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { refresh: refreshFeed, updateWorkerRatings } = useFeed();
@@ -693,7 +709,7 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
         if (cancelled) return;
         if (!c) {
           toast.warning('No tenés acceso a este chat.', 'Chat');
-          navigation.goBack();
+          leaveChat();
           return;
         }
         const myRole = c.cliente_id === myId ? 'cliente' : 'trabajador';
@@ -705,14 +721,14 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
       } catch {
         if (!cancelled) {
           toast.warning('No se pudo abrir este chat.', 'Chat');
-          navigation.goBack();
+          leaveChat();
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [conversationId, myId, navigation, toast]);
+  }, [conversationId, leaveChat, myId, toast]);
 
   useEffect(() => {
     if (!isSupabaseConfigured() || !conversationId) return;
@@ -2656,7 +2672,7 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
                                   await deleteConversation(myId, conversationId);
                                   await reconcileInboxFromServer({ force: true });
                                   toast.success('Chat eliminado.', 'Mensajes');
-                                  navigation.goBack();
+                                  leaveChat();
                                 } catch (e) {
                                   console.error('[delete chat:detail]', e);
                                   toast.error(
@@ -2689,7 +2705,7 @@ export function ChatScreen({ conversationId, otherDisplayName, headerSubtitle, w
           {/* Una sola fila: back + nombre + chips + ⋮/trash */}
           <View style={styles.headerTopRow}>
             <Pressable
-              onPress={() => navigation.goBack()}
+              onPress={leaveChat}
               accessibilityRole="button"
               accessibilityLabel="Volver"
               hitSlop={8}

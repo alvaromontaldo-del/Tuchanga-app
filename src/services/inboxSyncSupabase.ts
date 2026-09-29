@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../lib/supabase';
 import { CHAT_CERRADO_POR_RECLAMO } from '../utils/claimChatVisibility';
-import { fetchClosedClaimChatIds } from './claimChatSupabase';
+import { fetchClosedClaimChatIds, fetchSettledJobChatIds } from './claimChatSupabase';
 import { fetchTotalUnreadCountSupabase } from './chatSupabase';
 
 export type ConversationSnippet = {
@@ -80,9 +80,10 @@ export async function fetchInboxSyncLight(): Promise<{
     /* RPC opcional */
   }
 
+  const settledJobChatIds = await fetchSettledJobChatIds(convIds);
   const closedClaimIds = await fetchClosedClaimChatIds(convIds);
   let closedUnread = 0;
-  for (const id of closedClaimIds) {
+  for (const id of settledJobChatIds) {
     closedUnread += unreadByConversationId[id] ?? 0;
     unreadByConversationId[id] = 0;
   }
@@ -105,6 +106,7 @@ export async function fetchInboxSyncLight(): Promise<{
         .limit(1);
       const last = lastMsgs?.[0];
       if (!last) return;
+      if (settledJobChatIds.has(conversationId)) return;
       const closedByClaim = closedClaimIds.has(conversationId);
       snippets.push({
         conversationId,
@@ -143,6 +145,9 @@ export async function fetchConversationSnippet(
     .eq('user_id', user.id)
     .maybeSingle();
   if (hideRow) return null;
+
+  const settledJobChatIds = await fetchSettledJobChatIds([conversationId]);
+  if (settledJobChatIds.has(conversationId)) return null;
 
   const closedClaimIds = await fetchClosedClaimChatIds([conversationId]);
   if (closedClaimIds.has(conversationId)) {

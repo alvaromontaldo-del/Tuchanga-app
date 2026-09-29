@@ -141,7 +141,7 @@ export function ConversationsListScreen({ navigation }: Props) {
     const data = await loadConversations(user.id);
     // #7: ocultar conversaciones sin mensajes (solo mostrar hilos reales).
     const filtered = data.filter((c) => Boolean(c.lastMessageAt));
-    // Obligatorio en UI: 1 fila por peer (vieja soft-deleted / huérfana nunca compite).
+    // Una fila por conversación: varios reclamos del mismo profesional conviven.
     const deduped = dedupeInboxByPeer(filtered);
     const sorted = [...deduped].sort(
       (a, b) =>
@@ -234,7 +234,7 @@ export function ConversationsListScreen({ navigation }: Props) {
 
   const itemsForTab = useMemo(() => {
     const tabItems = isWorker ? items.filter((c) => c.myRole === activeTab) : items;
-    // Re-dedupe por si realtime/patches metieron un id viejo del mismo peer.
+    // Re-dedupe por si realtime repitió el mismo id.
     return dedupeInboxByPeer(tabItems);
   }, [items, activeTab, isWorker]);
 
