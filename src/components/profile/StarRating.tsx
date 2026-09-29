@@ -1,11 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, spacing } from '../../constants/theme';
+import { canShowWorkerReputation } from '../../utils/workerReputation';
 
 type Props = {
   /** Promedio entre 0 y 5 */
   score?: number | null | undefined;
   reviewCount?: number | null | undefined;
+  /**
+   * Trabajos finalizados (`profiles.total_jobs_done`).
+   * Definido y menor a 2 → badge «Nuevo». `undefined` → estrellas (dato legacy).
+   */
+  completedJobs?: number | null;
   /** Tamaño del icono de estrella */
   size?: number;
   /** Tamaño del texto (score y conteo). Si se omite, se calcula según `size`. */
@@ -21,16 +27,33 @@ type Props = {
 /**
  * Rating normalizado: [Estrellas] [Promedio] ([Cantidad]).
  * Si no hay reseñas, muestra estrellas vacías y "(0)".
+ * Con `completedJobs` definido y menor a 2, muestra el badge «Nuevo».
  */
 export function StarRating({
   score,
   reviewCount,
+  completedJobs,
   size = 14,
   textSize,
   onPressReviews,
   showCount = true,
   inline = false,
 }: Props) {
+  const resolvedTextSize = Math.max(11, Math.floor(Number(textSize ?? Math.max(12, size - 1)) || 12));
+  const wrapStyle = inline ? styles.wrapInline : styles.wrap;
+  const hideReputation =
+    completedJobs !== undefined && !canShowWorkerReputation(completedJobs);
+
+  if (hideReputation) {
+    return (
+      <View style={wrapStyle}>
+        <View style={styles.nuevoBadge} accessibilityRole="text" accessibilityLabel="Profesional nuevo">
+          <Text style={[styles.nuevoText, { fontSize: resolvedTextSize }]}>Nuevo</Text>
+        </View>
+      </View>
+    );
+  }
+
   const safeScore = typeof score === 'number' && !Number.isNaN(score) ? score : 0;
   const safeCount = typeof reviewCount === 'number' && Number.isFinite(reviewCount) ? reviewCount : 0;
   const clamped = Math.min(5, Math.max(0, safeScore));
@@ -49,8 +72,6 @@ export function StarRating({
 
   const tappable = Boolean(onPressReviews) && hasReviews;
   const countText = `(${safeCount})`;
-  const resolvedTextSize = Math.max(11, Math.floor(Number(textSize ?? Math.max(12, size - 1)) || 12));
-  const wrapStyle = inline ? styles.wrapInline : styles.wrap;
 
   const Content = (
     <View style={styles.row}>
@@ -114,6 +135,16 @@ const styles = StyleSheet.create({
   count: {
     marginLeft: spacing.xs,
     color: colors.textSecondary,
+    fontWeight: '800',
+  },
+  nuevoBadge: {
+    backgroundColor: '#E0E7FF',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  nuevoText: {
+    color: '#3730A3',
     fontWeight: '800',
   },
 });

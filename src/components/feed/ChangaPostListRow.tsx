@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ChangaCard } from './ChangaCard';
+import { StarRating } from '../profile/StarRating';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import type { FeedPost } from '../../types/feed';
 import { formatPostDate } from '../../utils/formatDate';
+import { canShowWorkerReputation } from '../../utils/workerReputation';
 
 export type ChangaPostListRowProps = {
   post: FeedPost;
@@ -29,8 +31,12 @@ export function ChangaPostListRow({
 }: ChangaPostListRowProps) {
   const uri = thumbUri(post);
   const rating = post.workerRatingAverage;
+  const jobsDone = post.workerTotalJobsDone;
+  const showNuevo =
+    showWorkerRating && jobsDone !== undefined && !canShowWorkerReputation(jobsDone);
   const showRating =
     showWorkerRating &&
+    !showNuevo &&
     typeof rating === 'number' &&
     !Number.isNaN(rating) &&
     rating > 0;
@@ -60,7 +66,9 @@ export function ChangaPostListRow({
               <Text style={styles.subtitle} numberOfLines={1}>
                 {post.trade}
               </Text>
-              {showRating ? (
+              {showNuevo ? (
+                <StarRating completedJobs={jobsDone} score={rating} inline size={12} textSize={12} />
+              ) : showRating ? (
                 <View style={styles.ratingBadge}>
                   <Text style={styles.ratingNum}>{rating.toFixed(1)}</Text>
                   <Ionicons name="star" size={12} color="#D97706" />

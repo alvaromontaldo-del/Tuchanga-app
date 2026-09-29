@@ -24,6 +24,7 @@ type FeedContextValue = {
     workerId: string,
     ratingAverage: number,
     reviewCount: number,
+    totalJobsDone?: number,
   ) => void;
 };
 
@@ -46,6 +47,7 @@ export function FeedProvider({ children }: { children: ReactNode }) {
           workerAvatarUrl: r.workerAvatarUrl,
           workerRatingAverage: r.workerRatingAverage,
           workerReviewCount: r.workerReviewCount,
+          workerTotalJobsDone: r.workerTotalJobsDone,
           trade: r.trade,
           workImageUrls: normalizePostImageUrls(r.workImageUrls),
           description: r.description ?? '',
@@ -108,13 +110,22 @@ export function FeedProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateWorkerRatings = useCallback(
-    (workerId: string, ratingAverage: number, reviewCount: number) => {
+    (workerId: string, ratingAverage: number, reviewCount: number, totalJobsDone?: number) => {
       const avg = Math.max(0, Math.min(5, Number(ratingAverage) || 0));
       const count = Math.max(0, Math.floor(Number(reviewCount) || 0));
+      const jobs =
+        typeof totalJobsDone === 'number' && Number.isFinite(totalJobsDone)
+          ? Math.max(0, Math.floor(totalJobsDone))
+          : undefined;
       setPosts((prev) =>
         prev.map((p) =>
           p.workerId === workerId
-            ? { ...p, workerRatingAverage: avg, workerReviewCount: count }
+            ? {
+                ...p,
+                workerRatingAverage: avg,
+                workerReviewCount: count,
+                ...(jobs != null ? { workerTotalJobsDone: jobs } : {}),
+              }
             : p,
         ),
       );

@@ -266,6 +266,8 @@ export type AuthUser = {
   ratingAverage?: number;
   /** Cantidad de reseñas acumuladas. */
   reviewCount?: number;
+  /** Trabajos finalizados. Con menos de 2 la cuenta muestra «Nuevo». */
+  totalJobsDone?: number;
 
   /** Fecha de nacimiento ISO (YYYY-MM-DD) */
   birthDate?: string;

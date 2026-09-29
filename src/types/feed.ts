@@ -13,6 +13,8 @@ export type FeedPost = {
   workerRatingAverage?: number;
   /** Cantidad de reseñas del profesional (opcional; útil para UI consistente) */
   workerReviewCount?: number;
+  /** Trabajos finalizados (`profiles.total_jobs_done`). Ausente = dato legacy. */
+  workerTotalJobsDone?: number;
   /** Hasta 3 fotos por publicación */
   workImageUrls: string[];
   description: string;
@@ -64,6 +66,8 @@ export type WorkerPublicProfile = {
   ratingAverage: number;
   /** Cantidad de reseñas que promedian la calificación */
   reviewCount: number;
+  /** Trabajos finalizados. Con menos de 2 la UI muestra «Nuevo» en lugar de estrellas. */
+  totalJobsDone: number;
   /** Oficios ofrecidos (máximo 5) */
   trades: WorkerTradeEntry[];
 };

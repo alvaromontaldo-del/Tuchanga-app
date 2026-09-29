@@ -27,6 +27,7 @@ import { openAuthModal } from '../../navigation/openAuthModal';
 import { openOrCreateChat } from '../../services/messaging';
 import { fetchWorkerPublicProfileFromSupabase } from '../../services/workerProfileSupabase';
 import { StarRating } from '../../components/profile/StarRating';
+import { canShowWorkerReputation } from '../../utils/workerReputation';
 import type {
   FeedStackScreenProps,
   MessagesStackScreenProps,
@@ -256,6 +257,9 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
   const favOn = favId ? isFavorite(favId) : false;
 
   const avgRating = Math.min(5, Math.max(0, Number(worker.ratingAverage) || 0));
+  const reputationLocked =
+    worker.totalJobsDone !== undefined && !canShowWorkerReputation(worker.totalJobsDone);
+  const canOpenReviews = !reputationLocked && worker.reviewCount > 0;
 
   async function onToggleFavorite() {
     if (!favId) return;
@@ -275,6 +279,7 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
           avatarUrl: w.avatarUrl,
           ratingAverage: w.ratingAverage,
           reviewCount: w.reviewCount,
+          totalJobsDone: w.totalJobsDone,
           categories: trades.map((t) => t.title).filter(Boolean),
         },
       });
@@ -392,23 +397,31 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
         </View>
 
         <Pressable
-          style={({ pressed }) => [styles.proRatingRow, pressed && styles.pressed]}
-          accessibilityRole={worker.reviewCount > 0 ? 'button' : 'text'}
+          style={({ pressed }) => [styles.proRatingRow, canOpenReviews && pressed && styles.pressed]}
+          accessibilityRole={canOpenReviews ? 'button' : 'text'}
           accessibilityLabel={
-            worker.reviewCount > 0
-              ? `Profesional, calificación ${avgRating.toFixed(1)} de 5. Ver reseñas`
-              : `Profesional, sin reseñas aún`
+            reputationLocked
+              ? 'Profesional nuevo'
+              : canOpenReviews
+                ? `Profesional, calificación ${avgRating.toFixed(1)} de 5. Ver reseñas`
+                : 'Profesional, sin reseñas aún'
           }
-          disabled={worker.reviewCount <= 0}
+          disabled={!canOpenReviews}
           onPress={() => {
-            if (worker.reviewCount <= 0) return;
+            if (!canOpenReviews) return;
             (navigation as unknown as WorkerProfileFlowNav).navigate('WorkerReviews', {
               workerId: reviewsNavWorkerId,
             });
           }}
         >
           <Text style={styles.proLabel}>Profesional</Text>
-          <StarRating score={avgRating} reviewCount={worker.reviewCount} size={14} textSize={13} />
+          <StarRating
+            score={avgRating}
+            reviewCount={worker.reviewCount}
+            completedJobs={worker.totalJobsDone}
+            size={14}
+            textSize={13}
+          />
         </Pressable>
 
         <Pressable

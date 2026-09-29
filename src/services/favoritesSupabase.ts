@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../lib/supabase';
+import { completedJobsFromPayload } from '../utils/workerReputation';
 
 export type FavoriteProfessional = {
   id: string;
@@ -7,6 +8,11 @@ export type FavoriteProfessional = {
   avatarUrl: string;
   ratingAverage: number;
   reviewCount: number;
+  /**
+   * Trabajos finalizados (`list_favorites.total_jobs_done`).
+   * Ausente solo si el RPC no trae la columna.
+   */
+  totalJobsDone?: number;
   categories: string[];
 };
 
@@ -18,7 +24,21 @@ type RpcFavoriteRow = {
   primary_trade: string | null;
   all_trades: string[] | null;
   summary_jobs: string | null;
+  rating_average?: number | string | null;
+  review_count?: number | string | null;
+  total_jobs_done?: number | string | null;
 };
+
+function finiteInRange(raw: unknown, max: number): number {
+  const n =
+    typeof raw === 'number'
+      ? raw
+      : typeof raw === 'string' && raw.trim() !== ''
+        ? Number(raw)
+        : Number.NaN;
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(max, n));
+}
 
 const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?u=favorite';
 
@@ -54,8 +74,9 @@ export async function fetchFavoritesFromSupabase(): Promise<FavoriteProfessional
       id: r.profile_id,
       firstName,
       summary,
-      ratingAverage: 0,
-      reviewCount: 0,
+      ratingAverage: finiteInRange(r.rating_average, 5),
+      reviewCount: Math.floor(finiteInRange(r.review_count, Number.MAX_SAFE_INTEGER)),
+      totalJobsDone: completedJobsFromPayload(r, 'total_jobs_done'),
       avatarUrl: r.avatar_url?.trim() || `${DEFAULT_AVATAR}&id=${encodeURIComponent(r.profile_id)}`,
       categories,
     };

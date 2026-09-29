@@ -54,5 +54,7 @@ export function mergeAuthUserProfile(
       typeof fresh.ratingAverage === 'number' ? fresh.ratingAverage : ctx.ratingAverage,
     reviewCount:
       typeof fresh.reviewCount === 'number' ? fresh.reviewCount : ctx.reviewCount,
+    totalJobsDone:
+      typeof fresh.totalJobsDone === 'number' ? fresh.totalJobsDone : ctx.totalJobsDone,
   };
 }

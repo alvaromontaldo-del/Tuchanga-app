@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../lib/supabase';
 import type { WorkerPublicProfile } from '../types/feed';
 import { MAX_WORKER_TRADES } from '../types/feed';
+import { completedJobsFromPayload } from '../utils/workerReputation';
 
 const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?u=profile';
 
@@ -74,7 +75,7 @@ export async function fetchWorkerPublicProfileFromSupabase(
   const { data: profile, error: pe } = await sb
     .from('profiles')
     .select(
-      'id,nombre,apellido,avatar_url,direccion_texto,bio,professional_description,birth_date,rating_average,review_count',
+      'id,nombre,apellido,avatar_url,direccion_texto,bio,professional_description,birth_date,rating_average,review_count,total_jobs_done',
     )
     .eq('id', workerUserId)
     .maybeSingle();
@@ -160,6 +161,7 @@ export async function fetchWorkerPublicProfileFromSupabase(
       0,
       Math.floor(Number((profile as { review_count?: unknown }).review_count) || 0),
     ),
+    totalJobsDone: completedJobsFromPayload(profile, 'total_jobs_done') ?? 0,
     trades,
   };
 }

@@ -94,6 +94,7 @@ export function FavoritesScreen({ navigation }: Props) {
                   avatarUrl: p.avatarUrl,
                   ratingAverage: p.ratingAverage,
                   reviewCount: p.reviewCount,
+                  totalJobsDone: p.totalJobsDone,
                 }}
                 onPress={() => goToWorkerProfile(p.id)}
                 showChevron

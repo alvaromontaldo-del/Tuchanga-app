@@ -82,6 +82,7 @@ export function ChangaImagePost({
               <StarRating
                 score={rating}
                 reviewCount={reviewCount}
+                completedJobs={post.workerTotalJobsDone}
                 size={12}
                 textSize={12}
               />

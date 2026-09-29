@@ -82,6 +82,7 @@ export function MyAccountScreen({ navigation }: Props) {
   const initials = initialsFromAuthUser(user);
   const ratingAverage = user?.ratingAverage ?? 0;
   const reviewCount = user?.reviewCount ?? 0;
+  const totalJobsDone = user?.totalJobsDone;
   const scrollRef = useRef<ScrollView | null>(null);
   useScrollToTop(scrollRef);
   return (
@@ -118,7 +119,13 @@ export function MyAccountScreen({ navigation }: Props) {
                 {displayName}
               </Text>
               {isWorkerRegisteredAnywhere ? (
-                <StarRating score={ratingAverage} reviewCount={reviewCount} size={12} textSize={12} />
+                <StarRating
+                  score={ratingAverage}
+                  reviewCount={reviewCount}
+                  completedJobs={totalJobsDone}
+                  size={12}
+                  textSize={12}
+                />
               ) : null}
             </View>
             <Text style={styles.heroEmail} numberOfLines={1}>

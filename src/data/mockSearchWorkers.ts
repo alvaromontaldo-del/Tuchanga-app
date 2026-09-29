@@ -15,6 +15,8 @@ export type SearchableWorker = {
   summary: string;
   ratingAverage: number;
   reviewCount: number;
+  /** Trabajos finalizados. Los mocks con reseñas quedan en ≥ 2 para seguir mostrando estrellas. */
+  totalJobsDone?: number;
   avatarUrl: string;
   /** Rubros canónicos (nombres del catálogo `rubros.json`) */
   categories: string[];
@@ -44,6 +46,7 @@ export const SEARCH_WORKERS: SearchableWorker[] = [
     summary: 'Electricista matriculada · Albañilería ligera · Paseos con mascotas',
     ratingAverage: 4.7,
     reviewCount: 8,
+    totalJobsDone: 8,
     avatarUrl: 'https://i.pravatar.cc/150?img=5',
     categories: ['Electricidad', 'Albañilería', 'Paseo de perros'],
     lat: -34.6037,
@@ -56,6 +59,7 @@ export const SEARCH_WORKERS: SearchableWorker[] = [
     summary: 'Plomería, destapaciones y gas en cocina y baño',
     ratingAverage: 4.5,
     reviewCount: 6,
+    totalJobsDone: 6,
     avatarUrl: 'https://i.pravatar.cc/150?img=12',
     categories: ['Plomería', 'Gasista'],
     lat: -34.6158,
@@ -68,6 +72,7 @@ export const SEARCH_WORKERS: SearchableWorker[] = [
     summary: 'Paseos individuales y grupales · Cuidado en domicilio',
     ratingAverage: 5,
     reviewCount: 5,
+    totalJobsDone: 5,
     avatarUrl: 'https://i.pravatar.cc/150?img=9',
     categories: ['Paseo de perros'],
     lat: -34.5895,
@@ -80,6 +85,7 @@ export const SEARCH_WORKERS: SearchableWorker[] = [
     summary: 'Gasista matriculado · Revisión de artefactos y instalaciones',
     ratingAverage: 4.7,
     reviewCount: 3,
+    totalJobsDone: 3,
     avatarUrl: 'https://i.pravatar.cc/150?img=33',
     categories: ['Gasista', 'Plomería'],
     lat: -34.404,
@@ -92,6 +98,7 @@ export const SEARCH_WORKERS: SearchableWorker[] = [
     summary: 'Pintura interior y exterior · Pequeñas reparaciones',
     ratingAverage: 4.5,
     reviewCount: 2,
+    totalJobsDone: 2,
     avatarUrl: 'https://i.pravatar.cc/150?img=47',
     categories: ['Pintura (obras)', 'Albañilería'],
     lat: -34.9214,
@@ -104,6 +111,7 @@ export const SEARCH_WORKERS: SearchableWorker[] = [
     summary: 'Instalaciones eléctricas y tableros en obra y hogar',
     ratingAverage: 4.5,
     reviewCount: 2,
+    totalJobsDone: 2,
     avatarUrl: 'https://i.pravatar.cc/150?img=15',
     categories: ['Electricidad'],
     lat: -38.0055,
