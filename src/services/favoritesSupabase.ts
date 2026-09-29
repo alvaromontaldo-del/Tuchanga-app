@@ -1,5 +1,5 @@
 import { getSupabaseClient } from '../lib/supabase';
-import { normalizeCompletedJobs } from '../utils/workerReputation';
+import { completedJobsFromPayload } from '../utils/workerReputation';
 
 export type FavoriteProfessional = {
   id: string;
@@ -8,7 +8,10 @@ export type FavoriteProfessional = {
   avatarUrl: string;
   ratingAverage: number;
   reviewCount: number;
-  /** Trabajos finalizados. Ausente si no se pudo leer el perfil. */
+  /**
+   * Trabajos finalizados (`list_favorites.total_jobs_done`).
+   * Ausente solo si el RPC no trae la columna.
+   */
   totalJobsDone?: number;
   categories: string[];
 };
@@ -21,7 +24,21 @@ type RpcFavoriteRow = {
   primary_trade: string | null;
   all_trades: string[] | null;
   summary_jobs: string | null;
+  rating_average?: number | string | null;
+  review_count?: number | string | null;
+  total_jobs_done?: number | string | null;
 };
+
+function finiteInRange(raw: unknown, max: number): number {
+  const n =
+    typeof raw === 'number'
+      ? raw
+      : typeof raw === 'string' && raw.trim() !== ''
+        ? Number(raw)
+        : Number.NaN;
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(max, n));
+}
 
 const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?u=favorite';
 
@@ -45,40 +62,6 @@ export async function fetchFavoritesFromSupabase(): Promise<FavoriteProfessional
   if (error) throw error;
   const rows = (data ?? []) as RpcFavoriteRow[];
 
-  const ids = rows.map((r) => String(r.profile_id ?? '').trim()).filter(Boolean);
-  const stats = new Map<
-    string,
-    { ratingAverage: number; reviewCount: number; totalJobsDone: number }
-  >();
-  if (ids.length > 0) {
-    const { data: profiles, error: pe } = await sb
-      .from('profiles')
-      .select('id,rating_average,review_count,total_jobs_done')
-      .in('id', ids);
-    if (!pe) {
-      for (const p of (profiles ?? []) as {
-        id?: string;
-        rating_average?: number | null;
-        review_count?: number | null;
-        total_jobs_done?: unknown;
-      }[]) {
-        const id = String(p.id ?? '').trim();
-        if (!id) continue;
-        stats.set(id, {
-          ratingAverage:
-            typeof p.rating_average === 'number' && !Number.isNaN(p.rating_average)
-              ? Math.max(0, Math.min(5, Number(p.rating_average) || 0))
-              : 0,
-          reviewCount:
-            typeof p.review_count === 'number' && Number.isFinite(p.review_count)
-              ? Math.max(0, Math.floor(Number(p.review_count) || 0))
-              : 0,
-          totalJobsDone: normalizeCompletedJobs(p.total_jobs_done),
-        });
-      }
-    }
-  }
-
   return rows.map((r) => {
     const firstName = r.nombre?.trim() || 'Profesional';
     const categories = Array.isArray(r.all_trades) ? r.all_trades : [];
@@ -87,14 +70,13 @@ export async function fetchFavoritesFromSupabase(): Promise<FavoriteProfessional
       r.summary_jobs?.trim() ||
       `${primary}${categories.length > 1 ? ` · ${categories.slice(1, 3).join(' · ')}` : ''}`;
 
-    const stat = stats.get(r.profile_id);
     return {
       id: r.profile_id,
       firstName,
       summary,
-      ratingAverage: stat?.ratingAverage ?? 0,
-      reviewCount: stat?.reviewCount ?? 0,
-      totalJobsDone: stat?.totalJobsDone,
+      ratingAverage: finiteInRange(r.rating_average, 5),
+      reviewCount: Math.floor(finiteInRange(r.review_count, Number.MAX_SAFE_INTEGER)),
+      totalJobsDone: completedJobsFromPayload(r, 'total_jobs_done'),
       avatarUrl: r.avatar_url?.trim() || `${DEFAULT_AVATAR}&id=${encodeURIComponent(r.profile_id)}`,
       categories,
     };

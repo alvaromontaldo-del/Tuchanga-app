@@ -77,6 +77,8 @@ export function WorkerReviewsScreen({ route }: Props) {
     }
 
     setLoading(true);
+    setRemoteReviews(null);
+    setCompletedJobs(mockWorker?.totalJobsDone);
     void (async () => {
       try {
         const sb = getSupabaseClient();
@@ -89,15 +91,20 @@ export function WorkerReviewsScreen({ route }: Props) {
           .maybeSingle();
         const profileRow = (p ?? {}) as { nombre?: string | null; total_jobs_done?: unknown };
         const jobs = completedJobsFromPayload(profileRow, 'total_jobs_done');
+        const jobsKnown = jobs != null ? jobs : mockWorker?.totalJobsDone;
         if (!cancelled) {
-          if (jobs != null) setCompletedJobs(jobs);
-          else if (mockWorker) setCompletedJobs(mockWorker.totalJobsDone);
+          if (jobsKnown != null) setCompletedJobs(jobsKnown);
+          if (!mockWorker) {
+            const first = String(profileRow.nombre ?? '').trim().split(/\s+/)[0] || '';
+            setRemoteWorkerName(first || null);
+          } else {
+            setRemoteWorkerName(null);
+          }
         }
-        if (!mockWorker) {
-          const first = String(profileRow.nombre ?? '').trim().split(/\s+/)[0] || '';
-          if (!cancelled) setRemoteWorkerName(first || null);
-        } else if (!cancelled) {
-          setRemoteWorkerName(null);
+
+        if (jobsKnown != null && !canShowWorkerReputation(jobsKnown)) {
+          if (!cancelled) setRemoteReviews([]);
+          return;
         }
 
         const { data, error } = await sb
@@ -172,8 +179,7 @@ export function WorkerReviewsScreen({ route }: Props) {
     return (
       <View style={styles.emptyWrap}>
         <Text style={styles.empty}>
-          Este profesional es nuevo. Las reseñas se muestran a partir del segundo trabajo
-          finalizado.
+          Profesional nuevo. Las reseñas se muestran a partir del segundo trabajo finalizado.
         </Text>
       </View>
     );
