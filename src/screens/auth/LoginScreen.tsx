@@ -16,6 +16,7 @@ import { AppTextInput } from '../../components/common/AppTextInput';
 import { TextLink } from '../../components/common/TextLink';
 import { useAppToast } from '../../components/toast/toast';
 import { colors, radii, spacing } from '../../constants/theme';
+import { AccountDeactivationModal } from '../../components/auth/AccountDeactivationModal';
 import { useAuth } from '../../context/AuthContext';
 import { useCommerceShell, COMMERCE_SHELL_STATUSES } from '../../context/CommerceShellContext';
 import { closeAuthModalAndGoToInicio, closeAuthModalAndRedirect } from '../../navigation/openAuthModal';
@@ -26,7 +27,13 @@ import { isValidEmail } from '../../utils/validation';
 type Props = AuthStackScreenProps<'Login'>;
 
 export function LoginScreen({ navigation, route }: Props) {
-  const { signIn: setSession, flashMessage, setFlashMessage } = useAuth();
+  const {
+    signIn: setSession,
+    flashMessage,
+    setFlashMessage,
+    deactivationMessage,
+    clearDeactivationMessage,
+  } = useAuth();
   const {
     enterCommerceIntent,
     clearCommerceIntent,
@@ -43,6 +50,7 @@ export function LoginScreen({ navigation, route }: Props) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [deactivationNotice, setDeactivationNotice] = useState<string | null>(null);
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
 
@@ -55,6 +63,13 @@ export function LoginScreen({ navigation, route }: Props) {
     toast.info(flashMessage, 'YaChanga');
     setFlashMessage(null);
   }, [flashMessage, setFlashMessage, toast]);
+
+  useEffect(() => {
+    if (!deactivationMessage) return;
+    setDeactivationNotice(deactivationMessage);
+    setSubmitError(deactivationMessage);
+    clearDeactivationMessage();
+  }, [deactivationMessage, clearDeactivationMessage]);
 
   function validate(): boolean {
     let ok = true;
@@ -88,6 +103,9 @@ export function LoginScreen({ navigation, route }: Props) {
       const result = await signIn(email, password);
       if (!result.ok) {
         setSubmitError(result.message);
+        if (result.reason === 'account_deactivated') {
+          setDeactivationNotice(result.message);
+        }
         return;
       }
 
@@ -127,6 +145,11 @@ export function LoginScreen({ navigation, route }: Props) {
 
   return (
     <AppScreen style={styles.flex} edges={['top', 'left', 'right', 'bottom']}>
+      <AccountDeactivationModal
+        visible={Boolean(deactivationNotice)}
+        message={deactivationNotice ?? ''}
+        onClose={() => setDeactivationNotice(null)}
+      />
       <AppKeyboardAvoidingView style={styles.flex}>
         <ScrollView
           contentContainerStyle={styles.scroll}

@@ -8,11 +8,15 @@ import { getPasswordRecoveryRedirectUrl } from '../config/authRedirect';
 import { RECOVERY_RESEND_COOLDOWN_MS } from '../config/passwordRecovery';
 import { isSupabaseConfigured } from '../config/supabase';
 import { getSupabaseClient } from '../lib/supabase';
+import { genericDeactivationMessage, isUserBannedAuthError } from './accountDeactivation';
 import { fetchAuthUserFromSupabase } from './supabaseUser';
 import type { AuthUser } from './auth';
 
 function mapSupabaseAuthError(raw: string, code?: string, status?: number): string {
   const m = raw.toLowerCase();
+  if (code === 'user_banned' || isUserBannedAuthError({ message: raw, code })) {
+    return genericDeactivationMessage();
+  }
 
   if (code === 'over_email_send_rate_limit' || code === 'over_request_rate_limit' || status === 429) {
     if (m.includes('once every') || m.includes('60 second')) {

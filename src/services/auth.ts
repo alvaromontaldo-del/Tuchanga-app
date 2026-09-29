@@ -13,6 +13,15 @@ import {
   savePendingProfileSignup,
   tryApplyPendingProfileSignup,
 } from './pendingProfileSignup';
+import {
+  isUserBannedAuthError,
+  loadDeactivationReason,
+  messageForBannedExternalLogin,
+  rememberDeactivationSignOut,
+  resolveBannedPasswordAttempt,
+  resolveSessionDeactivation,
+  takeDeactivationSignOutSince,
+} from './accountDeactivation';
 import { fetchAuthUserFromSupabase, persistSignUpToSupabase } from './supabaseUser';
 
 const MOCK_DELAY_MS = 900;
@@ -33,6 +42,8 @@ function rejectAfter(ms: number, message: string): Promise<never> {
 
 /** Mensajes de Supabase Auth más claros en español. */
 function mapSupabaseSignInError(raw: string): string {
+  const banned = messageForBannedExternalLogin({ message: raw });
+  if (banned) return banned;
   const m = raw.toLowerCase();
   if (m.includes('email not confirmed') || m.includes('not confirmed')) {
     return 'Tenés que confirmar el correo antes de ingresar. Revisá tu bandeja (y spam) o pedí un nuevo mail desde Supabase.';
@@ -259,7 +270,19 @@ export type AuthUser = {
   birthDate?: string;
 };
 
-export type AuthFailureReason = 'error' | 'email_confirmation' | 'identity_taken';
+export type AuthFailureReason = 'error' | 'email_confirmation' | 'identity_taken' | 'account_deactivated';
+
+class AccountDeactivatedError extends Error {
+  readonly reason = 'account_deactivated' as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'AccountDeactivatedError';
+  }
+}
+
+function isAccountDeactivatedError(e: unknown): e is AccountDeactivatedError {
+  return e instanceof AccountDeactivatedError;
+}
 
 export type AuthResult =
   | { ok: true; user: AuthUser }
@@ -402,6 +425,23 @@ function buildAuthUserFromSignUpPayload(
 
 const registeredEmails = new Set<string>();
 
+function deactivationRpc(sb: ReturnType<typeof getSupabaseClient>) {
+  return (fn: string, args?: Record<string, string>) =>
+    args ? sb.rpc(fn, args) : sb.rpc(fn);
+}
+
+async function signOutLocalQuiet(sb: ReturnType<typeof getSupabaseClient>) {
+  try {
+    await sb.auth.signOut({ scope: 'local' });
+  } catch {
+    try {
+      await sb.auth.signOut();
+    } catch {
+      /* el token ya fue revocado */
+    }
+  }
+}
+
 export async function signIn(email: string, password: string): Promise<AuthResult> {
   const em = email.trim().toLowerCase();
 
@@ -410,10 +450,22 @@ export async function signIn(email: string, password: string): Promise<AuthResul
     if (!password) return { ok: false, message: 'Ingresá tu contraseña.' };
     try {
       const sb = getSupabaseClient();
+      const attemptStarted = Date.now();
 
       const signInOnly = async (): Promise<User> => {
         const { data, error } = await sb.auth.signInWithPassword({ email: em, password });
         if (error) {
+          if (isUserBannedAuthError(error)) {
+            const loaded = await loadDeactivationReason(deactivationRpc(sb), {
+              email: em,
+              password,
+            });
+            const resolved = resolveBannedPasswordAttempt(loaded);
+            if (resolved.reason === 'account_deactivated') {
+              throw new AccountDeactivatedError(resolved.message);
+            }
+            throw new Error(resolved.message);
+          }
           throw new Error(mapSupabaseSignInError(error.message));
         }
         if (!data.user) {
@@ -440,10 +492,27 @@ export async function signIn(email: string, password: string): Promise<AuthResul
           ),
         ]);
       } catch (e) {
+        if (isAccountDeactivatedError(e)) {
+          return { ok: false, message: e.message, reason: 'account_deactivated' };
+        }
         if (isLikelyAbortError(e)) {
           return { ok: false, message: MSG_RED_SUPABASE };
         }
         return { ok: false, message: e instanceof Error ? e.message : 'Error de inicio de sesión.' };
+      }
+
+      const sessionGate = resolveSessionDeactivation(
+        await loadDeactivationReason(deactivationRpc(sb)),
+      );
+      if (sessionGate.signOut && sessionGate.message) {
+        rememberDeactivationSignOut(sessionGate.message);
+        await signOutLocalQuiet(sb);
+        return { ok: false, message: sessionGate.message, reason: 'account_deactivated' };
+      }
+      const remembered = takeDeactivationSignOutSince(attemptStarted);
+      if (remembered) {
+        await signOutLocalQuiet(sb);
+        return { ok: false, message: remembered, reason: 'account_deactivated' };
       }
 
       await tryApplyPendingProfileSignup(authUser.id);
@@ -467,6 +536,9 @@ export async function signIn(email: string, password: string): Promise<AuthResul
         };
       }
     } catch (e) {
+      if (isAccountDeactivatedError(e)) {
+        return { ok: false, message: e.message, reason: 'account_deactivated' };
+      }
       return { ok: false, message: e instanceof Error ? e.message : 'Error de inicio de sesión.' };
     }
   }
