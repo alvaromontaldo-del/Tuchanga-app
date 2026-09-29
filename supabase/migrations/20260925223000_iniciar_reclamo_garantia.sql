@@ -1,8 +1,18 @@
 -- Reclamo de garantía desde Trabajos contratados.
 -- El cliente lo inicia mientras quedan días. No cambia estado_trabajo
 -- ni warranty_anchor_at: el plazo sigue corriendo.
--- Reabre siempre el chat propio de la contratación, aunque esté soft-deleted.
--- No cambia a otro hilo activo del mismo cliente y profesional.
+--
+-- Chat (misma decisión que resolveWarrantyClaimChat):
+--   * Si el chat propio existe y está activo, se usa ese.
+--   * Si conversation_id es NULL o el chat está borrado, no se reabre a
+--     costa de otro trabajo. El chat activo del par solo se cierra cuando
+--     su trabajo está finalizado y no tiene reclamo abierto ni pendiente;
+--     en ese caso se crea un chat nuevo. Si no se puede cerrar, el evento
+--     va a ese chat activo y el texto nombra el servicio y la fecha.
+--   * Si no hay chat activo, se crea uno nuevo.
+--   * El id elegido se guarda en contrataciones.conversation_id.
+--   * Se quitan los conversation_hides de ese chat para cliente y profesional.
+--   * Repetir el RPC no vuelve a insertar el evento en el mismo chat.
 -- DROP primero: Postgres no deja cambiar el tipo de retorno con CREATE OR REPLACE.
 
 DROP FUNCTION IF EXISTS public.iniciar_reclamo_garantia(uuid);
@@ -18,9 +28,18 @@ DECLARE
   v_anchor timestamptz;
   v_already boolean;
   v_conv_id uuid;
+  v_own_id uuid;
+  v_own_deleted timestamptz;
   v_cliente uuid;
   v_trabajador uuid;
-  v_deleted timestamptz;
+  v_active uuid;
+  v_trade text;
+  v_can_close boolean := false;
+  v_on_other_chat boolean := false;
+  v_servicio text;
+  v_fecha text;
+  v_body text;
+  v_event_here boolean;
 BEGIN
   v_row := public._assert_contratacion_participante(p_contratacion_id);
 
@@ -60,44 +79,138 @@ BEGIN
     WHERE id = p_contratacion_id;
   END IF;
 
-  v_conv_id := v_row.conversation_id;
+  v_cliente := v_row.client_id;
+  v_trabajador := v_row.worker_id;
+  v_own_id := v_row.conversation_id;
 
-  SELECT c.cliente_id, c.trabajador_id, c.deleted_at
-    INTO v_cliente, v_trabajador, v_deleted
-  FROM public.conversations c
-  WHERE c.id = v_conv_id;
+  IF v_own_id IS NOT NULL THEN
+    SELECT c.deleted_at, c.primary_trade
+      INTO v_own_deleted, v_trade
+    FROM public.conversations c
+    WHERE c.id = v_own_id
+      AND c.cliente_id = v_cliente
+      AND c.trabajador_id = v_trabajador;
 
-  IF v_cliente IS NULL THEN
-    RAISE EXCEPTION 'No hay chat para este trabajo';
+    IF NOT FOUND THEN
+      v_own_id := NULL;
+      v_own_deleted := NULL;
+      v_trade := NULL;
+    END IF;
   END IF;
 
-  -- Siempre el chat de esta contratación (v_row.conversation_id).
-  -- ux_conversations_active_pair admite un solo hilo activo por par: si este
-  -- está soft-deleted, se cierra el otro activo del mismo cliente+profesional
-  -- y se reabre el propio. No se elige un chat al azar con LIMIT 1.
-  -- Corre también si el reclamo ya estaba abierto (v_already).
-  IF v_deleted IS NOT NULL THEN
-    UPDATE public.conversations
-    SET deleted_at = now(), updated_at = now()
-    WHERE cliente_id = v_cliente
-      AND trabajador_id = v_trabajador
-      AND deleted_at IS NULL
-      AND id <> v_conv_id;
+  -- Chat propio vivo: no se toca ningún otro hilo del par.
+  IF v_own_id IS NOT NULL AND v_own_deleted IS NULL THEN
+    v_conv_id := v_own_id;
+  ELSE
+    -- ux_conversations_active_pair: como mucho un hilo activo por par.
+    SELECT c.id
+      INTO v_active
+    FROM public.conversations c
+    WHERE c.cliente_id = v_cliente
+      AND c.trabajador_id = v_trabajador
+      AND c.deleted_at IS NULL
+    ORDER BY c.updated_at DESC NULLS LAST
+    LIMIT 1;
 
-    UPDATE public.conversations
-    SET deleted_at = NULL, updated_at = now()
-    WHERE id = v_conv_id;
+    IF v_active IS NOT NULL THEN
+      -- Cerrar solo si hay otro trabajo y todos están finalizados, sin reclamo
+      -- abierto ni pendiente. Un trabajo en curso, cancelado, en disputa o con
+      -- reclamo abierto bloquea el cierre: el evento va a ese chat.
+      SELECT
+        EXISTS (
+          SELECT 1
+          FROM public.contrataciones ct
+          WHERE ct.conversation_id = v_active
+            AND ct.id <> p_contratacion_id
+            AND ct.estado_trabajo = 'finalizado'
+            AND NOT ct.is_claim_open
+            AND ct.claim_status NOT IN ('open', 'pending_approval')
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM public.contrataciones ct
+          WHERE ct.conversation_id = v_active
+            AND ct.id <> p_contratacion_id
+            AND (
+              ct.estado_trabajo IS DISTINCT FROM 'finalizado'
+              OR ct.is_claim_open
+              OR ct.claim_status IN ('open', 'pending_approval')
+            )
+        )
+      INTO v_can_close;
+    END IF;
+
+    IF v_active IS NOT NULL AND v_can_close THEN
+      PERFORM public.hide_conversation_for_participants(v_active);
+      v_active := NULL;
+    END IF;
+
+    IF v_active IS NOT NULL THEN
+      v_conv_id := v_active;
+      v_on_other_chat := true;
+    ELSE
+      INSERT INTO public.conversations (cliente_id, trabajador_id, primary_trade, updated_at)
+      VALUES (v_cliente, v_trabajador, v_trade, now())
+      RETURNING id INTO v_conv_id;
+    END IF;
   END IF;
+
+  UPDATE public.contrataciones
+  SET conversation_id = v_conv_id
+  WHERE id = p_contratacion_id
+    AND conversation_id IS DISTINCT FROM v_conv_id;
 
   DELETE FROM public.conversation_hides
   WHERE conversation_id = v_conv_id
     AND user_id IN (v_cliente, v_trabajador);
 
-  IF NOT v_already THEN
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.messages m
+    WHERE m.conversation_id = v_conv_id
+      AND coalesce(m.metadata->>'event', '') = 'reclamo_garantia_iniciado'
+      AND coalesce(m.metadata->>'contratacion_id', '') = p_contratacion_id::text
+  )
+  INTO v_event_here;
+
+  -- Un ciclo nuevo siempre avisa. Si el reclamo ya estaba abierto, solo se
+  -- inserta cuando este chat todavía no tiene el evento (p. ej. conversation_id
+  -- era NULL y el intento anterior no llegó a escribir el mensaje).
+  IF NOT v_already OR NOT v_event_here THEN
+    v_body := 'El cliente inició un reclamo de garantía. Coordinen la revisión por este chat. La garantía sigue su curso.';
+
+    IF v_on_other_chat THEN
+      v_servicio := nullif(btrim(coalesce(v_row.service_detail, '')), '');
+      v_fecha := to_char(
+        coalesce(
+          v_row.fecha_trabajo,
+          (v_row.finalizado_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,
+          (v_row.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+        ),
+        'DD/MM/YYYY'
+      );
+
+      IF v_servicio IS NOT NULL AND coalesce(v_fecha, '') <> '' THEN
+        v_body := 'El cliente inició un reclamo de garantía por «'
+          || v_servicio
+          || '» del '
+          || v_fecha
+          || '. Coordinen la revisión por este chat. La garantía sigue su curso.';
+      ELSIF v_servicio IS NOT NULL THEN
+        v_body := 'El cliente inició un reclamo de garantía por «'
+          || v_servicio
+          || '». Coordinen la revisión por este chat. La garantía sigue su curso.';
+      ELSIF coalesce(v_fecha, '') <> '' THEN
+        v_body := 'El cliente inició un reclamo de garantía del '
+          || v_fecha
+          || '. Coordinen la revisión por este chat. La garantía sigue su curso.';
+      END IF;
+    END IF;
+
     PERFORM public._chat_insert_system_event(
       v_conv_id,
       auth.uid(),
-      'El cliente inició un reclamo de garantía. Coordinen la revisión por este chat. La garantía sigue su curso.',
+      v_body,
       jsonb_build_object(
         'event', 'reclamo_garantia_iniciado',
         'contratacion_id', p_contratacion_id,
@@ -111,7 +224,8 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.iniciar_reclamo_garantia(uuid) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.iniciar_reclamo_garantia(uuid) FROM anon;
 GRANT EXECUTE ON FUNCTION public.iniciar_reclamo_garantia(uuid) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.iniciar_reclamo_garantia(uuid) IS
-  'El cliente abre un reclamo de garantía y reabre el chat propio de la contratación. No cambia a otro hilo del mismo par ni mueve el ancla ni el estado del trabajo.';
+  'El cliente abre o vuelve a un reclamo de garantía y deja un chat usable. No oculta el chat de otro trabajo en curso o con reclamo abierto, ni mueve el ancla ni el estado del trabajo.';

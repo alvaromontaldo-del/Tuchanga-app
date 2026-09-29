@@ -15,9 +15,9 @@ import {
   contractedWarrantyDurationLabel,
   contractedWorkMoneyDisplay,
   contractedWorkSection,
-  resumeClaimConversationId,
   warrantyClaimAction,
   warrantyClaimButtonLabel,
+  warrantyClaimRequiresConfirmation,
   workerGivenName,
   type ContractedWorkSection,
 } from '../../utils/contractedWorkDisplay';
@@ -197,7 +197,14 @@ export function ContractedWorkOrdersScreen({ navigation }: Props) {
       const conversationId = await iniciarReclamoGarantia(row.id);
       setRows((prev) =>
         prev.map((item) =>
-          item.id === row.id ? { ...item, is_claim_open: true, claim_status: 'open' } : item,
+          item.id === row.id
+            ? {
+                ...item,
+                is_claim_open: true,
+                claim_status: item.claim_status === 'pending_approval' ? 'pending_approval' : 'open',
+                conversation_id: conversationId,
+              }
+            : item,
         ),
       );
       openClaimChat(row, conversationId);
@@ -210,13 +217,8 @@ export function ContractedWorkOrdersScreen({ navigation }: Props) {
   }
 
   function onClaimPress(row: OrderRow, action: 'start' | 'resume') {
-    if (action === 'resume') {
-      const conversationId = resumeClaimConversationId(row.conversation_id);
-      if (conversationId) {
-        openClaimChat(row, conversationId);
-      } else {
-        void startClaim(row);
-      }
+    if (!warrantyClaimRequiresConfirmation(action)) {
+      void startClaim(row);
       return;
     }
     Alert.alert(
