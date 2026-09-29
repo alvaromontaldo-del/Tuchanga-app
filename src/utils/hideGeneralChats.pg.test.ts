@@ -111,6 +111,16 @@ CREATE TABLE public.contrataciones (
   client_id uuid NOT NULL,
   worker_id uuid NOT NULL,
   estado_trabajo text NOT NULL,
+  estado_pago text NOT NULL DEFAULT 'pendiente_seña',
+  completed_by_worker_at timestamptz,
+  conformidad_aceptada boolean,
+  conformidad_solicitada_at timestamptz,
+  conformidad_respondida_at timestamptz,
+  finalizado_at timestamptz,
+  paid_at timestamptz,
+  offline_pago_notificado_at timestamptz,
+  offline_pago_confirmado_at timestamptz,
+  disputa_motivo text NOT NULL DEFAULT '',
   is_claim_open boolean NOT NULL DEFAULT false,
   claim_status text NOT NULL DEFAULT 'none',
   claim_opened_at timestamptz,
@@ -155,33 +165,21 @@ DECLARE
   v_trabajador uuid;
   ts timestamptz := now();
 BEGIN
-  SELECT c.cliente_id, c.trabajador_id
-    INTO v_cliente, v_trabajador
+  SELECT c.cliente_id, c.trabajador_id INTO v_cliente, v_trabajador
   FROM public.conversations c
   WHERE c.id = p_conversation_id;
-
   IF v_cliente IS NULL OR v_trabajador IS NULL THEN
     RETURN;
   END IF;
-
   UPDATE public.conversations
-  SET deleted_at = coalesce(deleted_at, ts),
-      updated_at = ts
+  SET deleted_at = coalesce(deleted_at, ts), updated_at = ts
   WHERE id = p_conversation_id;
-
   INSERT INTO public.conversation_hides (conversation_id, user_id, hidden_at)
-  VALUES
-    (p_conversation_id, v_cliente, ts),
-    (p_conversation_id, v_trabajador, ts)
-  ON CONFLICT (conversation_id, user_id)
-  DO UPDATE SET hidden_at = EXCLUDED.hidden_at;
-
+  VALUES (p_conversation_id, v_cliente, ts), (p_conversation_id, v_trabajador, ts)
+  ON CONFLICT (conversation_id, user_id) DO UPDATE SET hidden_at = EXCLUDED.hidden_at;
   INSERT INTO public.conversation_reads (conversation_id, user_id, read_at)
-  VALUES
-    (p_conversation_id, v_cliente, ts),
-    (p_conversation_id, v_trabajador, ts)
-  ON CONFLICT (conversation_id, user_id)
-  DO UPDATE SET read_at = EXCLUDED.read_at;
+  VALUES (p_conversation_id, v_cliente, ts), (p_conversation_id, v_trabajador, ts)
+  ON CONFLICT (conversation_id, user_id) DO UPDATE SET read_at = EXCLUDED.read_at;
 END;
 $$;
 
@@ -195,10 +193,7 @@ BEGIN
   IF auth.uid() IS NULL THEN
     RAISE EXCEPTION 'No autenticado';
   END IF;
-  SELECT * INTO v_row
-  FROM public.contrataciones
-  WHERE id = p_contratacion_id
-  FOR UPDATE;
+  SELECT * INTO v_row FROM public.contrataciones WHERE id = p_contratacion_id FOR UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Contratación inexistente';
   END IF;
@@ -209,6 +204,21 @@ BEGIN
 END;
 $$;
 
+CREATE FUNCTION public._chat_insert_system_event(
+  p_conversation_id uuid,
+  p_sender_id uuid,
+  p_body text,
+  p_metadata jsonb DEFAULT '{}'::jsonb
+)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  INSERT INTO public.messages (conversation_id, sender_id, body, type, metadata)
+  VALUES (p_conversation_id, p_sender_id, p_body, 'system', coalesce(p_metadata, '{}'::jsonb));
+END;
+$$;
+
 CREATE FUNCTION public._chat_notify_contratacion(p_conversation_id uuid, p_body text)
 RETURNS void
 LANGUAGE plpgsql
@@ -216,6 +226,15 @@ AS $$
 BEGIN
   INSERT INTO public.messages (conversation_id, sender_id, body, type)
   VALUES (p_conversation_id, COALESCE(auth.uid(), p_conversation_id), p_body, 'system');
+END;
+$$;
+
+CREATE FUNCTION public.try_archive_chat_after_job_complete(p_contratacion_id uuid)
+RETURNS boolean
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN false;
 END;
 $$;
 `;
@@ -230,21 +249,25 @@ function seedPair(suffix: string): { client: string; worker: string } {
   return { client, worker };
 }
 
-function insertThreads(client: string, worker: string): { general: string; claim: string } {
-  const general = psql(
+function insertGeneral(client: string, worker: string): string {
+  return psql(
     `INSERT INTO public.conversations (cliente_id, trabajador_id)
-     VALUES ('${client}', '${worker}')
-     RETURNING id;`,
+     VALUES ('${client}', '${worker}') RETURNING id;`,
   );
-  const claim = psql(
-    `INSERT INTO public.conversations (cliente_id, trabajador_id, contratacion_id)
-     VALUES ('${client}', '${worker}', gen_random_uuid())
-     RETURNING id;`,
-  );
-  return { general, claim };
 }
 
-describe.skipIf(!postgresAvailable())('ocultar el chat general cuando todos los reclamos cerraron', () => {
+function insertClaimThread(client: string, worker: string): string {
+  return psql(
+    `INSERT INTO public.conversations (cliente_id, trabajador_id, contratacion_id)
+     VALUES ('${client}', '${worker}', gen_random_uuid()) RETURNING id;`,
+  );
+}
+
+function hidden(id: string): string {
+  return psql(`SELECT deleted_at IS NOT NULL FROM public.conversations WHERE id = '${id}';`);
+}
+
+describe.skipIf(!postgresAvailable())('hide_pair_chats_if_done', () => {
   beforeAll(() => {
     execFileSync(
       'sudo',
@@ -274,32 +297,22 @@ describe.skipIf(!postgresAvailable())('ocultar el chat general cuando todos los 
     );
   });
 
-  it('un par con todos los reclamos cerrados oculta el general y el siguiente contacto crea otro', () => {
-    const { general, claim } = insertThreads(CLIENT, WORKER);
-    const job = psql(
+  it('un trabajo finalizado, con las dos conformidades y pago, oculta el general y el contacto nuevo abre otro', () => {
+    const general = insertGeneral(CLIENT, WORKER);
+    psql(
       `INSERT INTO public.contrataciones (
-         conversation_id, client_id, worker_id, estado_trabajo,
-         is_claim_open, claim_status, claim_opened_at, claim_resolved_at
+         conversation_id, client_id, worker_id, estado_trabajo, estado_pago,
+         completed_by_worker_at, conformidad_aceptada
        ) VALUES (
-         '${claim}', '${CLIENT}', '${WORKER}', 'finalizado',
-         false, 'closed', now(), now()
-       ) RETURNING id;`,
+         '${general}', '${CLIENT}', '${WORKER}', 'finalizado', 'totalmente_pagado',
+         now(), true
+       );`,
     );
-    psql(`UPDATE public.conversations SET contratacion_id = '${job}' WHERE id = '${claim}';`);
-
-    psql(`SELECT public.hide_general_chats_if_all_claims_closed('${CLIENT}', '${WORKER}');`);
-
-    expect(psql(`SELECT deleted_at IS NOT NULL FROM public.conversations WHERE id = '${general}';`)).toBe(
-      't',
+    psql(`SELECT public.hide_pair_chats_if_done('${CLIENT}', '${WORKER}');`);
+    expect(hidden(general)).toBe('t');
+    expect(psql(`SELECT count(*) FROM public.conversation_hides WHERE conversation_id = '${general}';`)).toBe(
+      '2',
     );
-    expect(psql(`SELECT deleted_at IS NULL FROM public.conversations WHERE id = '${claim}';`)).toBe('t');
-    expect(psql(`SELECT contratacion_id::text FROM public.conversations WHERE id = '${claim}';`)).toBe(job);
-    expect(
-      psql(`SELECT count(*) FROM public.conversation_hides WHERE conversation_id = '${general}';`),
-    ).toBe('2');
-    expect(
-      psql(`SELECT count(*) FROM public.conversation_reads WHERE conversation_id = '${general}';`),
-    ).toBe('2');
 
     const created = psql(
       `SELECT set_config('request.jwt.claim.sub', '${CLIENT}', false);
@@ -307,11 +320,11 @@ describe.skipIf(!postgresAvailable())('ocultar el chat general cuando todos los 
     ).split('\n').pop();
     expect(created).toBeTruthy();
     expect(created).not.toBe(general);
-    expect(created).not.toBe(claim);
-    expect(psql(`SELECT contratacion_id IS NULL AND deleted_at IS NULL FROM public.conversations WHERE id = '${created}';`)).toBe(
-      't',
-    );
-
+    expect(
+      psql(
+        `SELECT contratacion_id IS NULL AND deleted_at IS NULL FROM public.conversations WHERE id = '${created}';`,
+      ),
+    ).toBe('t');
     const again = psql(
       `SELECT set_config('request.jwt.claim.sub', '${CLIENT}', false);
        SELECT public.find_or_create_conversation('${WORKER}', 'Plomería');`,
@@ -319,116 +332,42 @@ describe.skipIf(!postgresAvailable())('ocultar el chat general cuando todos los 
     expect(again).toBe(created);
   });
 
-  it('un reclamo abierto del par no oculta el chat general', () => {
+  it('un trabajo finalizado sin pago sigue visible, y se oculta cuando el pago se confirma después', () => {
     const { client, worker } = seedPair('01');
-    const { general, claim } = insertThreads(client, worker);
+    const general = insertGeneral(client, worker);
     const job = psql(
       `INSERT INTO public.contrataciones (
-         conversation_id, client_id, worker_id, estado_trabajo,
-         is_claim_open, claim_status, claim_opened_at
+         conversation_id, client_id, worker_id, estado_trabajo, estado_pago,
+         completed_by_worker_at, conformidad_aceptada, offline_pago_notificado_at
        ) VALUES (
-         '${claim}', '${client}', '${worker}', 'finalizado',
-         true, 'open', now()
+         '${general}', '${client}', '${worker}', 'finalizado', 'seña_pagada',
+         now(), true, now()
        ) RETURNING id;`,
     );
-    psql(`UPDATE public.conversations SET contratacion_id = '${job}' WHERE id = '${claim}';`);
-    psql(`SELECT public.hide_general_chats_if_all_claims_closed('${client}', '${worker}');`);
-    expect(psql(`SELECT deleted_at IS NULL FROM public.conversations WHERE id = '${general}';`)).toBe('t');
-    expect(psql(`SELECT count(*) FROM public.conversation_hides WHERE conversation_id = '${general}';`)).toBe(
-      '0',
+    psql(`SELECT public.hide_pair_chats_if_done('${client}', '${worker}');`);
+    expect(hidden(general)).toBe('f');
+
+    psql(
+      `SELECT set_config('request.jwt.claim.sub', '${worker}', false);
+       SELECT public.trabajador_confirmar_recepcion_offline('${job}'::uuid);`,
     );
+    expect(psql(`SELECT estado_pago FROM public.contrataciones WHERE id = '${job}';`)).toBe(
+      'totalmente_pagado',
+    );
+    expect(hidden(general)).toBe('t');
   });
 
-  it('cerrar uno no oculta el general mientras otro reclamo del par sigue abierto', () => {
+  it('cerrar un reclamo con conformidad oculta ese hilo y el general', () => {
     const { client, worker } = seedPair('02');
-    const { general, claim } = insertThreads(client, worker);
-    const closing = psql(
-      `INSERT INTO public.contrataciones (
-         conversation_id, client_id, worker_id, estado_trabajo,
-         is_claim_open, claim_status, claim_opened_at, claim_marked_done_at
-       ) VALUES (
-         '${claim}', '${client}', '${worker}', 'finalizado',
-         true, 'pending_approval', now(), now()
-       ) RETURNING id;`,
-    );
-    psql(`UPDATE public.conversations SET contratacion_id = '${closing}' WHERE id = '${claim}';`);
-    const otherClaim = psql(
-      `INSERT INTO public.conversations (cliente_id, trabajador_id, contratacion_id)
-       VALUES ('${client}', '${worker}', gen_random_uuid()) RETURNING id;`,
-    );
-    const openJob = psql(
-      `INSERT INTO public.contrataciones (
-         conversation_id, client_id, worker_id, estado_trabajo,
-         is_claim_open, claim_status, claim_opened_at
-       ) VALUES (
-         '${otherClaim}', '${client}', '${worker}', 'finalizado',
-         true, 'pending_approval', now()
-       ) RETURNING id;`,
-    );
-    psql(`UPDATE public.conversations SET contratacion_id = '${openJob}' WHERE id = '${otherClaim}';`);
-
-    psql(
-      `SELECT set_config('request.jwt.claim.sub', '${client}', false);
-       SELECT public.confirmar_arreglo_garantia('${closing}'::uuid);`,
-    );
-    expect(psql(`SELECT claim_status FROM public.contrataciones WHERE id = '${closing}';`)).toBe('closed');
-    expect(psql(`SELECT deleted_at IS NULL FROM public.conversations WHERE id = '${general}';`)).toBe('t');
-    expect(psql(`SELECT claim_status FROM public.contrataciones WHERE id = '${openJob}';`)).toBe(
-      'pending_approval',
-    );
-  });
-
-  it('un trabajo finalizado sin reclamo no oculta el chat', () => {
-    const { client, worker } = seedPair('03');
-    const general = psql(
-      `INSERT INTO public.conversations (cliente_id, trabajador_id)
-       VALUES ('${client}', '${worker}') RETURNING id;`,
-    );
-    psql(
-      `INSERT INTO public.contrataciones (
-         conversation_id, client_id, worker_id, estado_trabajo
-       ) VALUES (
-         '${general}', '${client}', '${worker}', 'finalizado'
-       );`,
-    );
-    psql(`SELECT public.hide_general_chats_if_all_claims_closed('${client}', '${worker}');`);
-    expect(psql(`SELECT deleted_at IS NULL FROM public.conversations WHERE id = '${general}';`)).toBe('t');
-  });
-
-  it('un trabajo en curso en el hilo general lo mantiene aunque los reclamos estén cerrados', () => {
-    const { client, worker } = seedPair('04');
-    const { general, claim } = insertThreads(client, worker);
-    const job = psql(
-      `INSERT INTO public.contrataciones (
-         conversation_id, client_id, worker_id, estado_trabajo,
-         is_claim_open, claim_status, claim_opened_at, claim_resolved_at
-       ) VALUES (
-         '${claim}', '${client}', '${worker}', 'finalizado',
-         false, 'closed', now(), now()
-       ) RETURNING id;`,
-    );
-    psql(`UPDATE public.conversations SET contratacion_id = '${job}' WHERE id = '${claim}';`);
-    psql(
-      `INSERT INTO public.contrataciones (
-         conversation_id, client_id, worker_id, estado_trabajo
-       ) VALUES (
-         '${general}', '${client}', '${worker}', 'en_curso'
-       );`,
-    );
-    psql(`SELECT public.hide_general_chats_if_all_claims_closed('${client}', '${worker}');`);
-    expect(psql(`SELECT deleted_at IS NULL FROM public.conversations WHERE id = '${general}';`)).toBe('t');
-  });
-
-  it('confirmar el único arreglo oculta el general, deja el hilo de reclamo y conserva el aviso', () => {
-    const { client, worker } = seedPair('05');
-    const { general, claim } = insertThreads(client, worker);
+    const general = insertGeneral(client, worker);
+    const claim = insertClaimThread(client, worker);
     const job = psql(
       `INSERT INTO public.contrataciones (
          conversation_id, client_id, worker_id, estado_trabajo,
          is_claim_open, claim_status, claim_opened_at, claim_marked_done_at
        ) VALUES (
          '${claim}', '${client}', '${worker}', 'finalizado',
-         true, 'pending_approval', now() - interval '1 day', now() - interval '1 hour'
+         true, 'pending_approval', now() - interval '2 days', now() - interval '1 hour'
        ) RETURNING id;`,
     );
     psql(`UPDATE public.conversations SET contratacion_id = '${job}' WHERE id = '${claim}';`);
@@ -438,119 +377,97 @@ describe.skipIf(!postgresAvailable())('ocultar el chat general cuando todos los 
        SELECT public.confirmar_arreglo_garantia('${job}'::uuid)::text;`,
     ).split('\n').pop();
     expect(result).toContain('"claimStatus": "closed"');
-    expect(psql(`SELECT deleted_at IS NOT NULL FROM public.conversations WHERE id = '${general}';`)).toBe(
-      't',
-    );
-    expect(psql(`SELECT deleted_at IS NULL AND contratacion_id::text = '${job}' FROM public.conversations WHERE id = '${claim}';`)).toBe(
-      't',
-    );
+    expect(hidden(claim)).toBe('t');
+    expect(hidden(general)).toBe('t');
     expect(psql(`SELECT body FROM public.messages WHERE conversation_id = '${claim}';`)).toBe(
       '✅ El cliente confirmó el arreglo. Reclamo cerrado. La garantía de 30 días continúa sin reiniciarse.',
     );
   });
 
-  it('la autoaprobación oculta el par solo cuando cierra el último reclamo vencido', () => {
-    const closedPair = seedPair('06');
-    const openPair = seedPair('07');
-    const closedThreads = insertThreads(closedPair.client, closedPair.worker);
-    const openThreads = insertThreads(openPair.client, openPair.worker);
-
-    const first = psql(
+  it('otro trabajo en curso deja el general visible y no toca el hilo de un reclamo que sigue abierto', () => {
+    const { client, worker } = seedPair('03');
+    const general = insertGeneral(client, worker);
+    const claim = insertClaimThread(client, worker);
+    const closedClaim = psql(
       `INSERT INTO public.contrataciones (
          conversation_id, client_id, worker_id, estado_trabajo,
-         is_claim_open, claim_status, claim_opened_at, claim_marked_done_at
+         is_claim_open, claim_status, claim_opened_at, claim_marked_done_at, claim_resolved_at
        ) VALUES (
-         '${closedThreads.claim}', '${closedPair.client}', '${closedPair.worker}', 'finalizado',
-         true, 'pending_approval', now() - interval '5 days', now() - interval '80 hours'
+         '${claim}', '${client}', '${worker}', 'finalizado',
+         false, 'closed', now(), now(), now()
        ) RETURNING id;`,
     );
-    const secondThread = psql(
-      `INSERT INTO public.conversations (cliente_id, trabajador_id, contratacion_id)
-       VALUES ('${closedPair.client}', '${closedPair.worker}', gen_random_uuid()) RETURNING id;`,
-    );
-    const second = psql(
+    psql(`UPDATE public.conversations SET contratacion_id = '${closedClaim}' WHERE id = '${claim}';`);
+    const openClaim = insertClaimThread(client, worker);
+    const openJob = psql(
       `INSERT INTO public.contrataciones (
          conversation_id, client_id, worker_id, estado_trabajo,
-         is_claim_open, claim_status, claim_opened_at, claim_marked_done_at
+         is_claim_open, claim_status, claim_opened_at
        ) VALUES (
-         '${secondThread}', '${closedPair.client}', '${closedPair.worker}', 'finalizado',
-         true, 'pending_approval', now() - interval '5 days', now() - interval '73 hours'
+         '${openClaim}', '${client}', '${worker}', 'finalizado',
+         true, 'open', now()
        ) RETURNING id;`,
     );
+    psql(`UPDATE public.conversations SET contratacion_id = '${openJob}' WHERE id = '${openClaim}';`);
     psql(
-      `UPDATE public.conversations SET contratacion_id = '${first}' WHERE id = '${closedThreads.claim}';
-       UPDATE public.conversations SET contratacion_id = '${second}' WHERE id = '${secondThread}';`,
+      `INSERT INTO public.contrataciones (
+         conversation_id, client_id, worker_id, estado_trabajo
+       ) VALUES (
+         '${general}', '${client}', '${worker}', 'en_curso'
+       );`,
     );
 
-    const stillOpen = psql(
-      `INSERT INTO public.contrataciones (
-         conversation_id, client_id, worker_id, estado_trabajo,
-         is_claim_open, claim_status, claim_opened_at, claim_marked_done_at
-       ) VALUES (
-         '${openThreads.claim}', '${openPair.client}', '${openPair.worker}', 'finalizado',
-         true, 'open', now() - interval '2 days', NULL
-       ) RETURNING id;`,
-    );
-    const staleThread = psql(
-      `INSERT INTO public.conversations (cliente_id, trabajador_id, contratacion_id)
-       VALUES ('${openPair.client}', '${openPair.worker}', gen_random_uuid()) RETURNING id;`,
-    );
-    const stale = psql(
-      `INSERT INTO public.contrataciones (
-         conversation_id, client_id, worker_id, estado_trabajo,
-         is_claim_open, claim_status, claim_opened_at, claim_marked_done_at
-       ) VALUES (
-         '${staleThread}', '${openPair.client}', '${openPair.worker}', 'finalizado',
-         true, 'pending_approval', now() - interval '4 days', now() - interval '90 hours'
-       ) RETURNING id;`,
-    );
-    psql(
-      `UPDATE public.conversations SET contratacion_id = '${stillOpen}' WHERE id = '${openThreads.claim}';
-       UPDATE public.conversations SET contratacion_id = '${stale}' WHERE id = '${staleThread}';`,
-    );
-
-    expect(psql(`SELECT public.auto_approve_stale_warranty_claims();`)).toBe('3');
-    expect(
-      psql(`SELECT deleted_at IS NOT NULL FROM public.conversations WHERE id = '${closedThreads.general}';`),
-    ).toBe('t');
-    expect(
-      psql(`SELECT deleted_at IS NULL FROM public.conversations WHERE id = '${closedThreads.claim}';`),
-    ).toBe('t');
-    expect(
-      psql(`SELECT deleted_at IS NULL FROM public.conversations WHERE id = '${secondThread}';`),
-    ).toBe('t');
-    expect(
-      psql(`SELECT deleted_at IS NULL FROM public.conversations WHERE id = '${openThreads.general}';`),
-    ).toBe('t');
-    expect(psql(`SELECT claim_status FROM public.contrataciones WHERE id = '${stillOpen}';`)).toBe('open');
-    expect(psql(`SELECT claim_status FROM public.contrataciones WHERE id = '${stale}';`)).toBe('closed');
-    expect(psql(`SELECT count(*) FROM public.messages WHERE body LIKE '✅ Reclamo de garantía cerrado automáticamente%';`)).toBe(
-      '3',
-    );
+    psql(`SELECT public.hide_pair_chats_if_done('${client}', '${worker}');`);
+    expect(hidden(general)).toBe('f');
+    expect(hidden(openClaim)).toBe('f');
+    expect(hidden(claim)).toBe('t');
   });
 
-  it('anon y authenticated no pueden ejecutarla, y find_or_create sigue con los avisos del trabajador', () => {
+  it('finalizar sin pago no oculta, y el pago anterior a la conformidad sí oculta al final', () => {
+    const { client, worker } = seedPair('04');
+    const general = insertGeneral(client, worker);
+    const job = psql(
+      `INSERT INTO public.contrataciones (
+         conversation_id, client_id, worker_id, estado_trabajo, estado_pago,
+         offline_pago_notificado_at
+       ) VALUES (
+         '${general}', '${client}', '${worker}', 'en_curso', 'seña_pagada', now()
+       ) RETURNING id;`,
+    );
+    psql(
+      `SELECT set_config('request.jwt.claim.sub', '${worker}', false);
+       SELECT public.trabajador_confirmar_recepcion_offline('${job}'::uuid);`,
+    );
+    expect(hidden(general)).toBe('f');
+    psql(
+      `UPDATE public.contrataciones SET estado_trabajo = 'en_curso' WHERE id = '${job}';
+       SELECT set_config('request.jwt.claim.sub', '${worker}', false);
+       SELECT public.trabajador_finalizar_trabajo('${job}'::uuid);`,
+    );
+    expect(psql(`SELECT conformidad_aceptada::text FROM public.contrataciones WHERE id = '${job}';`)).toBe(
+      'true',
+    );
+    expect(hidden(general)).toBe('t');
+    expect(
+      psql(
+        `SELECT count(*) FROM public.messages
+         WHERE conversation_id = '${general}' AND metadata->>'event' = 'trabajo_finalizado';`,
+      ),
+    ).toBe('2');
+  });
+
+  it('anon y authenticated no pueden ejecutarla, y siguen los avisos del trabajador', () => {
     const meta = psql(
       `SELECT prosecdef::text || '|' || coalesce(array_to_string(proconfig, ','), '')
-       FROM pg_proc
-       WHERE proname = 'hide_general_chats_if_all_claims_closed';`,
+       FROM pg_proc WHERE proname = 'hide_pair_chats_if_done';`,
     );
     expect(meta).toBe('true|search_path=public');
-    const privileges = psql(
-      `SELECT has_function_privilege('anon', 'public.hide_general_chats_if_all_claims_closed(uuid, uuid)', 'EXECUTE')::text
-         || '|' || has_function_privilege('authenticated', 'public.hide_general_chats_if_all_claims_closed(uuid, uuid)', 'EXECUTE')::text;`,
-    );
-    expect(privileges).toBe('false|false');
-
-    const findDef = psql(
-      `SELECT pg_get_functiondef(p.oid)
-       FROM pg_proc p
-       JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = 'public' AND p.proname = 'find_or_create_conversation';`,
-    );
-    expect(findDef).toContain('worker_on_leave');
-    expect(findDef).toContain('worker_unavailable');
-    expect(findDef).toContain('worker_not_found');
+    expect(
+      psql(
+        `SELECT has_function_privilege('anon', 'public.hide_pair_chats_if_done(uuid, uuid)', 'EXECUTE')::text
+           || '|' || has_function_privilege('authenticated', 'public.hide_pair_chats_if_done(uuid, uuid)', 'EXECUTE')::text;`,
+      ),
+    ).toBe('false|false');
 
     const paused = seedPair('08');
     psql(`UPDATE public.profiles SET professional_status = 'paused' WHERE id = '${paused.worker}';`);

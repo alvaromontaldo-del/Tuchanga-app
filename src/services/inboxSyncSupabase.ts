@@ -1,5 +1,4 @@
 import { getSupabaseClient } from '../lib/supabase';
-import { fetchClosedClaimChatIds } from './claimChatSupabase';
 import { fetchTotalUnreadCountSupabase } from './chatSupabase';
 
 export type ConversationSnippet = {
@@ -79,16 +78,9 @@ export async function fetchInboxSyncLight(): Promise<{
     /* RPC opcional */
   }
 
-  const closedClaimIds = await fetchClosedClaimChatIds(convIds);
-  let closedUnread = 0;
-  for (const id of closedClaimIds) {
-    closedUnread += unreadByConversationId[id] ?? 0;
-    unreadByConversationId[id] = 0;
-  }
-
   let totalUnread = 0;
   try {
-    totalUnread = Math.max(0, (await fetchTotalUnreadCountSupabase()) - closedUnread);
+    totalUnread = await fetchTotalUnreadCountSupabase();
   } catch {
     totalUnread = Object.values(unreadByConversationId).reduce((n, v) => n + v, 0);
   }
@@ -104,7 +96,6 @@ export async function fetchInboxSyncLight(): Promise<{
         .limit(1);
       const last = lastMsgs?.[0];
       if (!last) return;
-      if (closedClaimIds.has(conversationId)) return;
       snippets.push({
         conversationId,
         lastMessage: last.body ?? null,
@@ -142,9 +133,6 @@ export async function fetchConversationSnippet(
     .eq('user_id', user.id)
     .maybeSingle();
   if (hideRow) return null;
-
-  const closedClaimIds = await fetchClosedClaimChatIds([conversationId]);
-  if (closedClaimIds.has(conversationId)) return null;
 
   const { data: lastMsgs } = await sb
     .from('messages')
