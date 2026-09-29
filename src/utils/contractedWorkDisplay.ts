@@ -134,3 +134,42 @@ export function warrantyClaimButtonLabel(action: WarrantyClaimAction): string | 
 export function warrantyClaimRequiresConfirmation(action: WarrantyClaimAction): boolean {
   return action === 'start';
 }
+
+/** Subtítulo del chat abierto desde un reclamo: identifica el trabajo. */
+export function claimChatHeaderSubtitle(serviceDetail: string | null | undefined): string {
+  const service = (serviceDetail ?? '').replace(/\s+/g, ' ').trim();
+  if (!service) return 'Reclamo de garantía';
+  const short = service.length > 42 ? `${service.slice(0, 39)}…` : service;
+  return `Reclamo · ${short}`;
+}
+
+/**
+ * El chat del reclamo se abre en la pila de Perfil, encima de Trabajos contratados.
+ * Volver no cae en Mensajes.
+ */
+export function buildClaimChatNavParams(input: {
+  conversationId: string;
+  workerName: string;
+  workerId: string;
+  serviceDetail: string;
+}): {
+  screen: 'ChatConversation';
+  params: {
+    conversationId: string;
+    otherDisplayName: string;
+    headerSubtitle: string;
+    workerId: string;
+    backToContractedWork: true;
+  };
+} {
+  return {
+    screen: 'ChatConversation',
+    params: {
+      conversationId: input.conversationId,
+      otherDisplayName: input.workerName,
+      headerSubtitle: claimChatHeaderSubtitle(input.serviceDetail),
+      workerId: input.workerId,
+      backToContractedWork: true,
+    },
+  };
+}

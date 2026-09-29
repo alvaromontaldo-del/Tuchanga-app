@@ -8,6 +8,8 @@ export type ApiConversation = {
   otherDisplayName: string;
   otherAvatarUrl?: string | null;
   primaryTrade: string;
+  /** Fila de reclamo: «Reclamo · servicio · fecha». No se pisa con mensajes nuevos. */
+  claimRowLabel?: string | null;
   lastMessage: string | null;
   /** Último mensaje del hilo (para no leídos). */
   lastMessageAt?: string | null;

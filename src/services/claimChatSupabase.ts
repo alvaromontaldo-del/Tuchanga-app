@@ -1,35 +1,18 @@
 import { getSupabaseClient } from '../lib/supabase';
 import { removeSupabaseRealtimeTopic } from '../lib/supabaseRealtime';
 import {
-  latestContratacionClosesChat,
+  chatClosedByAllClaimsConformity,
   type ClaimChatSnapshot,
 } from '../utils/claimChatVisibility';
 
 type ClaimRow = ClaimChatSnapshot & { conversation_id?: string };
 
-/**
- * Conversaciones cuyo hilo debe ocultarse: reclamo iniciado y conformidad
- * de profesional y cliente en la contratación más reciente.
- * Si faltan columnas o la consulta falla, no oculta nada.
- */
-export async function fetchClosedClaimChatIds(
-  conversationIds: string[],
-): Promise<Set<string>> {
-  const ids = conversationIds.filter(Boolean);
-  if (!ids.length) return new Set();
+const CLAIM_COLUMNS =
+  'conversation_id, updated_at, created_at, estado_trabajo, is_claim_open, claim_status, claim_opened_at, claim_marked_done_at, claim_resolved_at';
 
-  const sb = getSupabaseClient();
-  const { data, error } = await sb
-    .from('contrataciones')
-    .select(
-      'conversation_id, updated_at, created_at, is_claim_open, claim_status, claim_opened_at, claim_marked_done_at, claim_resolved_at',
-    )
-    .in('conversation_id', ids);
-
-  if (error || !data) return new Set();
-
+function groupClaimRows(data: ClaimRow[]): Map<string, ClaimChatSnapshot[]> {
   const byConversation = new Map<string, ClaimChatSnapshot[]>();
-  for (const raw of data as ClaimRow[]) {
+  for (const raw of data) {
     const conversationId = String(raw.conversation_id ?? '');
     if (!conversationId) continue;
     const list = byConversation.get(conversationId) ?? [];
@@ -39,20 +22,42 @@ export async function fetchClosedClaimChatIds(
       claim_opened_at: raw.claim_opened_at ?? null,
       claim_marked_done_at: raw.claim_marked_done_at ?? null,
       claim_resolved_at: raw.claim_resolved_at ?? null,
+      estado_trabajo: raw.estado_trabajo ?? null,
       updated_at: raw.updated_at ?? null,
       created_at: raw.created_at ?? null,
     });
     byConversation.set(conversationId, list);
   }
+  return byConversation;
+}
 
+async function loadClaimRows(conversationIds: string[]): Promise<Map<string, ClaimChatSnapshot[]> | null> {
+  const ids = conversationIds.filter(Boolean);
+  if (!ids.length) return new Map();
+
+  const sb = getSupabaseClient();
+  const { data, error } = await sb.from('contrataciones').select(CLAIM_COLUMNS).in('conversation_id', ids);
+
+  if (error || !data) return null;
+  return groupClaimRows(data as ClaimRow[]);
+}
+
+/**
+ * Hilos que salen de Mensajes por la regla de #55: hubo reclamo, todos
+ * terminaron con conformidad y ninguna contratación vinculada sigue en
+ * curso o con reclamo abierto o pendiente. Si la consulta falla, no oculta.
+ */
+export async function fetchClosedClaimChatIds(conversationIds: string[]): Promise<Set<string>> {
+  const grouped = await loadClaimRows(conversationIds);
+  if (!grouped) return new Set();
   const closed = new Set<string>();
-  for (const [conversationId, rows] of byConversation) {
-    if (latestContratacionClosesChat(rows)) closed.add(conversationId);
+  for (const [conversationId, rows] of grouped) {
+    if (chatClosedByAllClaimsConformity(rows)) closed.add(conversationId);
   }
   return closed;
 }
 
-/** Avisa si el hilo pasa a cerrado (o se reabre con una contratación nueva). */
+/** Avisa si el hilo pasa a cerrado por conformidad (o se reabre). */
 export function subscribeClaimChatLock(
   conversationId: string,
   onChange: (closed: boolean) => void,

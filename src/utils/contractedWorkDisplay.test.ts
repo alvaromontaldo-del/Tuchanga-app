@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { warrantyCountdown } from './warrantyDays';
 import {
+  buildClaimChatNavParams,
+  claimChatHeaderSubtitle,
   contractedWarrantyDurationLabel,
   contractedWorkMoneyDisplay,
   contractedWorkSection,
@@ -171,5 +173,21 @@ describe('warrantyClaimAction', () => {
       }),
     ).toBe('none');
     expect(warrantyClaimButtonLabel('none')).toBeNull();
+  });
+});
+
+describe('buildClaimChatNavParams', () => {
+  it('abre el chat en Perfil y nombra el trabajo, sin ir a Mensajes', () => {
+    const target = buildClaimChatNavParams({
+      conversationId: 'chat-1',
+      workerName: 'Alvaro',
+      workerId: 'worker-1',
+      serviceDetail: 'Instalación\n+15 dias de garantia',
+    });
+    expect(target.screen).toBe('ChatConversation');
+    expect(target.screen).not.toBe('Mensajes');
+    expect(target.params.backToContractedWork).toBe(true);
+    expect(target.params.headerSubtitle).toBe('Reclamo · Instalación +15 dias de garantia');
+    expect(claimChatHeaderSubtitle('')).toBe('Reclamo de garantía');
   });
 });

@@ -8,6 +8,10 @@ const MIGRATION = resolve(
   process.cwd(),
   'supabase/migrations/20260925223000_iniciar_reclamo_garantia.sql',
 );
+const HIDE_MIGRATION = resolve(
+  process.cwd(),
+  'supabase/migrations/20260924150000_hide_chat_after_claim_conformity.sql',
+);
 
 const CLIENT = '11111111-1111-4111-8111-111111111111';
 
@@ -201,6 +205,7 @@ describe.skipIf(!postgresAvailable())('iniciar_reclamo_garantia en Postgres', ()
       encoding: 'utf8',
     });
     psqlScript(DB, setupSql);
+    psqlScript(DB, readFileSync(HIDE_MIGRATION, 'utf8'));
     psqlScript(DB, readFileSync(MIGRATION, 'utf8'));
   });
 
@@ -331,27 +336,35 @@ describe.skipIf(!postgresAvailable())('iniciar_reclamo_garantia en Postgres', ()
        VALUES ('${active}', '${CLIENT}'), ('${active}', '${worker}');`,
     );
 
-    expect(callRpc(finished)).toBe(active);
-    expect(callRpc(finished)).toBe(active);
+    const created = callRpc(finished);
+    expect(created).not.toBe(active);
+    expect(created).not.toBe(deleted);
+    expect(callRpc(finished)).toBe(created);
 
     expect(
       psql(DB, `SELECT deleted_at IS NULL FROM public.conversations WHERE id = '${active}';`),
     ).toBe('t');
     expect(
+      psql(DB, `SELECT conversation_id::text FROM public.contrataciones WHERE id = '${inProgress}';`),
+    ).toBe(active);
+    expect(
       psql(DB, `SELECT deleted_at IS NOT NULL FROM public.conversations WHERE id = '${deleted}';`),
     ).toBe('t');
     expect(
       psql(DB, `SELECT conversation_id::text FROM public.contrataciones WHERE id = '${finished}';`),
-    ).toBe(active);
+    ).toBe(created);
+    expect(
+      psql(DB, `SELECT contratacion_id::text FROM public.conversations WHERE id = '${created}';`),
+    ).toBe(finished);
     expect(
       psql(DB, `SELECT count(*) FROM public.conversation_hides WHERE conversation_id = '${active}';`),
-    ).toBe('0');
+    ).toBe('2');
     expect(
       psql(
         DB,
         `SELECT count(*)::text || '|' || min(body)
          FROM public.messages
-         WHERE conversation_id = '${active}'
+         WHERE conversation_id = '${created}'
            AND metadata->>'event' = 'reclamo_garantia_iniciado';`,
       ),
     ).toBe(
@@ -399,7 +412,7 @@ describe.skipIf(!postgresAvailable())('iniciar_reclamo_garantia en Postgres', ()
     expect(
       psql(DB, `SELECT body FROM public.messages WHERE conversation_id = '${created}';`),
     ).toBe(
-      'El cliente inició un reclamo de garantía. Coordinen la revisión por este chat. La garantía sigue su curso.',
+      'El cliente inició un reclamo de garantía por «Electricidad» del 01/08/2026. Coordinen la revisión por este chat. La garantía sigue su curso.',
     );
     expect(callRpc(claimJob)).toBe(created);
     expect(
@@ -435,14 +448,175 @@ describe.skipIf(!postgresAvailable())('iniciar_reclamo_garantia en Postgres', ()
        );`,
     );
 
-    expect(callRpc(job)).toBe(claimed);
+    const created = callRpc(job);
+    expect(created).not.toBe(claimed);
+    expect(created).not.toBe(deleted);
     expect(
       psql(DB, `SELECT deleted_at IS NULL FROM public.conversations WHERE id = '${claimed}';`),
     ).toBe('t');
     expect(
-      psql(DB, `SELECT body FROM public.messages WHERE conversation_id = '${claimed}';`),
+      psql(
+        DB,
+        `SELECT count(*) FROM public.messages
+         WHERE conversation_id = '${claimed}'
+           AND metadata->>'event' = 'reclamo_garantia_iniciado';`,
+      ),
+    ).toBe('0');
+    expect(
+      psql(DB, `SELECT body FROM public.messages WHERE conversation_id = '${created}';`),
     ).toBe(
       'El cliente inició un reclamo de garantía por «Gasista» del 01/09/2026. Coordinen la revisión por este chat. La garantía sigue su curso.',
     );
+  });
+
+  it('tres reclamos del mismo trabajador quedan en chats distintos y la conformidad de uno no oculta al otro', () => {
+    const worker = '22222222-2222-4222-8222-222222222226';
+    const shared = '3cef3be1-d88d-45a1-8c69-150c2d5dc987';
+    const jobs = [
+      { id: '11111111-aaaa-4aaa-8aaa-aaaaaaaaaa01', detail: 'Pintura', fecha: '2026-09-01' },
+      { id: '11111111-aaaa-4aaa-8aaa-aaaaaaaaaa02', detail: 'Gasista', fecha: '2026-09-02' },
+      { id: '11111111-aaaa-4aaa-8aaa-aaaaaaaaaa03', detail: 'Plomería', fecha: '2026-09-03' },
+    ];
+    psql(
+      DB,
+      `       INSERT INTO public.conversations (id, cliente_id, trabajador_id)
+       VALUES ('${shared}', '${CLIENT}', '${worker}');
+       INSERT INTO public.messages (conversation_id, sender_id, body, type, metadata)
+       VALUES (
+         '${shared}', '${CLIENT}', 'reclamo previo', 'system',
+         jsonb_build_object('event', 'reclamo_garantia_iniciado', 'contratacion_id', '${jobs[0].id}')
+       );
+       INSERT INTO public.contrataciones (
+         id, conversation_id, client_id, worker_id, estado_trabajo,
+         warranty_days, warranty_anchor_at, service_detail, fecha_trabajo
+       ) VALUES
+         ('${jobs[0].id}', '${shared}', '${CLIENT}', '${worker}', 'finalizado', 30, now(), '${jobs[0].detail}', DATE '${jobs[0].fecha}'),
+         ('${jobs[1].id}', '${shared}', '${CLIENT}', '${worker}', 'finalizado', 30, now(), '${jobs[1].detail}', DATE '${jobs[1].fecha}'),
+         ('${jobs[2].id}', '${shared}', '${CLIENT}', '${worker}', 'finalizado', 30, now(), '${jobs[2].detail}', DATE '${jobs[2].fecha}');`,
+    );
+
+    const ids = jobs.map((job) => callRpc(job.id));
+    expect(new Set(ids).size).toBe(3);
+    for (const id of ids) {
+      expect(id).not.toBe(shared);
+      expect(
+        psql(DB, `SELECT contratacion_id IS NOT NULL AND deleted_at IS NULL FROM public.conversations WHERE id = '${id}';`),
+      ).toBe('t');
+      expect(
+        psql(
+          DB,
+          `SELECT count(*) FROM public.contrataciones WHERE conversation_id = '${id}';`,
+        ),
+      ).toBe('1');
+    }
+    expect(
+      psql(DB, `SELECT deleted_at IS NULL FROM public.conversations WHERE id = '${shared}';`),
+    ).toBe('t');
+    expect(
+      psql(DB, `SELECT public.chat_cerrado_por_reclamo_conformidad('${shared}'::uuid);`),
+    ).toBe('f');
+
+    const statuses = psql(
+      DB,
+      `SELECT string_agg(claim_status, ',' ORDER BY id) FROM public.contrataciones WHERE worker_id = '${worker}';`,
+    );
+    expect(statuses).toBe('open,open,open');
+
+    psql(
+      DB,
+      `UPDATE public.contrataciones
+       SET is_claim_open = false,
+           claim_status = 'closed',
+           claim_marked_done_at = now(),
+           claim_resolved_at = now()
+       WHERE id = '${jobs[0].id}';`,
+    );
+
+    const closedChat = psql(
+      DB,
+      `SELECT conversation_id::text FROM public.contrataciones WHERE id = '${jobs[0].id}';`,
+    );
+    const openChat = psql(
+      DB,
+      `SELECT conversation_id::text FROM public.contrataciones WHERE id = '${jobs[1].id}';`,
+    );
+    expect(
+      psql(DB, `SELECT public.chat_cerrado_por_reclamo_conformidad('${closedChat}'::uuid);`),
+    ).toBe('t');
+    expect(
+      psql(DB, `SELECT public.chat_cerrado_por_reclamo_conformidad('${openChat}'::uuid);`),
+    ).toBe('f');
+    expect(
+      psql(DB, `SELECT claim_status FROM public.contrataciones WHERE id = '${jobs[1].id}';`),
+    ).toBe('open');
+    expect(
+      psql(DB, `SELECT claim_status FROM public.contrataciones WHERE id = '${jobs[2].id}';`),
+    ).toBe('open');
+
+    psql(
+      DB,
+      `UPDATE public.contrataciones
+       SET is_claim_open = false,
+           claim_status = 'closed',
+           claim_marked_done_at = now(),
+           claim_resolved_at = now()
+       WHERE worker_id = '${worker}';`,
+    );
+    for (const id of ids) {
+      expect(
+        psql(DB, `SELECT public.chat_cerrado_por_reclamo_conformidad('${id}'::uuid);`),
+      ).toBe('t');
+    }
+  });
+
+  it('un trabajo finalizado sin reclamo no cierra el chat', () => {
+    const worker = '22222222-2222-4222-8222-222222222227';
+    const conv = '44444444-4444-4444-8444-444444444444';
+    const job = '11111111-bbbb-4bbb-8bbb-bbbbbbbbbbb1';
+    psql(
+      DB,
+      `INSERT INTO public.conversations (id, cliente_id, trabajador_id)
+       VALUES ('${conv}', '${CLIENT}', '${worker}');
+       INSERT INTO public.contrataciones (
+         id, conversation_id, client_id, worker_id, estado_trabajo, service_detail
+       ) VALUES (
+         '${job}', '${conv}', '${CLIENT}', '${worker}', 'finalizado', 'Sin reclamo'
+       );`,
+    );
+    expect(
+      psql(DB, `SELECT public.chat_cerrado_por_reclamo_conformidad('${conv}'::uuid);`),
+    ).toBe('f');
+  });
+
+  it('find_or_create conserva los chequeos del trabajador y crear_cotizacion rechaza el hilo de reclamo', () => {
+    const findDef = psql(
+      DB,
+      `SELECT pg_get_functiondef(p.oid)
+       FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proname = 'find_or_create_conversation';`,
+    );
+    expect(findDef).toContain('worker_not_found');
+    expect(findDef).toContain('worker_on_leave');
+    expect(findDef).toContain('worker_unavailable');
+    expect(findDef).toContain('contratacion_id IS NULL');
+    expect(findDef).toContain('conversation_tiene_trabajo_vivo');
+
+    const quoteDef = psql(
+      DB,
+      `SELECT pg_get_functiondef(p.oid)
+       FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proname = 'crear_cotizacion';`,
+    );
+    expect(quoteDef).toContain('contratacion_id IS NOT NULL');
+    expect(quoteDef).toContain('No se puede cotizar en un chat de reclamo');
+
+    const privileges = psql(
+      DB,
+      `SELECT has_function_privilege('anon', 'public.find_or_create_conversation(uuid, text)', 'EXECUTE')::text
+         || '|' || has_function_privilege('anon', 'public.crear_cotizacion(uuid, numeric, text, integer)', 'EXECUTE')::text;`,
+    );
+    expect(privileges).toBe('false|false');
   });
 });

@@ -12,6 +12,7 @@ import { fetchContratacionesByUser, iniciarReclamoGarantia } from '../../service
 import type { AccountStackScreenProps } from '../../navigation/accountTypes';
 import type { Contratacion, ContratacionEstadoPago, ContratacionEstadoTrabajo } from '../../types/contrataciones';
 import {
+  buildClaimChatNavParams,
   contractedWarrantyDurationLabel,
   contractedWorkMoneyDisplay,
   contractedWorkSection,
@@ -180,15 +181,13 @@ export function ContractedWorkOrdersScreen({ navigation }: Props) {
 
   function openClaimChat(row: OrderRow, conversationId: string) {
     const workerName = workerNameById[row.worker_id] ?? 'Profesional';
-    navigation.navigate('Mensajes', {
-      screen: 'ChatConversation',
-      params: {
-        conversationId,
-        otherDisplayName: workerName,
-        headerSubtitle: 'Profesional',
-        workerId: row.worker_id,
-      },
+    const target = buildClaimChatNavParams({
+      conversationId,
+      workerName,
+      workerId: row.worker_id,
+      serviceDetail: row.description,
     });
+    navigation.navigate(target.screen, target.params);
   }
 
   async function startClaim(row: OrderRow) {

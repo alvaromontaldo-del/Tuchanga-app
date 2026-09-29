@@ -2,7 +2,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../lib/supabase';
 import { removeSupabaseRealtimeTopic, removeSupabaseRealtimeTopicAsync } from '../lib/supabaseRealtime';
 import { fetchClosedClaimChatIds } from './claimChatSupabase';
-import { CHAT_CERRADO_POR_RECLAMO } from '../utils/claimChatVisibility';
+import { jobKeepsChatOpen } from '../utils/claimChatVisibility';
+import { claimInboxRowLabel, warrantyClaimEventFecha } from '../utils/warrantyClaimChat';
+import { dedupeInboxByPeer } from '../utils/inboxPeers';
 import { mapChatSendError } from '../utils/chatErrors';
 import type { ApiConversation, ApiMessage, ConversationRole } from './chatApi';
 import type { InboxRealtimeEvent } from './inboxState';
@@ -14,25 +16,55 @@ function firstNameOnly(name: string): string {
   return parts[0] ?? 'Usuario';
 }
 
-/**
- * Inbox 1:1 por peer: conservar SOLO la conversación más reciente por otherUserId.
- * Clave = otherUserId (no myRole): evita vieja+nueva aunque el rol se lea mal.
- */
-export function dedupeInboxByPeer(rows: ApiConversation[]): ApiConversation[] {
-  const best = new Map<string, ApiConversation>();
-  for (const row of rows) {
-    const key = row.otherUserId || row.id;
-    const prev = best.get(key);
-    if (!prev) {
-      best.set(key, row);
+/** Etiqueta estable del hilo de reclamo. No depende del último mensaje. */
+async function loadClaimRowLabels(
+  sb: ReturnType<typeof getSupabaseClient>,
+  links: Array<{ conversationId: string; contratacionId: string }>,
+): Promise<Map<string, string>> {
+  const labels = new Map<string, string>();
+  if (!links.length) return labels;
+  const { data, error } = await sb
+    .from('contrataciones')
+    .select('id, service_detail, fecha_trabajo, finalizado_at, created_at')
+    .in(
+      'id',
+      links.map((link) => link.contratacionId),
+    );
+  if (error || !data) {
+    for (const link of links) labels.set(link.conversationId, 'Reclamo');
+    return labels;
+  }
+  const byId = new Map(
+    (data as Array<{
+      id: string;
+      service_detail?: string | null;
+      fecha_trabajo?: string | null;
+      finalizado_at?: string | null;
+      created_at?: string | null;
+    }>).map((row) => [row.id, row]),
+  );
+  for (const link of links) {
+    const job = byId.get(link.contratacionId);
+    if (!job) {
+      labels.set(link.conversationId, 'Reclamo');
       continue;
     }
-    const prevTs = new Date(prev.lastMessageAt ?? prev.updatedAt).getTime();
-    const nextTs = new Date(row.lastMessageAt ?? row.updatedAt).getTime();
-    if (nextTs >= prevTs) best.set(key, row);
+    labels.set(
+      link.conversationId,
+      claimInboxRowLabel({
+        serviceDetail: job.service_detail,
+        fecha: warrantyClaimEventFecha({
+          fechaTrabajo: job.fecha_trabajo,
+          finalizadoAt: job.finalizado_at,
+          createdAt: job.created_at,
+        }),
+      }),
+    );
   }
-  return Array.from(best.values());
+  return labels;
 }
+
+export { dedupeInboxByPeer };
 
 /** Soft-delete + hide ambos (fallback si la RPC falla o quedó a medias). */
 async function forceSoftDeleteConversation(
@@ -78,21 +110,39 @@ async function forceSoftDeleteConversation(
   await sb.from('conversation_hides').upsert(hides, { onConflict: 'conversation_id,user_id' });
 }
 
-/** Cierra TODOS los hilos activos del mismo par excepto `keepId` (si se pasa). */
+/** Cierra hilos generales duplicados. No toca un reclamo ni un trabajo que sigue en uso. */
 async function softDeleteSiblingConversations(
   sb: ReturnType<typeof getSupabaseClient>,
   clienteId: string,
   trabajadorId: string,
   keepId?: string | null,
 ): Promise<void> {
-  const { data: siblings } = await sb
+  const { data: siblings, error } = await sb
     .from('conversations')
-    .select('id')
+    .select('id, contratacion_id')
     .eq('cliente_id', clienteId)
     .eq('trabajador_id', trabajadorId)
     .is('deleted_at', null);
-  for (const s of (siblings ?? []) as Array<{ id: string }>) {
-    if (!s?.id || (keepId && s.id === keepId)) continue;
+  if (error || !siblings) return;
+  for (const s of siblings as Array<{ id: string; contratacion_id?: string | null }>) {
+    if (!s?.id || (keepId && s.id === keepId) || s.contratacion_id) continue;
+    const { data: jobs, error: jobErr } = await sb
+      .from('contrataciones')
+      .select('estado_trabajo, is_claim_open, claim_status')
+      .eq('conversation_id', s.id);
+    if (jobErr || !jobs) continue;
+    const keeps = (jobs as Array<{
+      estado_trabajo?: string | null;
+      is_claim_open?: boolean | null;
+      claim_status?: string | null;
+    }>).some((job) =>
+      jobKeepsChatOpen({
+        estado_trabajo: job.estado_trabajo,
+        is_claim_open: job.is_claim_open,
+        claim_status: job.claim_status,
+      }),
+    );
+    if (keeps) continue;
     await forceSoftDeleteConversation(sb, s.id);
   }
 }
@@ -104,12 +154,43 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
   } = await sb.auth.getUser();
   if (!user) return [];
 
-  const { data: convs, error } = await sb
+  type ConversationInboxRow = {
+    id: string;
+    cliente_id: string;
+    trabajador_id: string;
+    primary_trade: string | null;
+    updated_at: string | null;
+    deleted_at: string | null;
+    contratacion_id: string | null;
+  };
+
+  const withClaim = await sb
     .from('conversations')
-    .select('id,cliente_id,trabajador_id,primary_trade,updated_at,deleted_at')
+    .select('id,cliente_id,trabajador_id,primary_trade,updated_at,deleted_at,contratacion_id')
     .or(`cliente_id.eq.${user.id},trabajador_id.eq.${user.id}`)
     .is('deleted_at', null)
     .order('updated_at', { ascending: false });
+
+  let error = withClaim.error;
+  let convs: ConversationInboxRow[] | null = withClaim.data;
+  if (error && /contratacion_id/i.test(error.message ?? '')) {
+    const fallback = await sb
+      .from('conversations')
+      .select('id,cliente_id,trabajador_id,primary_trade,updated_at,deleted_at')
+      .or(`cliente_id.eq.${user.id},trabajador_id.eq.${user.id}`)
+      .is('deleted_at', null)
+      .order('updated_at', { ascending: false });
+    error = fallback.error;
+    convs = (fallback.data ?? []).map((row) => ({
+      id: row.id,
+      cliente_id: row.cliente_id,
+      trabajador_id: row.trabajador_id,
+      primary_trade: row.primary_trade,
+      updated_at: row.updated_at,
+      deleted_at: row.deleted_at,
+      contratacion_id: null,
+    }));
+  }
 
   if (error || !convs?.length) return [];
 
@@ -121,11 +202,18 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
     primary_trade?: string | null;
     updated_at?: string | null;
     deleted_at?: string | null;
+    contratacion_id?: string | null;
   }>).filter((c) => !c.deleted_at);
 
   if (!activeConvs.length) return [];
 
   const closedClaimIds = await fetchClosedClaimChatIds(activeConvs.map((c) => c.id));
+  const claimLabelByConversation = await loadClaimRowLabels(
+    sb,
+    activeConvs
+      .filter((c) => c.contratacion_id)
+      .map((c) => ({ conversationId: c.id, contratacionId: c.contratacion_id as string })),
+  );
 
   const results: ApiConversation[] = [];
 
@@ -175,7 +263,7 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
   }
 
   for (const c of activeConvs) {
-    if (hiddenIds.has(c.id)) continue;
+    if (hiddenIds.has(c.id) || closedClaimIds.has(c.id)) continue;
 
     const myRole: ConversationRole = c.cliente_id === user.id ? 'cliente' : 'trabajador';
     const otherId = myRole === 'cliente' ? c.trabajador_id : c.cliente_id;
@@ -209,22 +297,18 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
       primaryTrade = job?.nombre_oficio ?? '';
     }
 
-    const closedByClaim = closedClaimIds.has(c.id);
     results.push({
       id: c.id,
       otherUserId: otherId,
       otherDisplayName: name,
       otherAvatarUrl: (prof as { avatar_url?: string | null } | null)?.avatar_url ?? null,
       primaryTrade,
-      lastMessage: closedByClaim
-        ? CHAT_CERRADO_POR_RECLAMO
-        : last?.type === 'image'
-          ? '📷 Foto'
-          : last?.body ?? null,
+      claimRowLabel: claimLabelByConversation.get(c.id) ?? null,
+      lastMessage: last?.type === 'image' ? '📷 Foto' : last?.body ?? null,
       lastMessageAt: last?.created_at ?? null,
       lastMessageSenderId: last?.sender_id ?? null,
       peerReadAt: peerReadById.get(c.id) ?? null,
-      unreadCount: closedByClaim ? 0 : (unreadById.get(c.id) ?? 0),
+      unreadCount: unreadById.get(c.id) ?? 0,
       updatedAt: c.updated_at ?? new Date().toISOString(),
       myRole,
     });

@@ -4,17 +4,28 @@ import {
   otherChatCanBeClosed,
   resolveWarrantyClaimChat,
   warrantyClaimEventBody,
+  claimInboxRowLabel,
   warrantyClaimEventFecha,
+  type OwnClaimChat,
 } from './warrantyClaimChat';
 
 const contratacionId = '34e896fa-0000-4000-8000-000000000084';
+
+function own(partial: Partial<OwnClaimChat> & Pick<OwnClaimChat, 'id' | 'active'>): OwnClaimChat {
+  return {
+    shared: false,
+    markedForThisJob: false,
+    foreignClaimMessages: false,
+    ...partial,
+  };
+}
 
 describe('resolveWarrantyClaimChat', () => {
   it('usa el chat propio si está activo y no toca el del otro trabajo', () => {
     expect(
       resolveWarrantyClaimChat({
         contratacionId,
-        own: { id: 'chat-propio', active: true },
+        own: own({ id: 'chat-propio', active: true }),
         activePair: {
           id: 'chat-3cef',
           jobs: [{ id: 'e2846e27', estadoTrabajo: 'en_curso', isClaimOpen: false, claimStatus: 'none' }],
@@ -39,7 +50,7 @@ describe('resolveWarrantyClaimChat', () => {
       kind: 'create',
       conversationId: null,
       closeConversationId: null,
-      nameJobInEvent: false,
+      nameJobInEvent: true,
     });
   });
 
@@ -47,30 +58,30 @@ describe('resolveWarrantyClaimChat', () => {
     expect(
       resolveWarrantyClaimChat({
         contratacionId,
-        own: { id: 'chat-17ff', active: false },
+        own: own({ id: 'chat-17ff', active: false }),
         activePair: null,
       }),
     ).toEqual({
       kind: 'create',
       conversationId: null,
       closeConversationId: null,
-      nameJobInEvent: false,
+      nameJobInEvent: true,
     });
   });
 
-  it('no cierra el chat de un trabajo en curso: el evento va ahí y nombra el trabajo', () => {
+  it('no cierra el chat de un trabajo en curso: el reclamo abre su propio hilo', () => {
     expect(
       resolveWarrantyClaimChat({
         contratacionId,
-        own: { id: 'chat-17ff', active: false },
+        own: own({ id: 'chat-17ff', active: false }),
         activePair: {
           id: 'chat-3cef',
           jobs: [{ id: 'e2846e27', estadoTrabajo: 'en_curso', isClaimOpen: false, claimStatus: 'none' }],
         },
       }),
     ).toEqual({
-      kind: 'use',
-      conversationId: 'chat-3cef',
+      kind: 'create',
+      conversationId: null,
       closeConversationId: null,
       nameJobInEvent: true,
     });
@@ -97,11 +108,48 @@ describe('resolveWarrantyClaimChat', () => {
     }
   });
 
+  it('tres reclamos del mismo trabajador no comparten el hilo ni cierran el de otro reclamo', () => {
+    const jobs = [
+      { id: 'a', estadoTrabajo: 'finalizado', isClaimOpen: true, claimStatus: 'open' },
+      { id: 'b', estadoTrabajo: 'finalizado', isClaimOpen: true, claimStatus: 'pending_approval' },
+      { id: 'c', estadoTrabajo: 'finalizado', isClaimOpen: false, claimStatus: 'closed' },
+    ];
+    for (const job of jobs) {
+      expect(
+        resolveWarrantyClaimChat({
+          contratacionId: job.id,
+          own: own({ id: 'chat-3cef', active: true, shared: true }),
+          activePair: { id: 'chat-3cef', jobs },
+        }),
+      ).toEqual({
+        kind: 'create',
+        conversationId: null,
+        closeConversationId: null,
+        nameJobInEvent: true,
+      });
+    }
+  });
+
+  it('si el hilo ya es de esta contratación, lo reutiliza', () => {
+    expect(
+      resolveWarrantyClaimChat({
+        contratacionId,
+        own: own({ id: 'chat-propio', active: true, markedForThisJob: true, shared: true }),
+        activePair: null,
+      }),
+    ).toEqual({
+      kind: 'use',
+      conversationId: 'chat-propio',
+      closeConversationId: null,
+      nameJobInEvent: false,
+    });
+  });
+
   it('cierra el otro chat solo si su trabajo está finalizado y sin reclamo', () => {
     expect(
       resolveWarrantyClaimChat({
         contratacionId,
-        own: { id: 'chat-17ff', active: false },
+        own: own({ id: 'chat-17ff', active: false }),
         activePair: {
           id: 'chat-viejo',
           jobs: [{ id: 'otro', estadoTrabajo: 'finalizado', isClaimOpen: false, claimStatus: 'closed' }],
@@ -111,7 +159,7 @@ describe('resolveWarrantyClaimChat', () => {
       kind: 'create',
       conversationId: null,
       closeConversationId: 'chat-viejo',
-      nameJobInEvent: false,
+      nameJobInEvent: true,
     });
   });
 
@@ -140,6 +188,17 @@ describe('resolveWarrantyClaimChat', () => {
   });
 });
 
+describe('claimInboxRowLabel', () => {
+  it('distingue el hilo por servicio y fecha, no por el último mensaje', () => {
+    expect(claimInboxRowLabel({ serviceDetail: '  Pintura de frente  ', fecha: '12/09/2026' })).toBe(
+      'Reclamo · Pintura de frente · 12/09/2026',
+    );
+    expect(claimInboxRowLabel({ serviceDetail: 'Gasista\nmatutino', fecha: '' })).toBe('Reclamo · Gasista matutino');
+    expect(claimInboxRowLabel({ serviceDetail: '   ', fecha: '01/09/2026' })).toBe('Reclamo · 01/09/2026');
+    expect(claimInboxRowLabel({ serviceDetail: '', fecha: '' })).toBe('Reclamo');
+  });
+});
+
 describe('warrantyClaimEventBody', () => {
   it('en el chat propio el texto no cambia', () => {
     expect(warrantyClaimEventBody({ nameJob: false, serviceDetail: 'Pintura', fecha: '12/09/2026' })).toBe(
@@ -147,7 +206,7 @@ describe('warrantyClaimEventBody', () => {
     );
   });
 
-  it('en el chat de otro trabajo nombra el servicio y la fecha', () => {
+  it('en el hilo propio del reclamo nombra el servicio y la fecha', () => {
     expect(
       warrantyClaimEventBody({ nameJob: true, serviceDetail: '  Pintura de frente  ', fecha: '12/09/2026' }),
     ).toBe(

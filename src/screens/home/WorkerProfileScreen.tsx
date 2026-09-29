@@ -29,6 +29,7 @@ import { fetchWorkerPublicProfileFromSupabase } from '../../services/workerProfi
 import { StarRating } from '../../components/profile/StarRating';
 import { canShowWorkerReputation } from '../../utils/workerReputation';
 import type {
+  AccountStackScreenProps,
   FeedStackScreenProps,
   MessagesStackScreenProps,
   SearchStackScreenProps,
@@ -38,7 +39,8 @@ import type { WorkerPublicProfile, WorkerTradeEntry } from '../../types/feed';
 type Props =
   | FeedStackScreenProps<'WorkerProfile'>
   | SearchStackScreenProps<'WorkerProfile'>
-  | MessagesStackScreenProps<'WorkerProfile'>;
+  | MessagesStackScreenProps<'WorkerProfile'>
+  | AccountStackScreenProps<'WorkerProfile'>;
 
 /** Evita conflicto de tipos entre stack de feed y de búsqueda (mismas rutas). */
 type WorkerProfileFlowNav = NativeStackNavigationProp<

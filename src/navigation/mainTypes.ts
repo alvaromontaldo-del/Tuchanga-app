@@ -105,6 +105,16 @@ export type AccountStackParamList = {
   ClientMaterialPickups: undefined;
   Favorites: undefined;
   ChangePassword: undefined;
+  ChatConversation: ChatScreenParams;
+  WorkerProfile: { workerId: string; conversationId?: string };
+  WorkerPosts: { workerId: string };
+  WorkerReviews: { workerId: string };
+  DetalleServicio: DetalleServicioParams;
+  CreateMaterialRequest: CreateMaterialRequestParams;
+  SelectMaterialStores: SelectMaterialStoresParams;
+  ClientCompareQuotes: { requestId: string; readOnly?: boolean };
+  MaterialOrderDetail: { orderId: string };
+  MaterialOrderSummary: MessagesStackParamList['MaterialOrderSummary'];
 };
 
 /**
