@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AppTextInput } from '../common/AppTextInput';
 import { colors, radii, spacing } from '../../constants/theme';
-import type { StoreHoursSlot } from '../../utils/storeOpeningHours';
+import { defaultStoreOpeningHours, type StoreHoursSlot } from '../../utils/storeOpeningHours';
 
 type Props = {
   slots: StoreHoursSlot[];
@@ -17,16 +17,17 @@ function patchSlot(slots: StoreHoursSlot[], index: number, patch: Partial<StoreH
  * Horarios de atención: corrido (1 tramo) o cortado (2 tramos).
  */
 export function StoreOpeningHoursEditor({ slots, onChange }: Props) {
-  const split = slots.length > 1;
+  const safeSlots = Array.isArray(slots) ? slots : defaultStoreOpeningHours();
+  const split = safeSlots.length > 1;
 
   const setSplit = (enabled: boolean) => {
     if (enabled) {
       onChange([
-        slots[0] ?? { open: '08:00', close: '12:00' },
-        slots[1] ?? { open: '15:00', close: '18:00' },
+        safeSlots[0] ?? { open: '08:00', close: '12:00' },
+        safeSlots[1] ?? { open: '15:00', close: '18:00' },
       ]);
     } else {
-      onChange([slots[0] ?? { open: '09:00', close: '18:00' }]);
+      onChange([safeSlots[0] ?? { open: '09:00', close: '18:00' }]);
     }
   };
 
@@ -57,8 +58,8 @@ export function StoreOpeningHoursEditor({ slots, onChange }: Props) {
         <View style={styles.timeRow}>
           <AppTextInput
             label="Desde"
-            value={slots[0]?.open ?? ''}
-            onChangeText={(t) => onChange(patchSlot(slots, 0, { open: t }))}
+            value={safeSlots[0]?.open ?? ''}
+            onChangeText={(t) => onChange(patchSlot(safeSlots, 0, { open: t }))}
             placeholder="09:00"
             maxLength={5}
             keyboardType="numbers-and-punctuation"
@@ -66,8 +67,8 @@ export function StoreOpeningHoursEditor({ slots, onChange }: Props) {
           />
           <AppTextInput
             label="Hasta"
-            value={slots[0]?.close ?? ''}
-            onChangeText={(t) => onChange(patchSlot(slots, 0, { close: t }))}
+            value={safeSlots[0]?.close ?? ''}
+            onChangeText={(t) => onChange(patchSlot(safeSlots, 0, { close: t }))}
             placeholder="18:00"
             maxLength={5}
             keyboardType="numbers-and-punctuation"
@@ -82,12 +83,12 @@ export function StoreOpeningHoursEditor({ slots, onChange }: Props) {
           <View style={styles.timeRow}>
             <AppTextInput
               label="Desde"
-              value={slots[1]?.open ?? ''}
+              value={safeSlots[1]?.open ?? ''}
               onChangeText={(t) =>
                 onChange(
-                  slots.length > 1
-                    ? patchSlot(slots, 1, { open: t })
-                    : [...slots, { open: t, close: '18:00' }],
+                  safeSlots.length > 1
+                    ? patchSlot(safeSlots, 1, { open: t })
+                    : [...safeSlots, { open: t, close: '18:00' }],
                 )
               }
               placeholder="15:00"
@@ -97,12 +98,12 @@ export function StoreOpeningHoursEditor({ slots, onChange }: Props) {
             />
             <AppTextInput
               label="Hasta"
-              value={slots[1]?.close ?? ''}
+              value={safeSlots[1]?.close ?? ''}
               onChangeText={(t) =>
                 onChange(
-                  slots.length > 1
-                    ? patchSlot(slots, 1, { close: t })
-                    : [...slots, { open: '15:00', close: t }],
+                  safeSlots.length > 1
+                    ? patchSlot(safeSlots, 1, { close: t })
+                    : [...safeSlots, { open: '15:00', close: t }],
                 )
               }
               placeholder="18:00"
@@ -117,8 +118,8 @@ export function StoreOpeningHoursEditor({ slots, onChange }: Props) {
       <View style={styles.previewRow}>
         <Ionicons name="time-outline" size={16} color={colors.textSecondary} />
         <Text style={styles.preview}>
-          {slots.length > 0
-            ? `De ${slots.map((s) => `${s.open || '?'} a ${s.close || '?'}`).join(' y de ')}`
+          {safeSlots.length > 0
+            ? `De ${safeSlots.map((s) => `${s.open || '?'} a ${s.close || '?'}`).join(' y de ')}`
             : 'Sin horarios cargados'}
         </Text>
       </View>
@@ -185,6 +186,7 @@ const styles = StyleSheet.create({
   },
   timeInput: {
     flex: 1,
+    minWidth: 0,
     marginBottom: 0,
   },
   previewRow: {

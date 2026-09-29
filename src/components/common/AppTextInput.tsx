@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import {
   Pressable,
+  StyleProp,
   StyleSheet,
   Text,
   TextInput,
   TextInputProps,
   View,
+  ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radii, spacing } from '../../constants/theme';
@@ -15,6 +17,8 @@ type Props = TextInputProps & {
   error?: string;
   /** Muestra ícono de ojo para alternar visibilidad (para campos de contraseña). */
   passwordToggle?: boolean;
+  /** Estilo del contenedor exterior (ancho, margen). Compatible con filas lado a lado. */
+  containerStyle?: StyleProp<ViewStyle>;
 };
 
 /**
@@ -26,6 +30,7 @@ export function AppTextInput({
   style,
   passwordToggle,
   secureTextEntry,
+  containerStyle,
   ...rest
 }: Props) {
   const [showPassword, setShowPassword] = useState(false);
@@ -33,7 +38,7 @@ export function AppTextInput({
     passwordToggle ? !showPassword : Boolean(secureTextEntry);
 
   return (
-    <View style={styles.wrapper}>
+    <View style={[styles.wrapper, containerStyle]}>
       <Text style={styles.label}>{label}</Text>
       <View style={[styles.inputRow, error ? styles.inputRowError : null]}>
         <TextInput

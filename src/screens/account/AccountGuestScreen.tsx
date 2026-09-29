@@ -6,7 +6,7 @@ import { openAuthModal } from '../../navigation/openAuthModal';
 import { accountUi } from './accountUi';
 
 /**
- * Tab Perfil sin sesión: login / registro. El modo comercio vive en el Login.
+ * Tab Perfil sin sesión: login, registro particular o registro de comercio.
  */
 export function AccountGuestScreen() {
   return (
@@ -33,24 +33,24 @@ export function AccountGuestScreen() {
           style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}
           onPress={() => openAuthModal('Register')}
           accessibilityRole="button"
-          accessibilityLabel="Crear cuenta"
+          accessibilityLabel="Crear cuenta particular"
         >
-          <Text style={styles.secondaryBtnText}>Crear cuenta</Text>
+          <Text style={styles.secondaryBtnText}>Crear cuenta particular</Text>
         </Pressable>
       </View>
 
       <View style={[accountUi.card, styles.authCard]}>
         <Text style={styles.commerceHint}>
-          ¿Tenés un corralón, ferretería u otro local? En el login marcá “Soy comercio”.
+          ¿Tenés un corralón, ferretería u otro local? Creá la cuenta del comercio.
         </Text>
         <Pressable
           style={({ pressed }) => [styles.commerceBtn, pressed && styles.pressed]}
-          onPress={() => openAuthModal('Login', { asCommerce: true })}
+          onPress={() => openAuthModal('RegisterCommerce')}
           accessibilityRole="button"
-          accessibilityLabel="Ir al login como comercio"
+          accessibilityLabel="Registrarme como comercio"
         >
           <Ionicons name="storefront-outline" size={22} color={colors.primary} />
-          <Text style={styles.commerceBtnText}>Ir al login de comercio</Text>
+          <Text style={styles.commerceBtnText}>Registrarme como comercio</Text>
         </Pressable>
       </View>
     </AppScreen>
