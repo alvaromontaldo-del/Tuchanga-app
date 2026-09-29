@@ -25,8 +25,8 @@ import {
 } from '../../services/storeRegistrationSupabase';
 import type { StoreRubro } from '../../types/materials';
 import {
-  defaultStoreOpeningHours,
-  type StoreHoursSlot,
+  defaultStoreWeekSchedule,
+  type StoreDaySchedule,
 } from '../../utils/storeOpeningHours';
 import { getHighAccuracyPosition } from '../../utils/deviceGeolocation';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -48,7 +48,7 @@ export function EditStoreScreen({ navigation }: Props) {
   const [lng, setLng] = useState<number | null>(null);
   const [rubros, setRubros] = useState<StoreRubro[]>([]);
   const [selectedRubros, setSelectedRubros] = useState<string[]>([]);
-  const [openingHours, setOpeningHours] = useState<StoreHoursSlot[]>(defaultStoreOpeningHours());
+  const [openingHours, setOpeningHours] = useState<StoreDaySchedule[]>(defaultStoreWeekSchedule());
   const [locating, setLocating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -75,7 +75,7 @@ export function EditStoreScreen({ navigation }: Props) {
           setLng(Number.isFinite(detail.longitude) ? detail.longitude : null);
           setSelectedRubros(detail.rubroIds);
           setOpeningHours(
-            detail.openingHours.length > 0 ? detail.openingHours : defaultStoreOpeningHours(),
+            detail.openingHours.length > 0 ? detail.openingHours : defaultStoreWeekSchedule(),
           );
         }
       } catch (e) {
@@ -216,7 +216,7 @@ export function EditStoreScreen({ navigation }: Props) {
           maxLength={200}
         />
 
-        <StoreOpeningHoursEditor slots={openingHours} onChange={setOpeningHours} />
+        <StoreOpeningHoursEditor days={openingHours} onChange={setOpeningHours} />
 
         <View style={styles.locationCard}>
           <View style={styles.locationHeader}>

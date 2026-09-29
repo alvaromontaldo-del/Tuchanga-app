@@ -1,128 +1,102 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { AppTextInput } from '../common/AppTextInput';
 import { colors, radii, spacing } from '../../constants/theme';
-import { defaultStoreOpeningHours, type StoreHoursSlot } from '../../utils/storeOpeningHours';
+import {
+  copyTuesdayHoursToFriday,
+  patchStoreDaySlot,
+  setStoreDayClosed,
+  STORE_HOURS_TIME_ROW,
+  storeOpeningHoursEditorRows,
+  type StoreDaySchedule,
+} from '../../utils/storeOpeningHours';
 
 type Props = {
-  slots: StoreHoursSlot[];
-  onChange: (slots: StoreHoursSlot[]) => void;
+  days: StoreDaySchedule[];
+  onChange: (days: StoreDaySchedule[]) => void;
 };
 
-function patchSlot(slots: StoreHoursSlot[], index: number, patch: Partial<StoreHoursSlot>): StoreHoursSlot[] {
-  return slots.map((s, i) => (i === index ? { ...s, ...patch } : s));
-}
-
 /**
- * Horarios de atención: corrido (1 tramo) o cortado (2 tramos).
+ * Horario semanal: lun a dom, cada día abierto o cerrado, Desde y Hasta en la misma fila.
  */
-export function StoreOpeningHoursEditor({ slots, onChange }: Props) {
-  const safeSlots = Array.isArray(slots) ? slots : defaultStoreOpeningHours();
-  const split = safeSlots.length > 1;
-
-  const setSplit = (enabled: boolean) => {
-    if (enabled) {
-      onChange([
-        safeSlots[0] ?? { open: '08:00', close: '12:00' },
-        safeSlots[1] ?? { open: '15:00', close: '18:00' },
-      ]);
-    } else {
-      onChange([safeSlots[0] ?? { open: '09:00', close: '18:00' }]);
-    }
-  };
+export function StoreOpeningHoursEditor({ days, onChange }: Props) {
+  const rows = storeOpeningHoursEditorRows(days);
 
   return (
     <View style={styles.wrap}>
       <Text style={styles.title}>Horarios de atención</Text>
-      <Text style={styles.hint}>Ej.: 9 a 18, o 8 a 12 y de 15 a 18 (horario cortado).</Text>
+      <Text style={styles.hint}>
+        Cada día tiene su horario. Si el local está cerrado, marcalo y no hace falta cargar Desde y
+        Hasta.
+      </Text>
 
-      <View style={styles.modeRow}>
-        <Pressable
-          onPress={() => setSplit(false)}
-          style={[styles.modeBtn, !split && styles.modeBtnOn]}
-          accessibilityRole="button"
-        >
-          <Text style={[styles.modeText, !split && styles.modeTextOn]}>Corrido</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => setSplit(true)}
-          style={[styles.modeBtn, split && styles.modeBtnOn]}
-          accessibilityRole="button"
-        >
-          <Text style={[styles.modeText, split && styles.modeTextOn]}>Horario cortado</Text>
-        </Pressable>
-      </View>
+      <Pressable
+        onPress={() => onChange(copyTuesdayHoursToFriday(days))}
+        style={styles.copyBtn}
+        accessibilityRole="button"
+        accessibilityLabel="Copiar horario de martes a viernes"
+      >
+        <Text style={styles.copyText}>Copiar horario de martes a viernes</Text>
+      </Pressable>
 
-      <View style={styles.slotCard}>
-        {split ? <Text style={styles.slotLabel}>Mañana</Text> : null}
-        <View style={styles.timeRow}>
-          <AppTextInput
-            label="Desde"
-            value={safeSlots[0]?.open ?? ''}
-            onChangeText={(t) => onChange(patchSlot(safeSlots, 0, { open: t }))}
-            placeholder="09:00"
-            maxLength={5}
-            keyboardType="numbers-and-punctuation"
-            containerStyle={styles.timeInput}
-          />
-          <AppTextInput
-            label="Hasta"
-            value={safeSlots[0]?.close ?? ''}
-            onChangeText={(t) => onChange(patchSlot(safeSlots, 0, { close: t }))}
-            placeholder="18:00"
-            maxLength={5}
-            keyboardType="numbers-and-punctuation"
-            containerStyle={styles.timeInput}
-          />
-        </View>
-      </View>
-
-      {split ? (
-        <View style={styles.slotCard}>
-          <Text style={styles.slotLabel}>Tarde</Text>
-          <View style={styles.timeRow}>
-            <AppTextInput
-              label="Desde"
-              value={safeSlots[1]?.open ?? ''}
-              onChangeText={(t) =>
-                onChange(
-                  safeSlots.length > 1
-                    ? patchSlot(safeSlots, 1, { open: t })
-                    : [...safeSlots, { open: t, close: '18:00' }],
-                )
-              }
-              placeholder="15:00"
-              maxLength={5}
-              keyboardType="numbers-and-punctuation"
-              containerStyle={styles.timeInput}
-            />
-            <AppTextInput
-              label="Hasta"
-              value={safeSlots[1]?.close ?? ''}
-              onChangeText={(t) =>
-                onChange(
-                  safeSlots.length > 1
-                    ? patchSlot(safeSlots, 1, { close: t })
-                    : [...safeSlots, { open: '15:00', close: t }],
-                )
-              }
-              placeholder="18:00"
-              maxLength={5}
-              keyboardType="numbers-and-punctuation"
-              containerStyle={styles.timeInput}
-            />
+      {rows.map((row) => (
+        <View key={row.day} style={styles.dayCard}>
+          <Text style={styles.dayLabel}>{row.label}</Text>
+          <View style={styles.modeRow}>
+            <Pressable
+              onPress={() => onChange(setStoreDayClosed(days, row.day, false))}
+              style={[styles.modeBtn, !row.closed && styles.modeBtnOn]}
+              accessibilityRole="button"
+              accessibilityLabel={`${row.label}: abierto`}
+              accessibilityState={{ selected: !row.closed }}
+            >
+              <Text style={[styles.modeText, !row.closed && styles.modeTextOn]}>Abierto</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => onChange(setStoreDayClosed(days, row.day, true))}
+              style={[styles.modeBtn, row.closed && styles.modeBtnOn]}
+              accessibilityRole="button"
+              accessibilityLabel={`${row.label}: cerrado`}
+              accessibilityState={{ selected: row.closed }}
+            >
+              <Text style={[styles.modeText, row.closed && styles.modeTextOn]}>Cerrado</Text>
+            </Pressable>
           </View>
-        </View>
-      ) : null}
 
-      <View style={styles.previewRow}>
-        <Ionicons name="time-outline" size={16} color={colors.textSecondary} />
-        <Text style={styles.preview}>
-          {safeSlots.length > 0
-            ? `De ${safeSlots.map((s) => `${s.open || '?'} a ${s.close || '?'}`).join(' y de ')}`
-            : 'Sin horarios cargados'}
-        </Text>
-      </View>
+          {row.closed
+            ? null
+            : row.slots.map((slot, index) => (
+                <View
+                  key={`${row.day}-${index}`}
+                  style={[styles.timeRow, STORE_HOURS_TIME_ROW]}
+                >
+                  <AppTextInput
+                    label="Desde"
+                    value={slot.open}
+                    onChangeText={(text) =>
+                      onChange(patchStoreDaySlot(days, row.day, index, { open: text }))
+                    }
+                    placeholder="09:00"
+                    maxLength={5}
+                    keyboardType="numbers-and-punctuation"
+                    containerStyle={styles.timeInput}
+                    accessibilityLabel={`${row.label} desde`}
+                  />
+                  <AppTextInput
+                    label="Hasta"
+                    value={slot.close}
+                    onChangeText={(text) =>
+                      onChange(patchStoreDaySlot(days, row.day, index, { close: text }))
+                    }
+                    placeholder="18:00"
+                    maxLength={5}
+                    keyboardType="numbers-and-punctuation"
+                    containerStyle={styles.timeInput}
+                    accessibilityLabel={`${row.label} hasta`}
+                  />
+                </View>
+              ))}
+        </View>
+      ))}
     </View>
   );
 }
@@ -141,6 +115,33 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textSecondary,
     lineHeight: 18,
+  },
+  copyBtn: {
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: radii.input,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: '#FFF8F8',
+  },
+  copyText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  dayCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  dayLabel: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.text,
   },
   modeRow: {
     flexDirection: 'row',
@@ -167,19 +168,6 @@ const styles = StyleSheet.create({
   modeTextOn: {
     color: colors.primary,
   },
-  slotCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  slotLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.text,
-  },
   timeRow: {
     flexDirection: 'row',
     gap: spacing.sm,
@@ -188,15 +176,5 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     marginBottom: 0,
-  },
-  previewRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  preview: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    flex: 1,
   },
 });

@@ -75,10 +75,12 @@ import {
   fetchStoreRubrosCatalog,
   registerMyStore,
 } from '../../services/storeRegistrationSupabase';
+import { updateMyStoreAvatarFromUri } from '../../services/storeQuotesSupabase';
 import { StoreOpeningHoursEditor } from '../../components/store/StoreOpeningHoursEditor';
 import {
-  defaultStoreOpeningHours,
-  type StoreHoursSlot,
+  defaultStoreWeekSchedule,
+  validateStoreWeekSchedule,
+  type StoreDaySchedule,
 } from '../../utils/storeOpeningHours';
 import type { StoreRubro } from '../../types/materials';
 import { getHighAccuracyPosition } from '../../utils/deviceGeolocation';
@@ -103,7 +105,11 @@ type DraftErrors = Partial<Record<
   | 'coverageKm'
   | 'trades'
   | 'storeName'
-  | 'storeRubros',
+  | 'storeRubros'
+  | 'storeAvatar'
+  | 'storeAddress'
+  | 'storeLocation'
+  | 'storeHours',
   string
 >>;
 
@@ -158,12 +164,17 @@ export function RegisterScreen({ navigation, route }: Props) {
   /** Obligatorio solo si ofrece servicios; se guarda como bio en el perfil. */
   const [professionalDescription, setProfessionalDescription] = useState('');
 
-  // Alta comercio (solo asCommerce)
+  // Alta comercio (solo asCommerce). La dirección del local no es la del titular.
   const [storeName, setStoreName] = useState('');
+  const [storeAvatarUri, setStoreAvatarUri] = useState<string | null>(null);
+  const [storeAddress, setStoreAddress] = useState('');
+  const [storeLat, setStoreLat] = useState<number | null>(null);
+  const [storeLng, setStoreLng] = useState<number | null>(null);
+  const [storeLocating, setStoreLocating] = useState(false);
   const [storeRubros, setStoreRubros] = useState<StoreRubro[]>([]);
   const [selectedStoreRubros, setSelectedStoreRubros] = useState<string[]>([]);
-  const [storeOpeningHours, setStoreOpeningHours] = useState<StoreHoursSlot[]>(
-    defaultStoreOpeningHours(),
+  const [storeOpeningHours, setStoreOpeningHours] = useState<StoreDaySchedule[]>(
+    defaultStoreWeekSchedule(),
   );
   const [storeRubrosLoading, setStoreRubrosLoading] = useState(false);
 
@@ -378,17 +389,22 @@ export function RegisterScreen({ navigation, route }: Props) {
     blurConfirmMatchOnly();
   }
 
-  async function applyAvatarUri(uri: string) {
+  async function applyAvatarUri(uri: string, target: 'profile' | 'store' = 'profile') {
     try {
       const stable = await normalizeLocalImageUri(uri, { squareCrop: true });
-      setAvatarUri(stable);
-      setErrors((p) => ({ ...p, avatar: undefined }));
+      if (target === 'store') {
+        setStoreAvatarUri(stable);
+        setErrors((p) => ({ ...p, storeAvatar: undefined }));
+      } else {
+        setAvatarUri(stable);
+        setErrors((p) => ({ ...p, avatar: undefined }));
+      }
     } catch {
       toast.warning('No se pudo procesar la foto. Probá de nuevo o elegí otra.', 'Foto');
     }
   }
 
-  async function pickAvatarFromGallery() {
+  async function pickAvatarFromGallery(target: 'profile' | 'store' = 'profile') {
     const okGallery = await ensureGalleryPermission();
     if (!okGallery) {
       return;
@@ -400,11 +416,11 @@ export function RegisterScreen({ navigation, route }: Props) {
       quality: 0.9,
     });
     if (!result.canceled && result.assets[0]?.uri) {
-      await applyAvatarUri(result.assets[0].uri);
+      await applyAvatarUri(result.assets[0].uri, target);
     }
   }
 
-  async function pickAvatarFromCamera() {
+  async function pickAvatarFromCamera(target: 'profile' | 'store' = 'profile') {
     const okCamera = await ensureCameraPermission();
     if (!okCamera) {
       return;
@@ -418,16 +434,20 @@ export function RegisterScreen({ navigation, route }: Props) {
       exif: false,
     });
     if (!result.canceled && result.assets[0]?.uri) {
-      await applyAvatarUri(result.assets[0].uri);
+      await applyAvatarUri(result.assets[0].uri, target);
     }
   }
 
-  function pickAvatar() {
-    Alert.alert('Foto de perfil', '¿Cómo querés cargar tu foto?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Tomar foto (Cámara)', onPress: () => void pickAvatarFromCamera() },
-      { text: 'Elegir de la galería', onPress: () => void pickAvatarFromGallery() },
-    ]);
+  function pickAvatar(target: 'profile' | 'store' = 'profile') {
+    Alert.alert(
+      target === 'store' ? 'Foto del comercio' : 'Foto de perfil',
+      '¿Cómo querés cargar tu foto?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Tomar foto (Cámara)', onPress: () => void pickAvatarFromCamera(target) },
+        { text: 'Elegir de la galería', onPress: () => void pickAvatarFromGallery(target) },
+      ],
+    );
   }
 
   async function pickTradePhoto(tradeId: string) {
@@ -607,6 +627,52 @@ export function RegisterScreen({ navigation, route }: Props) {
     }
   }
 
+  async function locateStore() {
+    setStoreLocating(true);
+    try {
+      const res = await getHighAccuracyPosition();
+      if (!res.ok) {
+        toast.warning(
+          res.reason === 'denied'
+            ? 'Necesitamos permiso de ubicación para marcar el local.'
+            : 'No se pudo obtener el GPS.',
+          'Ubicación del local',
+        );
+        return;
+      }
+      const { lat, lng } = res.position;
+      setStoreLat(lat);
+      setStoreLng(lng);
+      setErrors((p) => ({ ...p, storeLocation: undefined }));
+      try {
+        const addr = await reverseNominatimStreet(lat, lng);
+        if (addr) setStoreAddress(addr);
+        else setStoreAddress((prev) => prev.trim() || 'Ubicación actual');
+      } catch {
+        setStoreAddress((prev) => prev.trim() || 'Ubicación actual');
+      }
+    } finally {
+      setStoreLocating(false);
+    }
+  }
+
+  function useClientAddressForStore() {
+    if (!geo) {
+      toast.warning('Primero cargá la ubicación del titular, más abajo.', 'Dirección');
+      return;
+    }
+    const saved = addressToPersist({
+      typedQuery: activeStreetQuery(addressQuery, typedQueryRef.current),
+      confirmedLabel: confirmedLabelRef.current,
+      currentLabel: geo.address,
+      pinMoved: pinMovedRef.current,
+    });
+    setStoreAddress(saved || geo.address);
+    setStoreLat(geo.lat);
+    setStoreLng(geo.lng);
+    setErrors((p) => ({ ...p, storeAddress: undefined, storeLocation: undefined }));
+  }
+
   useEffect(() => {
     // Al montar: intentamos ubicación precisa (no por IP)
     void locateMe();
@@ -659,9 +725,16 @@ export function RegisterScreen({ navigation, route }: Props) {
 
     if (asCommerce) {
       if (!storeName.trim()) next.storeName = 'El nombre del comercio es obligatorio.';
+      if (!storeAvatarUri) next.storeAvatar = 'La foto o el logo del comercio es obligatorio.';
+      if (!storeAddress.trim()) next.storeAddress = 'La dirección del comercio es obligatoria.';
+      if (storeLat == null || storeLng == null) {
+        next.storeLocation = 'Marcá la ubicación del local en el mapa o con GPS.';
+      }
       if (selectedStoreRubros.length === 0) {
         next.storeRubros = 'Seleccioná al menos un rubro.';
       }
+      const hoursErr = validateStoreWeekSchedule(storeOpeningHours);
+      if (hoursErr) next.storeHours = hoursErr;
     }
 
     if (offerServices) {
@@ -724,6 +797,27 @@ export function RegisterScreen({ navigation, route }: Props) {
       pinMoved: pinMovedRef.current,
     });
     const baseLocation = { address: savedAddress, lat: geo.lat, lng: geo.lng };
+    const commerceDraft =
+      storeLat != null && storeLng != null && storeAvatarUri
+        ? {
+            name: storeName.trim(),
+            phone,
+            address: storeAddress.trim(),
+            latitude: storeLat,
+            longitude: storeLng,
+            rubroIds: selectedStoreRubros,
+            openingHours: storeOpeningHours,
+            avatarUri: storeAvatarUri,
+          }
+        : null;
+    if (asCommerce && !commerceDraft) {
+      toast.error(
+        'Completá la foto del titular, la del comercio y las dos direcciones.',
+        'Faltan datos',
+        { durationMs: 3500 },
+      );
+      return;
+    }
 
     setLoading(true);
     try {
@@ -744,17 +838,7 @@ export function RegisterScreen({ navigation, route }: Props) {
         coverageKm: wantWorker ? clampInt(Number(coverageKm) || 0, 1, 300) : undefined,
         trades: wantWorker ? trades : undefined,
         primaryTradeId: wantWorker ? primaryTradeId ?? undefined : undefined,
-        pendingCommerce: asCommerce
-          ? {
-              name: storeName.trim(),
-              phone,
-              address: savedAddress || storeName.trim(),
-              latitude: geo.lat,
-              longitude: geo.lng,
-              rubroIds: selectedStoreRubros,
-              openingHours: storeOpeningHours,
-            }
-          : undefined,
+        pendingCommerce: asCommerce && commerceDraft ? commerceDraft : undefined,
       });
 
       if (!result.ok) {
@@ -786,21 +870,12 @@ export function RegisterScreen({ navigation, route }: Props) {
       if (asCommerce) {
         await enterCommerceIntent();
         await chooseSessionRole('commerce');
+        let created: Awaited<ReturnType<typeof registerMyStore>> | null = null;
         try {
-          const created = await registerMyStore({
-            name: storeName.trim(),
-            phone,
-            address: savedAddress || storeName.trim(),
-            latitude: geo.lat,
-            longitude: geo.lng,
-            rubroIds: selectedStoreRubros,
-            openingHours: storeOpeningHours,
-          });
-          await refreshCommerceShell();
-          if (created.status === 'pending_approval') {
-            showPendingCommerceNoticeOnce(result.user.id);
-            await chooseSessionRole('client');
+          if (!commerceDraft) {
+            throw new Error('Faltan los datos del local.');
           }
+          created = await registerMyStore(commerceDraft);
         } catch (storeErr) {
           toast.warning(
             storeErr instanceof Error
@@ -809,6 +884,26 @@ export function RegisterScreen({ navigation, route }: Props) {
             'Comercio',
             { durationMs: 6000 },
           );
+        }
+        if (created && commerceDraft) {
+          try {
+            await updateMyStoreAvatarFromUri(created.id, commerceDraft.avatarUri);
+          } catch (avatarErr) {
+            toast.warning(
+              avatarErr instanceof Error
+                ? avatarErr.message
+                : 'El comercio quedó creado, pero no se pudo guardar la foto. Podés cargarla después.',
+              'Foto del comercio',
+              { durationMs: 6000 },
+            );
+          }
+        }
+        if (created) {
+          await refreshCommerceShell();
+          if (created.status === 'pending_approval') {
+            showPendingCommerceNoticeOnce(result.user.id);
+            await chooseSessionRole('client');
+          }
         }
       }
       if (redirectTo && !asCommerce) closeAuthModalAndRedirect(redirectTo);
@@ -839,7 +934,7 @@ export function RegisterScreen({ navigation, route }: Props) {
             </Text>
             <Text style={styles.subtitle}>
               {asCommerce
-                ? 'Cargá los datos de tu local y del titular. El comercio queda pendiente de aprobación del admin.'
+                ? 'Cargá los datos del titular (como una cuenta particular) y los del local: foto o logo, dirección, rubros y horario. El comercio queda pendiente de aprobación.'
                 : 'Perfil único: empezás como cliente y, si querés, activás funciones de trabajador.'}
             </Text>
 
@@ -858,6 +953,72 @@ export function RegisterScreen({ navigation, route }: Props) {
                   maxLength={120}
                   error={errors.storeName}
                 />
+                <Pressable
+                  style={[styles.avatarRow, styles.storeAvatarGap]}
+                  onPress={() => pickAvatar('store')}
+                  hitSlop={8}
+                >
+                  <View style={styles.avatar}>
+                    {storeAvatarUri ? (
+                      <Image source={{ uri: storeAvatarUri }} style={styles.avatarImg} />
+                    ) : (
+                      <Ionicons name="storefront-outline" size={28} color={colors.textSecondary} />
+                    )}
+                  </View>
+                  <View style={styles.avatarText}>
+                    <Text style={styles.avatarTitle}>Foto o logo del comercio</Text>
+                    <Text style={styles.avatarHint}>
+                      {storeAvatarUri ? 'Tocá para cambiar' : 'Obligatoria, distinta de tu foto de perfil'}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+                </Pressable>
+                {errors.storeAvatar ? <Text style={styles.error}>{errors.storeAvatar}</Text> : null}
+
+                <AppTextInput
+                  label="Dirección del local *"
+                  value={storeAddress}
+                  onChangeText={(t) => {
+                    setStoreAddress(t);
+                    setErrors((p) => ({ ...p, storeAddress: undefined }));
+                  }}
+                  placeholder="Calle, número, localidad"
+                  maxLength={200}
+                  error={errors.storeAddress}
+                />
+                <View style={styles.storeActions}>
+                  <AppButton
+                    title={storeLocating ? 'Obteniendo GPS…' : 'Usar GPS del local'}
+                    onPress={() => void locateStore()}
+                    loading={storeLocating}
+                    variant="secondary"
+                    style={styles.storeActionBtn}
+                  />
+                  <AppButton
+                    title="Usar la dirección del titular"
+                    onPress={useClientAddressForStore}
+                    variant="secondary"
+                    style={styles.storeActionBtn}
+                  />
+                </View>
+                {errors.storeLocation ? <Text style={styles.error}>{errors.storeLocation}</Text> : null}
+                {storeLat != null && storeLng != null ? (
+                  <View style={styles.storeMap}>
+                    <LocationMap
+                      geo={{ lat: storeLat, lng: storeLng }}
+                      coverageMeters={0}
+                      showCoverage={false}
+                      locating={storeLocating}
+                      onLocateMe={() => void locateStore()}
+                      onPinMoved={(lat, lng) => {
+                        setStoreLat(lat);
+                        setStoreLng(lng);
+                        setErrors((p) => ({ ...p, storeLocation: undefined }));
+                      }}
+                    />
+                  </View>
+                ) : null}
+
                 <Text style={styles.fieldLabelStatic}>Rubros * (podés elegir varios)</Text>
                 <Text style={styles.hint}>
                   Elegí los rubros en los que vas a cotizar materiales.
@@ -893,16 +1054,20 @@ export function RegisterScreen({ navigation, route }: Props) {
                   <Text style={styles.error}>{errors.storeRubros}</Text>
                 ) : null}
                 <StoreOpeningHoursEditor
-                  slots={storeOpeningHours}
-                  onChange={setStoreOpeningHours}
+                  days={storeOpeningHours}
+                  onChange={(next) => {
+                    setStoreOpeningHours(next);
+                    setErrors((p) => ({ ...p, storeHours: undefined }));
+                  }}
                 />
+                {errors.storeHours ? <Text style={styles.error}>{errors.storeHours}</Text> : null}
               </>
             ) : null}
 
             <Text style={styles.section}>
               {asCommerce ? 'Titular de la cuenta' : 'Identidad'}
             </Text>
-            <Pressable style={styles.avatarRow} onPress={pickAvatar} hitSlop={8}>
+            <Pressable style={styles.avatarRow} onPress={() => pickAvatar('profile')} hitSlop={8}>
               <View style={styles.avatar}>
                 {avatarUri ? (
                   <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
@@ -1081,12 +1246,11 @@ export function RegisterScreen({ navigation, route }: Props) {
               error={errors.confirm}
             />
 
-            <Text style={styles.section}>
-              {asCommerce ? 'Dirección del local *' : 'Ubicación base *'}
-            </Text>
+            <Text style={styles.section}>Ubicación base *</Text>
             <Text style={styles.hint}>
-              Buscá tu dirección y elegí una sugerencia para guardar latitud/longitud. Si no queda
-              exacto, mové el pin manualmente.
+              {asCommerce
+                ? 'Dirección de la persona titular. Puede ser distinta a la del local. Buscá y elegí una sugerencia; si no queda exacto, mové el pin.'
+                : 'Buscá tu dirección y elegí una sugerencia para guardar latitud/longitud. Si no queda exacto, mové el pin manualmente.'}
             </Text>
             {locationHint ? <Text style={styles.hintWarn}>{locationHint}</Text> : null}
             <View style={styles.searchRow}>
@@ -1211,14 +1375,10 @@ export function RegisterScreen({ navigation, route }: Props) {
               />
             ) : null}
 
-            <Text style={styles.section}>
-              {asCommerce
-                ? 'Detalles para ubicar el local'
-                : 'Detalles para ubicar el domicilio'}
-            </Text>
+            <Text style={styles.section}>Detalles para ubicar el domicilio</Text>
             <Text style={styles.hint}>
               {asCommerce
-                ? 'Opcional. Referencias del local (entrada, entre calles, etc.).'
+                ? 'Opcional. Referencias del domicilio del titular (rejas, color de fachada, etc.).'
                 : 'Opcional. Referencias para que el profesional te encuentre (rejas, color de fachada, etc.).'}
             </Text>
             <TextInput
@@ -1714,6 +1874,18 @@ const styles = StyleSheet.create({
   avatarText: { flex: 1, marginLeft: spacing.md },
   avatarTitle: { fontSize: 15, fontWeight: '800', color: colors.text },
   avatarHint: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
+  storeAvatarGap: { marginTop: spacing.sm, marginBottom: spacing.md },
+  storeActions: {
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  storeActionBtn: { marginTop: 0 },
+  storeMap: {
+    height: 220,
+    borderRadius: radii.input,
+    overflow: 'hidden',
+    marginBottom: spacing.md,
+  },
   row2: { flexDirection: 'row', gap: spacing.md },
   col: { flex: 1 },
   phoneBlock: { marginBottom: spacing.md },

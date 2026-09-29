@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { isSupabaseConfigured } from '../config/supabase';
 import type { SignUpPayload } from './auth';
-import { registerMyStore } from './storeRegistrationSupabase';
+import { fetchMyStoresDetailed, registerMyStore } from './storeRegistrationSupabase';
+import { updateMyStoreAvatarFromUri } from './storeQuotesSupabase';
 import { persistSignUpToSupabase } from './supabaseUser';
 
 const KEY = '@tuchanga/pending_profile_signup_v1';
@@ -60,12 +61,23 @@ async function applyPendingInternal(userId: string): Promise<void> {
     // y completa birth_date + avatar en vez de descartar el pending.
     await persistSignUpToSupabase(pending.profile, userId);
     if (pending.store) {
+      const { avatarUri, ...storeInput } = pending.store;
+      let storeId: string | null = null;
       try {
-        await registerMyStore(pending.store);
+        const created = await registerMyStore(storeInput);
+        storeId = created.id;
       } catch (storeErr) {
         const storeMsg = storeErr instanceof Error ? storeErr.message : String(storeErr);
-        // Ya existe: no hace falta reintentar ni pedir los datos de nuevo.
+        // Ya existe: igual hay que subir la foto si el alta anterior no llegó a guardarla.
         if (!/ya ten[eé]s un comercio/i.test(storeMsg)) throw storeErr;
+        const mine = await fetchMyStoresDetailed();
+        const existing = mine.find((store) => store.status === 'pending_approval') ?? mine[0];
+        storeId = existing?.id ?? null;
+      }
+      const photo = avatarUri?.trim();
+      if (photo) {
+        if (!storeId) throw new Error('No se pudo guardar la foto del comercio.');
+        await updateMyStoreAvatarFromUri(storeId, photo);
       }
     }
     await clearPendingProfileSignup();

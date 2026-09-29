@@ -25,8 +25,15 @@ vi.mock('./supabaseUser', () => ({
 }));
 
 const registerMyStore = vi.fn();
+const fetchMyStoresDetailed = vi.fn();
 vi.mock('./storeRegistrationSupabase', () => ({
   registerMyStore: (...args: unknown[]) => registerMyStore(...args),
+  fetchMyStoresDetailed: (...args: unknown[]) => fetchMyStoresDetailed(...args),
+}));
+
+const updateMyStoreAvatarFromUri = vi.fn();
+vi.mock('./storeQuotesSupabase', () => ({
+  updateMyStoreAvatarFromUri: (...args: unknown[]) => updateMyStoreAvatarFromUri(...args),
 }));
 
 import { savePendingProfileSignup, tryApplyPendingProfileSignup } from './pendingProfileSignup';
@@ -50,7 +57,16 @@ function payload(): SignUpPayload {
       latitude: -34.6,
       longitude: -58.4,
       rubroIds: ['rubro-1'],
-      openingHours: [{ open: '09:00', close: '18:00' }],
+      openingHours: [
+        { day: 1, closed: false, slots: [{ open: '09:00', close: '18:00' }] },
+        { day: 2, closed: false, slots: [{ open: '09:00', close: '18:00' }] },
+        { day: 3, closed: false, slots: [{ open: '09:00', close: '18:00' }] },
+        { day: 4, closed: false, slots: [{ open: '09:00', close: '18:00' }] },
+        { day: 5, closed: false, slots: [{ open: '09:00', close: '18:00' }] },
+        { day: 6, closed: false, slots: [{ open: '09:00', close: '13:00' }] },
+        { day: 7, closed: true, slots: [{ open: '09:00', close: '18:00' }] },
+      ],
+      avatarUri: 'file://logo.jpg',
     },
   };
 }
@@ -66,6 +82,17 @@ describe('signup pendiente de comercio', () => {
       name: 'Ferretería El Tornillo',
       status: 'pending_approval',
     });
+    fetchMyStoresDetailed.mockReset();
+    fetchMyStoresDetailed.mockResolvedValue([
+      {
+        id: 'store-1',
+        name: 'Ferretería El Tornillo',
+        status: 'pending_approval',
+        avatarUrl: null,
+      },
+    ]);
+    updateMyStoreAvatarFromUri.mockReset();
+    updateMyStoreAvatarFromUri.mockResolvedValue('https://cdn.example/logo.jpg');
   });
 
   it('crea el comercio con el horario en el primer login', async () => {
@@ -73,15 +100,27 @@ describe('signup pendiente de comercio', () => {
     await tryApplyPendingProfileSignup('user-1');
 
     expect(persistSignUpToSupabase).toHaveBeenCalledTimes(1);
-    expect(registerMyStore).toHaveBeenCalledWith({
-      name: 'Ferretería El Tornillo',
-      phone: '+5491111111111',
-      address: 'Calle 1',
-      latitude: -34.6,
-      longitude: -58.4,
-      rubroIds: ['rubro-1'],
-      openingHours: [{ open: '09:00', close: '18:00' }],
-    });
+    expect(persistSignUpToSupabase).toHaveBeenCalledWith(
+      expect.objectContaining({
+        firstName: 'Ana',
+        lastName: 'Paz',
+        avatarUri: 'file://avatar.jpg',
+        phone: '+5491111111111',
+        baseLocation: { address: 'Calle 1', lat: -34.6, lng: -58.4 },
+      }),
+      'user-1',
+    );
+    expect(registerMyStore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Ferretería El Tornillo',
+        phone: '+5491111111111',
+        address: 'Calle 1',
+        latitude: -34.6,
+        longitude: -58.4,
+        rubroIds: ['rubro-1'],
+      }),
+    );
+    expect(updateMyStoreAvatarFromUri).toHaveBeenCalledWith('store-1', 'file://logo.jpg');
 
     registerMyStore.mockClear();
     await tryApplyPendingProfileSignup('user-1');
@@ -104,9 +143,26 @@ describe('signup pendiente de comercio', () => {
     );
     await savePendingProfileSignup('user-3', payload());
     await tryApplyPendingProfileSignup('user-3');
+    expect(updateMyStoreAvatarFromUri).toHaveBeenCalledWith('store-1', 'file://logo.jpg');
 
     registerMyStore.mockClear();
+    updateMyStoreAvatarFromUri.mockClear();
     await tryApplyPendingProfileSignup('user-3');
     expect(registerMyStore).not.toHaveBeenCalled();
+    expect(updateMyStoreAvatarFromUri).not.toHaveBeenCalled();
+  });
+
+  it('reintenta la foto del comercio si la subida falla en el primer login', async () => {
+    updateMyStoreAvatarFromUri.mockRejectedValueOnce(new Error('network'));
+    await savePendingProfileSignup('user-4', payload());
+    await tryApplyPendingProfileSignup('user-4');
+    expect(updateMyStoreAvatarFromUri).toHaveBeenCalledTimes(1);
+
+    registerMyStore.mockRejectedValueOnce(
+      new Error('Ya tenés un comercio pendiente de aprobación.'),
+    );
+    await tryApplyPendingProfileSignup('user-4');
+    expect(updateMyStoreAvatarFromUri).toHaveBeenCalledTimes(2);
+    expect(updateMyStoreAvatarFromUri).toHaveBeenLastCalledWith('store-1', 'file://logo.jpg');
   });
 });
