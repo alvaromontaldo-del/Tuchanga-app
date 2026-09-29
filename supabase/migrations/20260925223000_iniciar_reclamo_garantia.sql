@@ -58,7 +58,9 @@ REVOKE ALL ON FUNCTION public.conversation_tiene_trabajo_vivo(uuid) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.conversation_tiene_trabajo_vivo(uuid) FROM anon;
 GRANT EXECUTE ON FUNCTION public.conversation_tiene_trabajo_vivo(uuid) TO service_role;
 
--- No cierra hilos de reclamo ni chats con un trabajo que sigue en uso.
+-- Cuerpo de producción (worker_not_found / worker_on_leave / worker_unavailable)
+-- más dos filtros: el hilo general es contratacion_id IS NULL, y no se cierra
+-- un hilo con trabajo en curso o reclamo abierto.
 CREATE OR REPLACE FUNCTION public.find_or_create_conversation(
   p_trabajador_id uuid,
   p_primary_trade text DEFAULT ''
@@ -73,6 +75,7 @@ DECLARE
   v_id uuid;
   v_trade text;
   v_blocked boolean;
+  v_worker_status text;
   r record;
 BEGIN
   IF v_cliente_id IS NULL THEN
@@ -125,6 +128,23 @@ BEGIN
     RETURN v_id;
   END IF;
 
+  SELECT coalesce(p.professional_status, 'none')
+  INTO v_worker_status
+  FROM public.profiles p
+  WHERE p.id = p_trabajador_id;
+
+  IF v_worker_status IS NULL THEN
+    RAISE EXCEPTION 'worker_not_found' USING ERRCODE = 'P0001';
+  END IF;
+
+  IF v_worker_status = 'paused' THEN
+    RAISE EXCEPTION 'worker_on_leave' USING ERRCODE = 'P0001';
+  END IF;
+
+  IF v_worker_status IS DISTINCT FROM 'accepted' THEN
+    RAISE EXCEPTION 'worker_unavailable' USING ERRCODE = 'P0001';
+  END IF;
+
   FOR r IN
     SELECT c.id
     FROM public.conversations c
@@ -136,6 +156,19 @@ BEGIN
   LOOP
     PERFORM public.hide_conversation_for_participants(r.id);
   END LOOP;
+
+  SELECT c.id INTO v_id
+  FROM public.conversations c
+  WHERE c.cliente_id = v_cliente_id
+    AND c.trabajador_id = p_trabajador_id
+    AND c.deleted_at IS NULL
+    AND c.contratacion_id IS NULL
+  ORDER BY c.updated_at DESC NULLS LAST, c.id DESC
+  LIMIT 1;
+
+  IF v_id IS NOT NULL THEN
+    RETURN v_id;
+  END IF;
 
   INSERT INTO public.conversations (cliente_id, trabajador_id, primary_trade, updated_at)
   VALUES (v_cliente_id, p_trabajador_id, v_trade, now())
@@ -323,15 +356,8 @@ BEGIN
   WHERE id = p_contratacion_id
     AND conversation_id IS DISTINCT FROM v_conv_id;
 
-  IF v_own_id IS NOT NULL AND v_own_id IS DISTINCT FROM v_conv_id THEN
-    IF NOT EXISTS (
-      SELECT 1
-      FROM public.contrataciones ct
-      WHERE ct.conversation_id = v_own_id
-    ) THEN
-      PERFORM public.hide_conversation_for_participants(v_own_id);
-    END IF;
-  END IF;
+  -- El hilo general compartido se queda con su historial. No se oculta
+  -- porque las contrataciones pasaron a un chat de reclamo propio.
 
   DELETE FROM public.conversation_hides
   WHERE conversation_id = v_conv_id
@@ -399,3 +425,111 @@ GRANT EXECUTE ON FUNCTION public.iniciar_reclamo_garantia(uuid) TO authenticated
 
 COMMENT ON FUNCTION public.iniciar_reclamo_garantia(uuid) IS
   'El cliente abre o vuelve a un reclamo de garantía en el chat de esa contratación. Si el hilo está compartido, crea uno propio y no oculta el chat de otro trabajo en curso o con reclamo abierto.';
+
+-- Cuerpo de producción de crear_cotizacion, más el rechazo de un hilo de reclamo
+-- (contratacion_id NOT NULL). Va después del ADD COLUMN de esta migración.
+CREATE OR REPLACE FUNCTION public.crear_cotizacion(
+  p_conversation_id uuid,
+  p_precio_trabajador numeric,
+  p_service_detail text DEFAULT '',
+  p_warranty_days integer DEFAULT NULL
+)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_conv public.conversations%rowtype;
+  v_precios record;
+  v_id uuid;
+  v_detail text;
+  v_neto numeric;
+  v_warranty_days integer;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'No autenticado';
+  END IF;
+
+  SELECT * INTO v_conv
+  FROM public.conversations
+  WHERE id = p_conversation_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Conversación inexistente';
+  END IF;
+
+  IF v_conv.trabajador_id <> auth.uid() THEN
+    RAISE EXCEPTION 'Solo el trabajador puede cotizar';
+  END IF;
+
+  IF v_conv.contratacion_id IS NOT NULL THEN
+    RAISE EXCEPTION 'No se puede cotizar en un chat de reclamo' USING ERRCODE = 'P0001';
+  END IF;
+
+  v_detail := coalesce(trim(p_service_detail), '');
+  IF v_detail = '' THEN
+    RAISE EXCEPTION 'El detalle del servicio es obligatorio';
+  END IF;
+
+  IF p_warranty_days IS NULL OR p_warranty_days <= 0 THEN
+    v_warranty_days := NULL;
+  ELSIF p_warranty_days > 60 THEN
+    RAISE EXCEPTION 'Los días de garantía deben ser entre 1 y 60';
+  ELSE
+    v_warranty_days := p_warranty_days;
+  END IF;
+
+  PERFORM public._assert_sin_contratacion_activa(p_conversation_id);
+
+  v_neto := ceil(p_precio_trabajador);
+  SELECT * INTO v_precios FROM public.calc_precios_contratacion(v_neto);
+
+  INSERT INTO public.contrataciones (
+    conversation_id,
+    worker_id,
+    client_id,
+    precio_trabajador,
+    precio_final,
+    comision_app,
+    service_detail,
+    estado_trabajo,
+    estado_pago,
+    warranty_days
+  )
+  VALUES (
+    p_conversation_id,
+    v_conv.trabajador_id,
+    v_conv.cliente_id,
+    v_neto,
+    v_precios.precio_final,
+    v_precios.comision_app,
+    v_detail,
+    'precio_cotizado',
+    'pendiente_seña',
+    v_warranty_days
+  )
+  RETURNING id INTO v_id;
+
+  INSERT INTO public.messages (conversation_id, sender_id, body, type, metadata)
+  VALUES (
+    p_conversation_id,
+    auth.uid(),
+    v_detail,
+    'quotation',
+    jsonb_build_object(
+      'contratacion_id', v_id,
+      'precio_final', v_precios.precio_final,
+      'precio_trabajador', v_neto,
+      'service_detail', v_detail,
+      'warranty_days', v_warranty_days
+    )
+  );
+
+  RETURN v_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.crear_cotizacion(uuid, numeric, text, integer) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.crear_cotizacion(uuid, numeric, text, integer) FROM anon;
+GRANT EXECUTE ON FUNCTION public.crear_cotizacion(uuid, numeric, text, integer) TO authenticated, service_role;

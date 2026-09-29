@@ -1,7 +1,6 @@
 import { getSupabaseClient } from '../lib/supabase';
 import { removeSupabaseRealtimeTopic } from '../lib/supabaseRealtime';
 import {
-  allLinkedJobsClosedWithoutOpenClaim,
   chatClosedByAllClaimsConformity,
   type ClaimChatSnapshot,
 } from '../utils/claimChatVisibility';
@@ -44,24 +43,9 @@ async function loadClaimRows(conversationIds: string[]): Promise<Map<string, Cla
 }
 
 /**
- * Hilos que salen de Mensajes: todas las contrataciones vinculadas están
- * cerradas y ninguna tiene reclamo abierto o pendiente.
- * Si faltan columnas o la consulta falla, no oculta nada.
- */
-export async function fetchSettledJobChatIds(conversationIds: string[]): Promise<Set<string>> {
-  const grouped = await loadClaimRows(conversationIds);
-  if (!grouped) return new Set();
-  const hidden = new Set<string>();
-  for (const [conversationId, rows] of grouped) {
-    if (allLinkedJobsClosedWithoutOpenClaim(rows)) hidden.add(conversationId);
-  }
-  return hidden;
-}
-
-/**
- * Hilos bloqueados por conformidad de reclamo. Exige que todas las
- * contrataciones estén cerradas sin reclamo abierto y que alguna haya
- * llegado a conformidad de las dos partes.
+ * Hilos que salen de Mensajes por la regla de #55: hubo reclamo, todos
+ * terminaron con conformidad y ninguna contratación vinculada sigue en
+ * curso o con reclamo abierto o pendiente. Si la consulta falla, no oculta.
  */
 export async function fetchClosedClaimChatIds(conversationIds: string[]): Promise<Set<string>> {
   const grouped = await loadClaimRows(conversationIds);

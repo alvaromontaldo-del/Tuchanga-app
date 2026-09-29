@@ -346,8 +346,12 @@ export function ConversationsListScreen({ navigation }: Props) {
                   </Text>
                 </View>
                 <View style={styles.rowBottom}>
-                  <Text style={styles.roleChip}>
-                    {item.myRole === 'cliente' ? (item.primaryTrade?.trim() || 'Oficio') : 'Cliente'}
+                  <Text
+                    style={[styles.roleChip, item.claimRowLabel ? styles.claimChip : null]}
+                    numberOfLines={1}
+                  >
+                    {item.claimRowLabel?.trim()
+                      || (item.myRole === 'cliente' ? (item.primaryTrade?.trim() || 'Oficio') : 'Cliente')}
                   </Text>
                   {item.lastMessage ? (
                     <View style={styles.previewRow}>
@@ -579,12 +583,18 @@ const styles = StyleSheet.create({
   rowBottom: { marginTop: 6 },
   roleChip: {
     alignSelf: 'flex-start',
+    maxWidth: '100%',
     fontSize: 11,
     fontWeight: '800',
     color: colors.primary,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
     marginBottom: 4,
+  },
+  claimChip: {
+    textTransform: 'none',
+    letterSpacing: 0,
+    fontSize: 12,
   },
   rowSub: { fontSize: 15, color: colors.textSecondary, lineHeight: 20 },
   rowSubMuted: { fontSize: 14, color: colors.textSecondary, fontStyle: 'italic', opacity: 0.85 },

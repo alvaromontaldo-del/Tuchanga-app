@@ -1,6 +1,5 @@
 import { getSupabaseClient } from '../lib/supabase';
-import { CHAT_CERRADO_POR_RECLAMO } from '../utils/claimChatVisibility';
-import { fetchClosedClaimChatIds, fetchSettledJobChatIds } from './claimChatSupabase';
+import { fetchClosedClaimChatIds } from './claimChatSupabase';
 import { fetchTotalUnreadCountSupabase } from './chatSupabase';
 
 export type ConversationSnippet = {
@@ -80,10 +79,9 @@ export async function fetchInboxSyncLight(): Promise<{
     /* RPC opcional */
   }
 
-  const settledJobChatIds = await fetchSettledJobChatIds(convIds);
   const closedClaimIds = await fetchClosedClaimChatIds(convIds);
   let closedUnread = 0;
-  for (const id of settledJobChatIds) {
+  for (const id of closedClaimIds) {
     closedUnread += unreadByConversationId[id] ?? 0;
     unreadByConversationId[id] = 0;
   }
@@ -106,11 +104,10 @@ export async function fetchInboxSyncLight(): Promise<{
         .limit(1);
       const last = lastMsgs?.[0];
       if (!last) return;
-      if (settledJobChatIds.has(conversationId)) return;
-      const closedByClaim = closedClaimIds.has(conversationId);
+      if (closedClaimIds.has(conversationId)) return;
       snippets.push({
         conversationId,
-        lastMessage: closedByClaim ? CHAT_CERRADO_POR_RECLAMO : (last.body ?? null),
+        lastMessage: last.body ?? null,
         lastMessageAt: last.created_at ?? null,
         lastMessageSenderId: last.sender_id ?? null,
         unreadCount: unreadByConversationId[conversationId] ?? 0,
@@ -146,27 +143,8 @@ export async function fetchConversationSnippet(
     .maybeSingle();
   if (hideRow) return null;
 
-  const settledJobChatIds = await fetchSettledJobChatIds([conversationId]);
-  if (settledJobChatIds.has(conversationId)) return null;
-
   const closedClaimIds = await fetchClosedClaimChatIds([conversationId]);
-  if (closedClaimIds.has(conversationId)) {
-    const { data: lastMsgs } = await sb
-      .from('messages')
-      .select('body,created_at,sender_id')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: false })
-      .limit(1);
-    const last = lastMsgs?.[0];
-    if (!last) return null;
-    return {
-      conversationId,
-      lastMessage: CHAT_CERRADO_POR_RECLAMO,
-      lastMessageAt: last.created_at ?? null,
-      lastMessageSenderId: last.sender_id ?? null,
-      unreadCount: 0,
-    };
-  }
+  if (closedClaimIds.has(conversationId)) return null;
 
   const { data: lastMsgs } = await sb
     .from('messages')

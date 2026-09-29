@@ -91,19 +91,43 @@ describe('allLinkedJobsClosedWithoutOpenClaim', () => {
     expect(chatClosedByAllClaimsConformity([closedClaim])).toBe(true);
   });
 
-  it('oculta el hilo cuando las tres contrataciones están cerradas sin reclamo vivo', () => {
+  it('oculta el hilo si hubo reclamo, todos conformes, y el resto está cerrado', () => {
     const rows = [
       closedClaim,
       { estado_trabajo: 'finalizado', is_claim_open: false, claim_status: 'none' },
       { estado_trabajo: 'cancelado', is_claim_open: false, claim_status: 'none' },
     ];
-    expect(allLinkedJobsClosedWithoutOpenClaim(rows)).toBe(true);
     expect(chatClosedByAllClaimsConformity(rows)).toBe(true);
   });
 
-  it('saca de la lista un trabajo finalizado sin reclamo, sin marcarlo como conformidad', () => {
+  it('un trabajo finalizado sin reclamo no se oculta', () => {
     const rows = [{ estado_trabajo: 'finalizado', is_claim_open: false, claim_status: 'none' }];
     expect(allLinkedJobsClosedWithoutOpenClaim(rows)).toBe(true);
     expect(chatClosedByAllClaimsConformity(rows)).toBe(false);
+  });
+
+  it('no oculta si un reclamo iniciado no llegó a conformidad, aunque otro sí', () => {
+    expect(
+      chatClosedByAllClaimsConformity([
+        closedClaim,
+        {
+          estado_trabajo: 'finalizado',
+          is_claim_open: false,
+          claim_status: 'none',
+          claim_opened_at: '2026-09-04T12:00:00.000Z',
+          claim_marked_done_at: null,
+          claim_resolved_at: null,
+        },
+      ]),
+    ).toBe(false);
+  });
+
+  it('no oculta un reclamo conforme si otra contratación sigue en curso', () => {
+    expect(
+      chatClosedByAllClaimsConformity([
+        closedClaim,
+        { estado_trabajo: 'en_curso', is_claim_open: false, claim_status: 'none' },
+      ]),
+    ).toBe(false);
   });
 });

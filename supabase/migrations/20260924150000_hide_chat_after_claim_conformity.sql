@@ -22,7 +22,7 @@ ALTER TABLE public.contrataciones
   ADD COLUMN IF NOT EXISTS claim_resolved_at timestamptz;
 
 COMMENT ON COLUMN public.contrataciones.claim_opened_at IS
-  'Inicio del reclamo de garantía. El chat se cierra cuando todas las contrataciones del hilo están cerradas y alguna llegó a conformidad.';
+  'Inicio del reclamo de garantía. El chat se oculta cuando hubo al menos un reclamo, todos los iniciados llegaron a conformidad y ninguna contratación vinculada está en curso ni tiene reclamo abierto o pendiente.';
 
 CREATE OR REPLACE FUNCTION public.chat_cerrado_por_reclamo_conformidad(p_conversation_id uuid)
 RETURNS boolean
@@ -31,11 +31,32 @@ STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
+  -- Misma regla que chatClosedByAllClaimsConformity en la app:
+  -- hubo al menos un reclamo, todos los reclamos iniciados llegaron a
+  -- conformidad de las dos partes, y ninguna contratación está en curso
+  -- ni tiene reclamo abierto o pendiente.
   SELECT
     EXISTS (
       SELECT 1
       FROM public.contrataciones c
       WHERE c.conversation_id = p_conversation_id
+        AND c.claim_opened_at IS NOT NULL
+        AND c.claim_marked_done_at IS NOT NULL
+        AND c.claim_resolved_at IS NOT NULL
+        AND c.is_claim_open = false
+        AND c.claim_status = 'closed'
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.contrataciones c
+      WHERE c.conversation_id = p_conversation_id
+        AND c.claim_opened_at IS NOT NULL
+        AND NOT (
+          c.claim_marked_done_at IS NOT NULL
+          AND c.claim_resolved_at IS NOT NULL
+          AND c.is_claim_open = false
+          AND c.claim_status = 'closed'
+        )
     )
     AND NOT EXISTS (
       SELECT 1
@@ -50,16 +71,6 @@ AS $$
           OR c.is_claim_open
           OR c.claim_status IN ('open', 'pending_approval')
         )
-    )
-    AND EXISTS (
-      SELECT 1
-      FROM public.contrataciones c
-      WHERE c.conversation_id = p_conversation_id
-        AND c.claim_opened_at IS NOT NULL
-        AND c.claim_marked_done_at IS NOT NULL
-        AND c.claim_resolved_at IS NOT NULL
-        AND c.is_claim_open = false
-        AND c.claim_status = 'closed'
     );
 $$;
 

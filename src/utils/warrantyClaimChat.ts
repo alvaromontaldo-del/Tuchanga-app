@@ -95,6 +95,19 @@ export function resolveWarrantyClaimChat(params: {
   };
 }
 
+/** Identidad de la fila en Mensajes. No usa el último mensaje. */
+export function claimInboxRowLabel(params: {
+  serviceDetail?: string | null;
+  fecha?: string | null;
+}): string {
+  const servicio = (params.serviceDetail ?? '').replace(/[\r\n\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const fecha = (params.fecha ?? '').trim();
+  if (servicio && fecha) return `Reclamo · ${servicio} · ${fecha}`;
+  if (servicio) return `Reclamo · ${servicio}`;
+  if (fecha) return `Reclamo · ${fecha}`;
+  return 'Reclamo';
+}
+
 /** Fecha del trabajo para el aviso cuando el reclamo abre su propio hilo. */
 export function warrantyClaimEventFecha(params: {
   fechaTrabajo?: string | null;

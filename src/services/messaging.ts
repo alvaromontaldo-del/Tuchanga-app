@@ -60,10 +60,12 @@ export async function computeUnreadCountTotal(userId: string): Promise<number> {
   return items.reduce((acc, c) => acc + (conversationHasUnreadForUser(c, userId, reads) ? 1 : 0), 0);
 }
 
-/** Subtítulo del chat según rol: el cliente ve al profesional con oficio; el trabajador ve "Cliente". */
+/** Subtítulo del chat. Un hilo de reclamo se nombra aunque lleguen mensajes nuevos. */
 export function buildChatHeaderSubtitle(
-  item: Pick<ApiConversation, 'myRole' | 'primaryTrade'>,
+  item: Pick<ApiConversation, 'myRole' | 'primaryTrade' | 'claimRowLabel'>,
 ): string {
+  const claim = item.claimRowLabel?.replace(/\s+/g, ' ').trim();
+  if (claim) return claim;
   if (item.myRole === 'cliente') {
     // Identidad por oficio: evitamos "Profesional" genérico.
     return item.primaryTrade?.trim() ? item.primaryTrade.trim() : 'Oficio';

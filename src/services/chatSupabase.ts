@@ -1,8 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../lib/supabase';
 import { removeSupabaseRealtimeTopic, removeSupabaseRealtimeTopicAsync } from '../lib/supabaseRealtime';
-import { fetchClosedClaimChatIds, fetchSettledJobChatIds } from './claimChatSupabase';
-import { CHAT_CERRADO_POR_RECLAMO, jobKeepsChatOpen } from '../utils/claimChatVisibility';
+import { fetchClosedClaimChatIds } from './claimChatSupabase';
+import { jobKeepsChatOpen } from '../utils/claimChatVisibility';
+import { claimInboxRowLabel, warrantyClaimEventFecha } from '../utils/warrantyClaimChat';
 import { dedupeInboxByPeer } from '../utils/inboxPeers';
 import { mapChatSendError } from '../utils/chatErrors';
 import type { ApiConversation, ApiMessage, ConversationRole } from './chatApi';
@@ -13,6 +14,54 @@ function firstNameOnly(name: string): string {
   if (!s) return 'Usuario';
   const parts = s.split(' ').filter(Boolean);
   return parts[0] ?? 'Usuario';
+}
+
+/** Etiqueta estable del hilo de reclamo. No depende del último mensaje. */
+async function loadClaimRowLabels(
+  sb: ReturnType<typeof getSupabaseClient>,
+  links: Array<{ conversationId: string; contratacionId: string }>,
+): Promise<Map<string, string>> {
+  const labels = new Map<string, string>();
+  if (!links.length) return labels;
+  const { data, error } = await sb
+    .from('contrataciones')
+    .select('id, service_detail, fecha_trabajo, finalizado_at, created_at')
+    .in(
+      'id',
+      links.map((link) => link.contratacionId),
+    );
+  if (error || !data) {
+    for (const link of links) labels.set(link.conversationId, 'Reclamo');
+    return labels;
+  }
+  const byId = new Map(
+    (data as Array<{
+      id: string;
+      service_detail?: string | null;
+      fecha_trabajo?: string | null;
+      finalizado_at?: string | null;
+      created_at?: string | null;
+    }>).map((row) => [row.id, row]),
+  );
+  for (const link of links) {
+    const job = byId.get(link.contratacionId);
+    if (!job) {
+      labels.set(link.conversationId, 'Reclamo');
+      continue;
+    }
+    labels.set(
+      link.conversationId,
+      claimInboxRowLabel({
+        serviceDetail: job.service_detail,
+        fecha: warrantyClaimEventFecha({
+          fechaTrabajo: job.fecha_trabajo,
+          finalizadoAt: job.finalizado_at,
+          createdAt: job.created_at,
+        }),
+      }),
+    );
+  }
+  return labels;
 }
 
 export { dedupeInboxByPeer };
@@ -105,12 +154,26 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
   } = await sb.auth.getUser();
   if (!user) return [];
 
-  const { data: convs, error } = await sb
-    .from('conversations')
-    .select('id,cliente_id,trabajador_id,primary_trade,updated_at,deleted_at')
-    .or(`cliente_id.eq.${user.id},trabajador_id.eq.${user.id}`)
-    .is('deleted_at', null)
-    .order('updated_at', { ascending: false });
+  const convColumns = 'id,cliente_id,trabajador_id,primary_trade,updated_at,deleted_at';
+  const convQuery = () =>
+    sb
+      .from('conversations')
+      .select(`${convColumns},contratacion_id`)
+      .or(`cliente_id.eq.${user.id},trabajador_id.eq.${user.id}`)
+      .is('deleted_at', null)
+      .order('updated_at', { ascending: false });
+
+  let { data: convs, error } = await convQuery();
+  if (error && /contratacion_id/i.test(error.message ?? '')) {
+    const fallback = await sb
+      .from('conversations')
+      .select(convColumns)
+      .or(`cliente_id.eq.${user.id},trabajador_id.eq.${user.id}`)
+      .is('deleted_at', null)
+      .order('updated_at', { ascending: false });
+    convs = fallback.data;
+    error = fallback.error;
+  }
 
   if (error || !convs?.length) return [];
 
@@ -122,12 +185,18 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
     primary_trade?: string | null;
     updated_at?: string | null;
     deleted_at?: string | null;
+    contratacion_id?: string | null;
   }>).filter((c) => !c.deleted_at);
 
   if (!activeConvs.length) return [];
 
-  const settledJobChatIds = await fetchSettledJobChatIds(activeConvs.map((c) => c.id));
   const closedClaimIds = await fetchClosedClaimChatIds(activeConvs.map((c) => c.id));
+  const claimLabelByConversation = await loadClaimRowLabels(
+    sb,
+    activeConvs
+      .filter((c) => c.contratacion_id)
+      .map((c) => ({ conversationId: c.id, contratacionId: c.contratacion_id as string })),
+  );
 
   const results: ApiConversation[] = [];
 
@@ -177,7 +246,7 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
   }
 
   for (const c of activeConvs) {
-    if (hiddenIds.has(c.id) || settledJobChatIds.has(c.id)) continue;
+    if (hiddenIds.has(c.id) || closedClaimIds.has(c.id)) continue;
 
     const myRole: ConversationRole = c.cliente_id === user.id ? 'cliente' : 'trabajador';
     const otherId = myRole === 'cliente' ? c.trabajador_id : c.cliente_id;
@@ -211,22 +280,18 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
       primaryTrade = job?.nombre_oficio ?? '';
     }
 
-    const closedByClaim = closedClaimIds.has(c.id);
     results.push({
       id: c.id,
       otherUserId: otherId,
       otherDisplayName: name,
       otherAvatarUrl: (prof as { avatar_url?: string | null } | null)?.avatar_url ?? null,
       primaryTrade,
-      lastMessage: closedByClaim
-        ? CHAT_CERRADO_POR_RECLAMO
-        : last?.type === 'image'
-          ? '📷 Foto'
-          : last?.body ?? null,
+      claimRowLabel: claimLabelByConversation.get(c.id) ?? null,
+      lastMessage: last?.type === 'image' ? '📷 Foto' : last?.body ?? null,
       lastMessageAt: last?.created_at ?? null,
       lastMessageSenderId: last?.sender_id ?? null,
       peerReadAt: peerReadById.get(c.id) ?? null,
-      unreadCount: closedByClaim ? 0 : (unreadById.get(c.id) ?? 0),
+      unreadCount: unreadById.get(c.id) ?? 0,
       updatedAt: c.updated_at ?? new Date().toISOString(),
       myRole,
     });

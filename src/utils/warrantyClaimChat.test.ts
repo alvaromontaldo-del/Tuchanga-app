@@ -4,6 +4,7 @@ import {
   otherChatCanBeClosed,
   resolveWarrantyClaimChat,
   warrantyClaimEventBody,
+  claimInboxRowLabel,
   warrantyClaimEventFecha,
   type OwnClaimChat,
 } from './warrantyClaimChat';
@@ -184,6 +185,17 @@ describe('resolveWarrantyClaimChat', () => {
         contratacionId,
       ),
     ).toBe(false);
+  });
+});
+
+describe('claimInboxRowLabel', () => {
+  it('distingue el hilo por servicio y fecha, no por el último mensaje', () => {
+    expect(claimInboxRowLabel({ serviceDetail: '  Pintura de frente  ', fecha: '12/09/2026' })).toBe(
+      'Reclamo · Pintura de frente · 12/09/2026',
+    );
+    expect(claimInboxRowLabel({ serviceDetail: 'Gasista\nmatutino', fecha: '' })).toBe('Reclamo · Gasista matutino');
+    expect(claimInboxRowLabel({ serviceDetail: '   ', fecha: '01/09/2026' })).toBe('Reclamo · 01/09/2026');
+    expect(claimInboxRowLabel({ serviceDetail: '', fecha: '' })).toBe('Reclamo');
   });
 });
 

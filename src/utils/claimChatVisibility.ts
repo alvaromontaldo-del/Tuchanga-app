@@ -1,12 +1,11 @@
 /**
  * Visibilidad del chat cuando un hilo tiene una o varias contrataciones.
  *
- * El chat sale de Mensajes cuando todas están cerradas (finalizado, cancelado
- * o disputa) y ninguna tiene reclamo abierto o pendiente.
- *
- * El compositor se bloquea con «Chat cerrado por reclamo» solo si, además,
- * alguna de esas contrataciones llegó a la conformidad de las dos partes.
- * Un reclamo abierto o pendiente del mismo par mantiene el hilo usable.
+ * Misma regla que chat_cerrado_por_reclamo_conformidad: el chat sale de
+ * Mensajes solo si tuvo al menos un reclamo, todos los reclamos iniciados
+ * terminaron con conformidad de las dos partes, y ninguna contratación
+ * vinculada está en curso ni tiene reclamo abierto o pendiente.
+ * Un trabajo finalizado que nunca tuvo reclamo no alcanza para ocultarlo.
  */
 
 export const CHAT_CERRADO_POR_RECLAMO = 'Chat cerrado por reclamo';
@@ -49,8 +48,8 @@ export function jobKeepsChatOpen(row: ClaimChatSnapshot | null | undefined): boo
 }
 
 /**
- * true cuando hay contrataciones y todas están cerradas sin reclamo abierto
- * ni pendiente. Un hilo sin contrataciones no se oculta por esta regla.
+ * true cuando hay contrataciones y ninguna está en curso ni con reclamo
+ * abierto o pendiente. No es la regla de ocultado de Mensajes.
  */
 export function allLinkedJobsClosedWithoutOpenClaim(rows: ClaimChatSnapshot[]): boolean {
   if (!rows.length) return false;
@@ -58,10 +57,16 @@ export function allLinkedJobsClosedWithoutOpenClaim(rows: ClaimChatSnapshot[]): 
 }
 
 /**
- * Bloqueo por conformidad: todas las contrataciones del hilo están cerradas
- * sin reclamo abierto o pendiente, y al menos una llegó a conformidad.
+ * Ocultado de #55. Igual que el SQL: al menos una conformidad completa,
+ * ningún reclamo iniciado a medias, y ninguna contratación en curso o con
+ * reclamo abierto o pendiente.
  */
 export function chatClosedByAllClaimsConformity(rows: ClaimChatSnapshot[]): boolean {
-  if (!allLinkedJobsClosedWithoutOpenClaim(rows)) return false;
-  return rows.some((row) => isChatClosedByClaimConformity(row));
+  if (!rows.length) return false;
+  const hasFullConformity = rows.some((row) => isChatClosedByClaimConformity(row));
+  const hasIncompleteClaim = rows.some(
+    (row) => Boolean(row.claim_opened_at) && !isChatClosedByClaimConformity(row),
+  );
+  const hasLiveJob = rows.some((row) => jobKeepsChatOpen(row));
+  return hasFullConformity && !hasIncompleteClaim && !hasLiveJob;
 }

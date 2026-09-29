@@ -510,8 +510,11 @@ describe.skipIf(!postgresAvailable())('iniciar_reclamo_garantia en Postgres', ()
       ).toBe('1');
     }
     expect(
-      psql(DB, `SELECT deleted_at IS NOT NULL FROM public.conversations WHERE id = '${shared}';`),
+      psql(DB, `SELECT deleted_at IS NULL FROM public.conversations WHERE id = '${shared}';`),
     ).toBe('t');
+    expect(
+      psql(DB, `SELECT public.chat_cerrado_por_reclamo_conformidad('${shared}'::uuid);`),
+    ).toBe('f');
 
     const statuses = psql(
       DB,
@@ -564,5 +567,56 @@ describe.skipIf(!postgresAvailable())('iniciar_reclamo_garantia en Postgres', ()
         psql(DB, `SELECT public.chat_cerrado_por_reclamo_conformidad('${id}'::uuid);`),
       ).toBe('t');
     }
+  });
+
+  it('un trabajo finalizado sin reclamo no cierra el chat', () => {
+    const worker = '22222222-2222-4222-8222-222222222227';
+    const conv = '44444444-4444-4444-8444-444444444444';
+    const job = '11111111-bbbb-4bbb-8bbb-bbbbbbbbbbb1';
+    psql(
+      DB,
+      `INSERT INTO public.conversations (id, cliente_id, trabajador_id)
+       VALUES ('${conv}', '${CLIENT}', '${worker}');
+       INSERT INTO public.contrataciones (
+         id, conversation_id, client_id, worker_id, estado_trabajo, service_detail
+       ) VALUES (
+         '${job}', '${conv}', '${CLIENT}', '${worker}', 'finalizado', 'Sin reclamo'
+       );`,
+    );
+    expect(
+      psql(DB, `SELECT public.chat_cerrado_por_reclamo_conformidad('${conv}'::uuid);`),
+    ).toBe('f');
+  });
+
+  it('find_or_create conserva los chequeos del trabajador y crear_cotizacion rechaza el hilo de reclamo', () => {
+    const findDef = psql(
+      DB,
+      `SELECT pg_get_functiondef(p.oid)
+       FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proname = 'find_or_create_conversation';`,
+    );
+    expect(findDef).toContain('worker_not_found');
+    expect(findDef).toContain('worker_on_leave');
+    expect(findDef).toContain('worker_unavailable');
+    expect(findDef).toContain('contratacion_id IS NULL');
+    expect(findDef).toContain('conversation_tiene_trabajo_vivo');
+
+    const quoteDef = psql(
+      DB,
+      `SELECT pg_get_functiondef(p.oid)
+       FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proname = 'crear_cotizacion';`,
+    );
+    expect(quoteDef).toContain('contratacion_id IS NOT NULL');
+    expect(quoteDef).toContain('No se puede cotizar en un chat de reclamo');
+
+    const privileges = psql(
+      DB,
+      `SELECT has_function_privilege('anon', 'public.find_or_create_conversation(uuid, text)', 'EXECUTE')::text
+         || '|' || has_function_privilege('anon', 'public.crear_cotizacion(uuid, numeric, text, integer)', 'EXECUTE')::text;`,
+    );
+    expect(privileges).toBe('false|false');
   });
 });
