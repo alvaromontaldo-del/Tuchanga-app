@@ -33,4 +33,9 @@ jobs:
       - name: Publish OTA update
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: npx eas-cli update --branch preview --environment preview --non-interactive --message "${{ github.event.head_commit.message }}"
+          UPDATE_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          # El mensaje va por env (no interpolado en el script): la primera línea,
+          # sin comillas dobles y acotada, para que el shell no parta --message.
+          MSG=$(printf '%s\n' "$UPDATE_MESSAGE" | head -n1 | tr '"' "'" | cut -c1-120)
+          npx eas-cli update --branch preview --environment preview --non-interactive --message "$MSG"
