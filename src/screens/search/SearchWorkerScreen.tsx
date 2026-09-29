@@ -240,13 +240,15 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
 
       // 2) Perfil + jobs del usuario actual (si hay sesión)
       const meId = user?.id ?? null;
-      type MeProfileRow = { coverage_km: number | null; direccion_texto: string | null };
+      type MeProfileRow = { coverage_km: number | null };
       let meProfile: MeProfileRow | null = null;
       let meJobsCount: number | null = null;
       if (meId) {
+        // Solo el perfil propio. coverage_km no es PII. El domicilio sale del
+        // usuario de sesión (get_my_profile_private), no de esta fila.
         const pr = await sb
           .from('profiles')
-          .select('coverage_km,direccion_texto')
+          .select('coverage_km')
           .eq('id', meId)
           .maybeSingle();
         if (!pr.error) meProfile = (pr.data as MeProfileRow | null) ?? null;

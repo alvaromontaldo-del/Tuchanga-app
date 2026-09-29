@@ -2,6 +2,7 @@ import { getSupabaseClient } from '../lib/supabase';
 import type { WorkerPublicProfile } from '../types/feed';
 import { MAX_WORKER_TRADES } from '../types/feed';
 import { completedJobsFromPayload } from '../utils/workerReputation';
+import { fetchMyProfilePrivate } from './supabaseUser';
 
 const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?u=profile';
 
@@ -75,7 +76,7 @@ export async function fetchWorkerPublicProfileFromSupabase(
   const { data: profile, error: pe } = await sb
     .from('profiles')
     .select(
-      'id,nombre,apellido,avatar_url,direccion_texto,bio,professional_description,birth_date,rating_average,review_count,total_jobs_done',
+      'id,nombre,apellido,avatar_url,bio,professional_description,rating_average,review_count,total_jobs_done',
     )
     .eq('id', workerUserId)
     .maybeSingle();
@@ -134,11 +135,15 @@ export async function fetchWorkerPublicProfileFromSupabase(
     typeof profile === 'object' && profile !== null && 'bio' in profile
       ? String((profile as { bio: unknown }).bio ?? '').trim()
       : '';
-  const bioBase = bioFromProfile || profile.direccion_texto?.trim() || '';
-  const birthDate =
-    typeof profile === 'object' && profile !== null && 'birth_date' in profile
-      ? String((profile as { birth_date: unknown }).birth_date ?? '').trim()
-      : '';
+  const bioBase = bioFromProfile;
+  let birthDate = '';
+  const {
+    data: { user: sessionUser },
+  } = await sb.auth.getUser();
+  if (sessionUser?.id === workerUserId) {
+    const priv = await fetchMyProfilePrivate();
+    birthDate = priv?.birth_date ?? '';
+  }
 
   return {
     id: profile.id,

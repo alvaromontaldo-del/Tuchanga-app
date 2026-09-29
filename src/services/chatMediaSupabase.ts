@@ -4,6 +4,7 @@ import { mapChatSendError } from '../utils/chatErrors';
 import { normalizeLocalImageUri } from '../utils/normalizeLocalImage';
 import { storageOwnerFolder } from '../utils/storageOwnerFolder';
 import type { ApiMessage } from './chatApi';
+import { fetchMyProfilePrivate } from './supabaseUser';
 
 const IMAGE_BODY_PREVIEW = '📷 Foto';
 
@@ -36,15 +37,17 @@ async function readUriAsArrayBuffer(uri: string): Promise<ArrayBuffer> {
 
 async function resolveOwnerFolder(userId: string): Promise<string> {
   const sb = getSupabaseClient();
-  const { data } = await sb
-    .from('profiles')
-    .select('dni,apellido')
-    .eq('id', userId)
-    .maybeSingle();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  const [nameRes, priv] = await Promise.all([
+    sb.from('profiles').select('apellido').eq('id', userId).maybeSingle(),
+    user?.id === userId ? fetchMyProfilePrivate() : Promise.resolve(null),
+  ]);
   return storageOwnerFolder({
     userId,
-    dni: (data as { dni?: string | null } | null)?.dni,
-    lastName: (data as { apellido?: string | null } | null)?.apellido,
+    dni: priv?.dni,
+    lastName: (nameRes.data as { apellido?: string | null } | null)?.apellido,
   });
 }
 
