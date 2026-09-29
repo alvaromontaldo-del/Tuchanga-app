@@ -129,9 +129,8 @@ export function warrantyClaimButtonLabel(action: WarrantyClaimAction): string | 
 }
 
 /**
- * "Ver reclamo" abre el chat ya guardado en la contratación.
- * Si no hay id, el llamador puede iniciar el reclamo como último recurso.
+ * "Iniciar reclamo" pide confirmación. "Ver reclamo" llama al RPC directo.
  */
-export function resumeClaimConversationId(conversationId: string | null | undefined): string {
-  return String(conversationId ?? '').trim();
+export function warrantyClaimRequiresConfirmation(action: WarrantyClaimAction): boolean {
+  return action === 'start';
 }
