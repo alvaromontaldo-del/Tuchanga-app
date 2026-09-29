@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert,
+import {
   Pressable,
   ScrollView,
   StyleSheet,
@@ -19,6 +19,7 @@ import { colors, radii, spacing } from '../../constants/theme';
 import { AccountDeactivationModal } from '../../components/auth/AccountDeactivationModal';
 import { useAuth } from '../../context/AuthContext';
 import { useCommerceShell, COMMERCE_SHELL_STATUSES } from '../../context/CommerceShellContext';
+import { showPendingCommerceNoticeOnce } from '../../context/pendingCommerceNotice';
 import { closeAuthModalAndGoToInicio, closeAuthModalAndRedirect } from '../../navigation/openAuthModal';
 import type { AuthStackScreenProps } from '../../navigation/types';
 import { signIn } from '../../services/auth';
@@ -120,10 +121,7 @@ export function LoginScreen({ navigation, route }: Props) {
         if (asCommerce) await chooseSessionRole('commerce');
         else await clearSessionRole();
       } else if (asCommerce && hasPendingOnly) {
-        Alert.alert(
-          'Comercio en validacion',
-          'Su comercio esta siendo validado por un administrador. Aguarde entre 24 y 48 hs para poder ingresar.',
-        );
+        showPendingCommerceNoticeOnce(result.user.id);
         await chooseSessionRole('client');
       } else if (asCommerce) {
         await chooseSessionRole('commerce');

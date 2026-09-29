@@ -12,11 +12,17 @@ import { useAuth } from './AuthContext';
 import { isSupabaseConfigured } from '../config/supabase';
 import { fetchMyStores } from '../services/storeQuotesSupabase';
 import type { MyStoreSummary } from '../types/materials';
+import {
+  isCommerceShell as computeIsCommerceShell,
+  shouldDemotePendingCommerceRole,
+  type SessionRole,
+} from './commerceShellState';
+import { showPendingCommerceNoticeOnce } from './pendingCommerceNotice';
+
+export type { SessionRole };
 
 const COMMERCE_INTENT_KEY = '@yachanga/commerce_intent';
 const SESSION_ROLE_KEY = '@yachanga/session_role';
-
-export type SessionRole = 'client' | 'commerce';
 
 /** Statuses that allow choosing the commerce shell. */
 /** Estados que habilitan el shell comercio (NO incluye pending_approval). */
@@ -206,12 +212,41 @@ export function CommerceShellProvider({ children }: { children: ReactNode }) {
       sessionRole == null,
   );
 
-  const isCommerceShell = Boolean(
-    isAuthed &&
-      roleHydrated &&
-      (sessionRole === 'commerce' ||
-        (sessionRole == null && commerceIntent && !hasCommerceStore && !hasPendingCommerceStore)),
-  );
+  const isCommerceShell = computeIsCommerceShell({
+    isAuthed,
+    roleHydrated,
+    sessionRole,
+    commerceIntent,
+    hasApprovedStore: hasCommerceStore,
+    hasPendingStore: hasPendingCommerceStore,
+  });
+
+  // Rol `commerce` guardado + solo pendientes: volver a cliente y persistirlo
+  // (también al reabrir la app). El aviso de 24–48 hs se muestra una sola vez.
+  useEffect(() => {
+    if (!isAuthed || !roleHydrated || loading || !user?.id) return;
+    if (!hasPendingCommerceStore || hasCommerceStore) return;
+
+    if (
+      shouldDemotePendingCommerceRole({
+        sessionRole,
+        hasApprovedStore: hasCommerceStore,
+        hasPendingStore: hasPendingCommerceStore,
+      })
+    ) {
+      void chooseSessionRole('client');
+    }
+    showPendingCommerceNoticeOnce(user.id);
+  }, [
+    isAuthed,
+    roleHydrated,
+    loading,
+    user?.id,
+    sessionRole,
+    hasCommerceStore,
+    hasPendingCommerceStore,
+    chooseSessionRole,
+  ]);
 
   const primaryStore = useMemo(() => {
     const preferred = stores.find((s) => s.status === 'active' || s.status === 'trial');

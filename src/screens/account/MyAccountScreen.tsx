@@ -16,6 +16,10 @@ import { StarRating } from '../../components/profile/StarRating';
 import { colors, radii, spacing } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useCommerceShell } from '../../context/CommerceShellContext';
+import {
+  PENDING_COMMERCE_NOTICE_MESSAGE,
+  PENDING_COMMERCE_NOTICE_TITLE,
+} from '../../context/pendingCommerceNotice';
 import { useUserMode } from '../../context/UserModeContext';
 import { useWorkerProfile } from '../../context/WorkerProfileContext';
 import type { AccountStackScreenProps } from '../../navigation/accountTypes';
@@ -170,10 +174,7 @@ export function MyAccountScreen({ navigation }: Props) {
                 subtitle="Pedidos de materiales y cotizaciones"
                 onPress={() => {
                   if (hasPendingCommerceStore && !hasCommerceStore) {
-              Alert.alert(
-                'Comercio en validación',
-                'Su comercio está siendo validado por un administrador. Aguarde entre 24 y 48 hs para poder ingresar.',
-              );
+              Alert.alert(PENDING_COMMERCE_NOTICE_TITLE, PENDING_COMMERCE_NOTICE_MESSAGE);
               return;
             }
             void chooseSessionRole('commerce');
