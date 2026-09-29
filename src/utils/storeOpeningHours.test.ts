@@ -65,9 +65,11 @@ describe('editor de horarios del comercio', () => {
     days = patchStoreDaySlot(days, 6, 0, { open: '09:00', close: '13:00' });
 
     const json = storeWeekScheduleToJson(days);
-    expect(json).toHaveLength(7);
-    expect(json.find((day) => day.day === 7)?.slots).toEqual([]);
-    expect(json.find((day) => day.day === 3)?.slots).toEqual([{ open: '09:00', close: '15:00' }]);
+    expect(json.schedule).toHaveLength(7);
+    expect(json.schedule.find((day) => day.day === 7)?.slots).toEqual([]);
+    expect(json.schedule.find((day) => day.day === 3)?.slots).toEqual([
+      { open: '09:00', close: '15:00' },
+    ]);
     expect(formatPickupOpeningHours(json)).toBe(
       'Lun a Vie: 09:00 a 15:00 · Sáb: 09:00 a 13:00 · Dom: cerrado',
     );
@@ -88,6 +90,32 @@ describe('editor de horarios del comercio', () => {
     const rows = storeOpeningHoursEditorRows(days);
     expect(rows[4].slots).toHaveLength(2);
     expect(rows[4].timeFieldsShareRow).toBe(true);
+  });
+
+  it('lee el horario guardado de Ferretería El Tornillo Loco tal cual', () => {
+    const saved = {
+      schedule: [
+        { day: 1, slots: [{ open: '09:00', close: '15:00' }] },
+        { day: 2, slots: [{ open: '09:00', close: '15:00' }] },
+        { day: 3, slots: [{ open: '09:00', close: '15:00' }] },
+        { day: 4, slots: [{ open: '09:00', close: '15:00' }] },
+        { day: 5, slots: [{ open: '09:00', close: '15:00' }] },
+        { day: 6, slots: [{ open: '09:00', close: '13:00' }] },
+        { day: 7, slots: [] },
+      ],
+    };
+    const label = 'Lun a Vie: 09:00 a 15:00 · Sáb: 09:00 a 13:00 · Dom: cerrado';
+
+    for (const raw of [saved, { days: saved.schedule }, JSON.stringify(saved)]) {
+      const loaded = normalizeStoreWeekSchedule(raw);
+      expect(storeWeekScheduleToJson(loaded)).toEqual(saved);
+      expect(formatPickupOpeningHours(raw)).toBe(label);
+      const rows = storeOpeningHoursEditorRows(loaded);
+      expect(rows.filter((row) => row.day <= 5).every((row) => !row.closed)).toBe(true);
+      expect(rows.find((row) => row.day === 1)?.slots).toEqual([{ open: '09:00', close: '15:00' }]);
+      expect(rows.find((row) => row.day === 6)?.slots).toEqual([{ open: '09:00', close: '13:00' }]);
+      expect(rows.find((row) => row.day === 7)?.closed).toBe(true);
+    }
   });
 
   it('rechaza un día abierto con hora inválida y conserva el texto mientras se tipea', () => {

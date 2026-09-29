@@ -4,6 +4,7 @@ import { formatOrderCodeDisplay } from './orderCode';
 import {
   formatStoreOpeningHours,
   normalizeStoreOpeningHours,
+  readOpeningHoursList,
   type StoreHoursSlot,
 } from './storeOpeningHours';
 
@@ -212,14 +213,7 @@ function slotsFromUnknown(raw: unknown): StoreHoursSlot[] {
 }
 
 function scheduleRows(raw: unknown): { day: number; slots: StoreHoursSlot[] }[] | null {
-  const record = asRecord(raw);
-  const list = Array.isArray(raw)
-    ? raw
-    : Array.isArray(record?.schedule)
-      ? (record.schedule as unknown[])
-      : Array.isArray(record?.days)
-        ? (record.days as unknown[])
-        : null;
+  const list = readOpeningHoursList(raw);
   if (!list) return null;
   const rows: { day: number; slots: StoreHoursSlot[] }[] = [];
   for (const entry of list) {
@@ -237,7 +231,7 @@ function scheduleRows(raw: unknown): { day: number; slots: StoreHoursSlot[] }[] 
 export function formatPickupOpeningHours(raw: unknown): string | null {
   const schedule = scheduleRows(raw);
   if (!schedule) {
-    const text = formatStoreOpeningHours(normalizeStoreOpeningHours(raw));
+    const text = formatStoreOpeningHours(normalizeStoreOpeningHours(readOpeningHoursList(raw) ?? raw));
     return text || null;
   }
   const open = schedule.filter((row) => row.slots.length > 0);

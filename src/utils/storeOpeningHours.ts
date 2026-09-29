@@ -187,17 +187,45 @@ export function ensureStoreWeekShape(
   });
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/**
+ * Lista de días o de franjas, venga como array, `{ schedule }`, `{ days }`
+ * o como string JSON de cualquiera de esos.
+ */
+export function readOpeningHoursList(raw: unknown): unknown[] | null {
+  let value = raw;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    try {
+      value = JSON.parse(trimmed) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  if (Array.isArray(value)) return value;
+  const record = asRecord(value);
+  if (Array.isArray(record?.schedule)) return record.schedule;
+  if (Array.isArray(record?.days)) return record.days;
+  return null;
+}
+
 /**
  * Lee lo guardado en `stores.opening_hours`.
- * Acepta la grilla semanal `{ day, slots }` y el formato viejo `[{ open, close }]`
- * (esas franjas se aplican a los 7 días).
+ * Acepta `{ schedule: [{ day, slots }] }`, `{ days: [...] }`, la lista plana
+ * y un string JSON. El formato viejo `[{ open, close }]` se aplica a los 7 días.
  */
 export function normalizeStoreWeekSchedule(raw: unknown): StoreDaySchedule[] {
-  if (isEditorWeek(raw)) return ensureStoreWeekShape(raw);
-  if (!Array.isArray(raw) || raw.length === 0) return defaultStoreWeekSchedule();
+  const list = readOpeningHoursList(raw);
+  if (isEditorWeek(list)) return ensureStoreWeekShape(list);
+  if (!list || list.length === 0) return defaultStoreWeekSchedule();
 
   const weekly: { day: number; slots: StoreHoursSlot[] }[] = [];
-  for (const entry of raw) {
+  for (const entry of list) {
     if (!entry || typeof entry !== 'object') continue;
     const obj = entry as Record<string, unknown>;
     const day = dayNumber(obj.day ?? obj.weekday ?? obj.dia);
@@ -220,24 +248,26 @@ export function normalizeStoreWeekSchedule(raw: unknown): StoreDaySchedule[] {
     });
   }
 
-  const legacy = normalizeStoreOpeningHours(raw);
+  const legacy = normalizeStoreOpeningHours(list);
   if (legacy.length === 0) return defaultStoreWeekSchedule();
   return WEEK_DAYS.map((day) => openDay(day, legacy));
 }
 
 /** JSON que se guarda en `stores.opening_hours`. Día cerrado → `slots: []`. */
-export function storeWeekScheduleToJson(
-  days: StoreDaySchedule[],
-): { day: number; slots: StoreHoursSlot[] }[] {
-  return ensureStoreWeekShape(days).map((day) => ({
-    day: day.day,
-    slots: day.closed
-      ? []
-      : day.slots.slice(0, 2).map((slot) => ({
-          open: slot.open.trim(),
-          close: slot.close.trim(),
-        })),
-  }));
+export function storeWeekScheduleToJson(days: StoreDaySchedule[]): {
+  schedule: { day: number; slots: StoreHoursSlot[] }[];
+} {
+  return {
+    schedule: ensureStoreWeekShape(days).map((day) => ({
+      day: day.day,
+      slots: day.closed
+        ? []
+        : day.slots.slice(0, 2).map((slot) => ({
+            open: slot.open.trim(),
+            close: slot.close.trim(),
+          })),
+    })),
+  };
 }
 
 export function validateStoreWeekSchedule(days: StoreDaySchedule[]): string | null {
