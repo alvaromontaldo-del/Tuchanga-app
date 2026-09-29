@@ -3,13 +3,18 @@ import {
   formatShortAddress,
   type NominatimAddressParts,
 } from '../utils/formatAddress';
+import { fetchGeorefAddressHits } from './georef';
 import {
+  enrichPositionedHits,
   fallbackStreetNames,
   hitsIncludeNearbyStreet,
   houseNumberDigits,
+  isPlausibleHouseNumber,
+  noteAddressHeightRejection,
   parseStreetAddressQuery,
   rankGeocodeHits,
   stampSuggestions,
+  tagStreetHeightRanges,
   type GeocodeHit,
 } from '../utils/streetAddressQuery';
 
@@ -139,15 +144,12 @@ function mergeHits(primary: GeocodeHit[], extra: GeocodeHit[]): GeocodeHit[] {
   return merged;
 }
 
-export async function fetchNominatimSuggestions(
+async function collectNominatimHits(
   query: string,
-  opts?: NominatimSearchOptions,
-): Promise<NominatimSuggestion[]> {
-  const q = query.trim();
-  if (q.length < 4) return [];
-
-  const parsed = parseStreetAddressQuery(q);
-  let hits = await fetchGeocodeHits(searchParamsFor(q, opts, true));
+  opts: NominatimSearchOptions | undefined,
+): Promise<GeocodeHit[]> {
+  const parsed = parseStreetAddressQuery(query);
+  let hits = await fetchGeocodeHits(searchParamsFor(query, opts, true));
 
   // `street=1140 Alejandro Volta` puede devolver solo un homónimo a 20 km
   // (Tigre) y ni enterarse de «Volta» en Palermo. Si no hay esa calle al lado,
@@ -173,10 +175,42 @@ export async function fetchNominatimSuggestions(
       if (hitsIncludeNearbyStreet(hits, parsed, opts.near, localStreetM)) break;
     }
   }
+  return hits;
+}
+
+export async function fetchNominatimSuggestions(
+  query: string,
+  opts?: NominatimSearchOptions,
+): Promise<NominatimSuggestion[]> {
+  const q = query.trim();
+  if (q.length < 4) return [];
+
+  const parsed = parseStreetAddressQuery(q);
+  const digits = parsed ? houseNumberDigits(parsed.houseNumber) : '';
+  const useGeoref = Boolean(
+    parsed && digits && isPlausibleHouseNumber(parsed.houseNumber) && opts?.near,
+  );
+
+  // Nominatim y Georef en paralelo: si el padrón no responde, queda el camino de hoy.
+  const [nominatimHits, georef] = await Promise.all([
+    collectNominatimHits(q, opts),
+    useGeoref && opts?.near ? fetchGeorefAddressHits(q, opts.near).catch(() => null) : Promise.resolve(null),
+  ]);
+
+  let hits = nominatimHits;
+  if (georef) {
+    const positioned = enrichPositionedHits(georef.hits, nominatimHits);
+    hits = mergeHits(positioned, tagStreetHeightRanges(nominatimHits, georef.localityRanges));
+  }
+
+  const ranked = rankGeocodeHits(hits, q, opts?.near);
+  if (parsed && digits) {
+    noteAddressHeightRejection(q, Boolean(georef?.aboveStreetEnd) && ranked.length === 0);
+  }
 
   return stampSuggestions(
     q,
-    rankGeocodeHits(hits, q, opts?.near).map((item) => ({
+    ranked.map((item) => ({
       id: item.id,
       address: item.address,
       plainAddress: item.plainAddress?.trim() || item.address,
