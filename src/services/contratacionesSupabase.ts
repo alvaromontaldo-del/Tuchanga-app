@@ -100,6 +100,14 @@ function throwContratacionRpcError(
   throw new Error(msg && msg.length > 0 ? msg : fallback);
 }
 
+function contratacionRows(data: unknown): Record<string, unknown>[] {
+  return data as Record<string, unknown>[];
+}
+
+function contratacionRow(data: unknown): Record<string, unknown> {
+  return data as Record<string, unknown>;
+}
+
 function mapContratacionRow(r: Record<string, unknown>): Contratacion {
   // No leer verification_pin: ni el select ni el payload de realtime lo usan.
   return {
@@ -200,7 +208,7 @@ export async function fetchContratacionesByConversation(
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: true });
   if (error || !data) return [];
-  return (data as Record<string, unknown>[]).map(mapContratacionRow);
+  return contratacionRows(data).map(mapContratacionRow);
 }
 
 export async function fetchContratacionById(id: string): Promise<Contratacion | null> {
@@ -211,7 +219,7 @@ export async function fetchContratacionById(id: string): Promise<Contratacion | 
     .eq('id', id)
     .maybeSingle();
   if (error || !data) return null;
-  return mapContratacionRow(data as Record<string, unknown>);
+  return mapContratacionRow(contratacionRow(data));
 }
 
 /** Contratación activa (no finalizada, cancelada ni en disputa) del hilo. */
@@ -228,7 +236,7 @@ export async function fetchContratacionActivaByConversation(
     .limit(1)
     .maybeSingle();
   if (error || !data) return null;
-  return mapContratacionRow(data as Record<string, unknown>);
+  return mapContratacionRow(contratacionRow(data));
 }
 
 /** Última contratación “en curso de servicio” (post aceptación de precio). */
@@ -245,7 +253,7 @@ export async function fetchLatestContratacionServicioByConversation(
     .limit(1)
     .maybeSingle();
   if (error || !data) return null;
-  return mapContratacionRow(data as Record<string, unknown>);
+  return mapContratacionRow(contratacionRow(data));
 }
 
 export async function fetchContratacionesByUser(params: {
@@ -271,7 +279,7 @@ export async function fetchContratacionesByUser(params: {
 
   const { data, error } = await query;
   if (error || !data) return [];
-  return (data as Record<string, unknown>[]).map(mapContratacionRow);
+  return contratacionRows(data).map(mapContratacionRow);
 }
 
 export type AgendaClienteInfo = {
@@ -364,7 +372,7 @@ export async function fetchContratacionesAgendaWorkerProgramadas(
     .order('fecha_trabajo', { ascending: true })
     .order('hora_inicio', { ascending: true });
   if (error || !data) return [];
-  return (data as Record<string, unknown>[]).map(mapContratacionRow);
+  return contratacionRows(data).map(mapContratacionRow);
 }
 
 /** @deprecated Usar fetchContratacionesAgendaWorkerProgramadas */
