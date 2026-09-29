@@ -84,10 +84,6 @@ import {
   obtenerPinCliente,
   rechazarDisponibilidad,
 } from '../../services/contratacionesSupabase';
-import {
-  fetchClosedClaimChatIds,
-  subscribeClaimChatLock,
-} from '../../services/claimChatSupabase';
 import type { DisponibilidadOpcion } from '../../types/contrataciones';
 import { openPagoCheckout } from '../../navigation/openPagoCheckout';
 import { crearPreferenciaSeña, sincronizarSeñaSiPendiente } from '../../services/pagosMercadoPago';
@@ -286,8 +282,9 @@ export function ChatScreen({
   }, [participants]);
 
   const chatBlocked = blockStatus.iBlockedThem || blockStatus.theyBlockedMe;
-  const [chatClosedByClaim, setChatClosedByClaim] = useState(false);
-  const [claimLockLoading, setClaimLockLoading] = useState(() => isSupabaseConfigured());
+  // El hilo sale de Mensajes cuando el servidor pone deleted_at. No se aplica acá la regla vieja de #55.
+  const chatClosedByClaim = false;
+  const claimLockLoading = false;
 
   const refreshBlockStatus = useCallback(async () => {
     if (!otherUserId || !isSupabaseConfigured()) {
@@ -308,33 +305,6 @@ export function ChatScreen({
   useEffect(() => {
     void refreshBlockStatus();
   }, [refreshBlockStatus]);
-
-  useEffect(() => {
-    if (!isSupabaseConfigured() || !conversationId) {
-      setChatClosedByClaim(false);
-      setClaimLockLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setClaimLockLoading(true);
-    void fetchClosedClaimChatIds([conversationId])
-      .then((ids) => {
-        if (!cancelled) setChatClosedByClaim(ids.has(conversationId));
-      })
-      .catch(() => {
-        if (!cancelled) setChatClosedByClaim(false);
-      })
-      .finally(() => {
-        if (!cancelled) setClaimLockLoading(false);
-      });
-    const unsub = subscribeClaimChatLock(conversationId, (closed) => {
-      if (!cancelled) setChatClosedByClaim(closed);
-    });
-    return () => {
-      cancelled = true;
-      unsub();
-    };
-  }, [conversationId]);
 
   const handleBlockUser = useCallback(() => {
     if (!otherUserId) return;

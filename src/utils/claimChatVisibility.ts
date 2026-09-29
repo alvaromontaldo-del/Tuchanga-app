@@ -1,11 +1,10 @@
 /**
- * Visibilidad del chat cuando un hilo tiene una o varias contrataciones.
+ * Ayuda para leer el estado de un reclamo dentro de un hilo.
  *
- * Misma regla que chat_cerrado_por_reclamo_conformidad: el chat sale de
- * Mensajes solo si tuvo al menos un reclamo, todos los reclamos iniciados
- * terminaron con conformidad de las dos partes, y ninguna contratación
- * vinculada está en curso ni tiene reclamo abierto o pendiente.
- * Un trabajo finalizado que nunca tuvo reclamo no alcanza para ocultarlo.
+ * Mensajes ya no oculta chats con esta regla. El borrado lo hace el servidor
+ * con hide_pair_chats_if_done (deleted_at): fin normal con conformidad de las
+ * dos partes y pago completo, o reclamo cerrado con conformidad. Un trabajo
+ * en curso o un reclamo abierto del par deja el chat general visible.
  */
 
 export const CHAT_CERRADO_POR_RECLAMO = 'Chat cerrado por reclamo';
