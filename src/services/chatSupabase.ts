@@ -154,25 +154,42 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
   } = await sb.auth.getUser();
   if (!user) return [];
 
-  const convColumns = 'id,cliente_id,trabajador_id,primary_trade,updated_at,deleted_at';
-  const convQuery = () =>
-    sb
-      .from('conversations')
-      .select(`${convColumns},contratacion_id`)
-      .or(`cliente_id.eq.${user.id},trabajador_id.eq.${user.id}`)
-      .is('deleted_at', null)
-      .order('updated_at', { ascending: false });
+  type ConversationInboxRow = {
+    id: string;
+    cliente_id: string;
+    trabajador_id: string;
+    primary_trade: string | null;
+    updated_at: string | null;
+    deleted_at: string | null;
+    contratacion_id: string | null;
+  };
 
-  let { data: convs, error } = await convQuery();
+  const withClaim = await sb
+    .from('conversations')
+    .select('id,cliente_id,trabajador_id,primary_trade,updated_at,deleted_at,contratacion_id')
+    .or(`cliente_id.eq.${user.id},trabajador_id.eq.${user.id}`)
+    .is('deleted_at', null)
+    .order('updated_at', { ascending: false });
+
+  let error = withClaim.error;
+  let convs: ConversationInboxRow[] | null = withClaim.data;
   if (error && /contratacion_id/i.test(error.message ?? '')) {
     const fallback = await sb
       .from('conversations')
-      .select(convColumns)
+      .select('id,cliente_id,trabajador_id,primary_trade,updated_at,deleted_at')
       .or(`cliente_id.eq.${user.id},trabajador_id.eq.${user.id}`)
       .is('deleted_at', null)
       .order('updated_at', { ascending: false });
-    convs = fallback.data;
     error = fallback.error;
+    convs = (fallback.data ?? []).map((row) => ({
+      id: row.id,
+      cliente_id: row.cliente_id,
+      trabajador_id: row.trabajador_id,
+      primary_trade: row.primary_trade,
+      updated_at: row.updated_at,
+      deleted_at: row.deleted_at,
+      contratacion_id: null,
+    }));
   }
 
   if (error || !convs?.length) return [];
