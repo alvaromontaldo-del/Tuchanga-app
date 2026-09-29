@@ -48,7 +48,7 @@ export function EditStoreScreen({ navigation }: Props) {
   const [lng, setLng] = useState<number | null>(null);
   const [rubros, setRubros] = useState<StoreRubro[]>([]);
   const [selectedRubros, setSelectedRubros] = useState<string[]>([]);
-  const [openingHours, setOpeningHours] = useState<StoreHoursSlot[]>(defaultStoreOpeningHours);
+  const [openingHours, setOpeningHours] = useState<StoreHoursSlot[]>(defaultStoreOpeningHours());
   const [locating, setLocating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 

@@ -236,18 +236,28 @@ export function LoginScreen({ navigation, route }: Props) {
               </Text>
             ) : null}
 
-            <View style={styles.footerRow}>
-              <Text style={styles.muted}>¿No tenés cuenta? </Text>
-              <TextLink
-                inline
-                onPress={() =>
-                  asCommerce
-                    ? navigation.navigate('RegisterCommerce')
-                    : navigation.navigate('Register', { asCommerce: false })
-                }
-              >
-                Registrate
-              </TextLink>
+            <View style={styles.footer}>
+              <Text style={styles.muted}>¿No tenés cuenta? Registrate como</Text>
+              <View style={styles.registerChoices}>
+                <Pressable
+                  style={({ pressed }) => [styles.registerChip, pressed && styles.pressed]}
+                  onPress={() => navigation.navigate('Register', { asCommerce: false })}
+                  accessibilityRole="button"
+                  accessibilityLabel="Registrate como particular"
+                >
+                  <Ionicons name="person-outline" size={18} color={colors.primary} />
+                  <Text style={styles.registerChipText}>Particular</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [styles.registerChip, pressed && styles.pressed]}
+                  onPress={() => navigation.navigate('RegisterCommerce')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Registrate como comercio"
+                >
+                  <Ionicons name="storefront-outline" size={18} color={colors.primary} />
+                  <Text style={styles.registerChipText}>Comercio</Text>
+                </Pressable>
+              </View>
             </View>
           </View>
         </ScrollView>
@@ -300,12 +310,32 @@ const styles = StyleSheet.create({
   commerceToggleTitle: { fontSize: 15, fontWeight: '800', color: colors.text },
   commerceToggleTitleOn: { color: colors.primary },
   commerceToggleSub: { fontSize: 12, color: colors.textSecondary },
-  footerRow: {
+  footer: {
+    marginTop: spacing.md,
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  registerChoices: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignSelf: 'stretch',
+    gap: spacing.sm,
+  },
+  registerChip: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: spacing.md,
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: radii.input,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
+  },
+  registerChipText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.primary,
   },
   muted: {
     color: colors.textSecondary,

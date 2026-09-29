@@ -48,7 +48,7 @@ export function RegisterStoreScreen({ navigation }: Props) {
   const [lng, setLng] = useState<number | null>(user?.baseLocation?.lng ?? null);
   const [rubros, setRubros] = useState<StoreRubro[]>([]);
   const [selectedRubros, setSelectedRubros] = useState<string[]>([]);
-  const [openingHours, setOpeningHours] = useState<StoreHoursSlot[]>(defaultStoreOpeningHours);
+  const [openingHours, setOpeningHours] = useState<StoreHoursSlot[]>(defaultStoreOpeningHours());
   const [rubrosLoading, setRubrosLoading] = useState(true);
   const [locating, setLocating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
