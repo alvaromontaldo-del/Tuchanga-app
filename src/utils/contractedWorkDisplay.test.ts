@@ -5,6 +5,7 @@ import {
   contractedWorkMoneyDisplay,
   contractedWorkSection,
   professionalPayoutAmount,
+  resumeClaimConversationId,
   warrantyClaimAction,
   warrantyClaimButtonLabel,
   workerGivenName,
@@ -153,6 +154,10 @@ describe('warrantyClaimAction', () => {
       }),
     ).toBe('resume');
     expect(warrantyClaimButtonLabel('resume')).toBe('Ver reclamo');
+    expect(resumeClaimConversationId('  conv-propia  ')).toBe('conv-propia');
+    expect(resumeClaimConversationId('')).toBe('');
+    expect(resumeClaimConversationId(null)).toBe('');
+    expect(resumeClaimConversationId(undefined)).toBe('');
 
     const expired = warrantyCountdown({
       warrantyDays: 30,

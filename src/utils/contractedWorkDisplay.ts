@@ -127,3 +127,11 @@ export function warrantyClaimButtonLabel(action: WarrantyClaimAction): string | 
   if (action === 'resume') return 'Ver reclamo';
   return null;
 }
+
+/**
+ * "Ver reclamo" abre el chat ya guardado en la contratación.
+ * Si no hay id, el llamador puede iniciar el reclamo como último recurso.
+ */
+export function resumeClaimConversationId(conversationId: string | null | undefined): string {
+  return String(conversationId ?? '').trim();
+}
