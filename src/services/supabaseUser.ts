@@ -19,10 +19,57 @@ import { completedJobsFromPayload } from '../utils/workerReputation';
  * bio → p_bio → bio (si la migración y la función en BD lo incluyen)
  */
 
-const PROFILE_CORE =
-  'id,nombre,apellido,dni,telefono,direccion_texto,detalles_ubicacion,avatar_url,coverage_km,created_at,rating_average,review_count,total_jobs_done,birth_date,professional_description' as const;
-const PROFILE_WITH_LOC = `${PROFILE_CORE},location` as const;
-const PROFILE_FULL = `${PROFILE_WITH_LOC},bio` as const;
+/** Columnas de profiles que no son PII. DNI, teléfono, domicilio y nacimiento salen de get_my_profile_private. */
+const PROFILE_PUBLIC_CORE =
+  'id,nombre,apellido,avatar_url,coverage_km,created_at,rating_average,review_count,total_jobs_done,professional_description' as const;
+const PROFILE_PUBLIC_WITH_LOC = `${PROFILE_PUBLIC_CORE},location` as const;
+const PROFILE_PUBLIC_FULL = `${PROFILE_PUBLIC_WITH_LOC},bio` as const;
+
+export type MyProfilePrivate = {
+  dni: string | null;
+  telefono: string | null;
+  direccion_texto: string | null;
+  detalles_ubicacion: string | null;
+  birth_date: string | null;
+};
+
+function textOrNull(v: unknown): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s.length ? s : null;
+}
+
+function birthDateOrNull(v: unknown): string | null {
+  const s = textOrNull(v);
+  if (!s) return null;
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : s;
+}
+
+function firstPrivateRow(data: unknown): Record<string, unknown> | null {
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || typeof row !== 'object') return null;
+  return row as Record<string, unknown>;
+}
+
+/** PII del usuario autenticado. El RPC solo lee auth.uid(); no acepta otro id. */
+export async function fetchMyProfilePrivate(): Promise<MyProfilePrivate | null> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc('get_my_profile_private');
+  if (error) {
+    console.warn('[get_my_profile_private]', error.message);
+    return null;
+  }
+  const row = firstPrivateRow(data);
+  if (!row) return null;
+  return {
+    dni: textOrNull(row.dni),
+    telefono: textOrNull(row.telefono),
+    direccion_texto: textOrNull(row.direccion_texto),
+    detalles_ubicacion: textOrNull(row.detalles_ubicacion),
+    birth_date: birthDateOrNull(row.birth_date),
+  };
+}
 
 type ProfileRow = {
   id: string;
@@ -47,14 +94,14 @@ type ProfileRow = {
 async function fetchProfileRowForUser(userId: string): Promise<ProfileRow | null> {
   const supabase = getSupabaseClient();
 
-  let res = await supabase.from('profiles').select(PROFILE_FULL).eq('id', userId).maybeSingle();
+  let res = await supabase.from('profiles').select(PROFILE_PUBLIC_FULL).eq('id', userId).maybeSingle();
 
   if (res.error) {
-    res = await supabase.from('profiles').select(PROFILE_WITH_LOC).eq('id', userId).maybeSingle();
+    res = await supabase.from('profiles').select(PROFILE_PUBLIC_WITH_LOC).eq('id', userId).maybeSingle();
   }
 
   if (res.error) {
-    res = await supabase.from('profiles').select(PROFILE_CORE).eq('id', userId).maybeSingle();
+    res = await supabase.from('profiles').select(PROFILE_PUBLIC_CORE).eq('id', userId).maybeSingle();
   }
 
   if (res.error) {
@@ -62,7 +109,24 @@ async function fetchProfileRowForUser(userId: string): Promise<ProfileRow | null
     return null;
   }
 
-  return (res.data as ProfileRow | null) ?? null;
+  const row = (res.data as ProfileRow | null) ?? null;
+  if (!row) return null;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (user?.id !== userId) return row;
+
+  const priv = await fetchMyProfilePrivate();
+  if (!priv) return row;
+  return {
+    ...row,
+    dni: priv.dni,
+    telefono: priv.telefono,
+    direccion_texto: priv.direccion_texto,
+    detalles_ubicacion: priv.detalles_ubicacion,
+    birth_date: priv.birth_date,
+  };
 }
 
 function parseGeographyPoint(raw: unknown): { lat: number; lng: number } {
