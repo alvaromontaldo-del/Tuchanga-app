@@ -2536,7 +2536,6 @@ export function ChatScreen({
                                 workerId: participants.workerId,
                                 clientId: participants.clientId,
                                 netAmount: quoteNetNum,
-                                feeRate,
                                 serviceDetail: quoteDetail,
                                 replacesQuoteId,
                                 warrantyDays: incluyeGarantia ? warrantyDaysNum : null,
