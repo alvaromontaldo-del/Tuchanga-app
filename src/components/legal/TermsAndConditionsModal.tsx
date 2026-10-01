@@ -121,18 +121,20 @@ function TermsBody() {
         Un cliente o un profesional puede pedir materiales a comercios. El comercio ve el pedido
         para cotizarlo. Si se indicó una dirección de entrega, el comercio la usa para el flete. El
         teléfono, el correo y el documento del cliente no se comparten con el comercio por la app.
-        El nombre, el teléfono y la dirección del comercio se muestran al cliente recién cuando está
-        pago el costo de servicio YaChanga de ese pedido, que se abona con Mercado Pago. El precio
-        de los materiales se paga al comercio, aparte de ese costo de servicio. El comercio puede
+        Cuando está pago el costo de servicio YaChanga de ese pedido, el nombre, el teléfono y la
+        dirección del comercio se muestran al cliente que lo pagó y al profesional que creó el
+        pedido de materiales, aunque ese profesional no lo haya pagado él. Ese costo se abona con
+        Mercado Pago. El precio de los materiales se paga al comercio, aparte de ese costo de
+        servicio. El comercio puede
         cotizar retiro en el local, envío sin cargo o envío con costo. Si hay un costo de flete,
         quien pide elige si ese envío entra en la orden.
       </Section>
 
       <Section title="11. PIN de retiro de materiales">
-        Al pagar el costo de servicio de materiales, quien pagó ve un código de orden y un PIN de
-        retiro. Si el profesional que cargó el pedido es quien pagó, o la app lo identifica como
-        cliente de esa orden, también puede verlos. El comercio nunca ve el PIN: lo ingresa para
-        cerrar la entrega. No lo publiques ni se lo pases a terceros.
+        Cuando el costo de servicio de materiales está pago, el código de orden y el PIN de retiro
+        los ven el cliente que pagó y el profesional que creó el pedido, aunque ese profesional no
+        lo haya pagado él. El comercio nunca ve el PIN: lo ingresa para cerrar la entrega. No lo
+        publiques ni se lo pases a terceros.
       </Section>
 
       <Section title="12. Ubicación">

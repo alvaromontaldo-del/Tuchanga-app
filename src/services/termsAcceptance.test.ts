@@ -35,6 +35,28 @@ describe('aceptación de términos', () => {
     expect(isTermsBackendUnavailable({ message: 'Failed to fetch' })).toBe(false);
   });
 
+  it('el markdown de revisión tiene el mismo texto que el modal', () => {
+    const modal = readFileSync('src/components/legal/TermsAndConditionsModal.tsx', 'utf8');
+    const markdown = readFileSync('docs/terminos-y-condiciones-2026-10-01.md', 'utf8');
+    const bodyStart = modal.indexOf('function TermsBody');
+    const bodyEnd = modal.indexOf('export function TermsAndConditionsModal');
+    const body = modal.slice(bodyStart, bodyEnd);
+    const collapse = (value: string) => value.replace(/\s+/g, ' ').trim();
+    const intro = body.match(/<Text style=\{styles\.p\}>([\s\S]*?)<\/Text>/);
+    if (!intro) throw new Error('falta el párrafo inicial del modal');
+    const sections = [...body.matchAll(/<Section title="([^"]+)">([\s\S]*?)<\/Section>/g)].map(
+      (match) => `${match[1]}\n\n${collapse(match[2] ?? '')}`,
+    );
+    const fromModal = [
+      'Términos y Condiciones',
+      `Última actualización: ${readFileSync('src/constants/terms.ts', 'utf8').match(/TERMS_UPDATED_LABEL = '([^']+)'/)?.[1]} · Versión ${TERMS_VERSION}`,
+      collapse(intro[1] ?? ''),
+      ...sections,
+    ].join('\n\n');
+    const fromMarkdown = collapse(markdown.replace(/^# /gm, '').replace(/^## /gm, ''));
+    expect(collapse(fromModal)).toBe(fromMarkdown);
+  });
+
   it('la fecha de los términos es una constante, no el día de hoy', () => {
     const modal = readFileSync('src/components/legal/TermsAndConditionsModal.tsx', 'utf8');
     const register = readFileSync('src/screens/auth/RegisterScreen.tsx', 'utf8');
