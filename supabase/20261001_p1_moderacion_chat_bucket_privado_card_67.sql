@@ -1,5 +1,5 @@
--- Card #67. No aplicar este archivo en producción desde un agente.
--- Correlo a mano en el SQL editor de Supabase cuando toque desplegarlo.
+-- Card #67. Aplicado en producción el 2026-10-01, antes del OTA de la app.
+-- Es idempotente: se puede volver a correr en el SQL editor de Supabase.
 --
 -- Moderación relajada (no vuelve el filtro de la card #85):
 --   bloquea teléfonos reales y emails;
@@ -618,3 +618,108 @@ WITH CHECK (
     OR (storage.foldername(name))[1] = public.storage_owner_folder_for_me()
   )
 );
+
+-- ---------------------------------------------------------------------------
+-- Las RPC de limpieza son solo para service_role (edge cleanup_chat_images).
+-- Supabase le da EXECUTE a anon/authenticated por default privileges al crear
+-- la función, así que hay que sacarlo explícito.
+-- ---------------------------------------------------------------------------
+
+REVOKE EXECUTE ON FUNCTION public.list_expired_chat_images(integer) FROM anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.archive_eligible_chats_and_list_images(integer) FROM anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Panel admin: puede firmar fotos del bucket privado `chat`.
+-- admin_get_chat devuelve una referencia de Storage para las fotos nuevas
+-- (metadata.image_path, sin URL pública). El panel la reconoce y la firma.
+-- ---------------------------------------------------------------------------
+
+DROP POLICY IF EXISTS "chat_images_select_admin" ON storage.objects;
+CREATE POLICY "chat_images_select_admin" ON storage.objects
+FOR SELECT TO authenticated
+USING (
+  bucket_id = 'chat'
+  AND public.is_admin()
+);
+
+CREATE OR REPLACE FUNCTION public.admin_get_chat(p_conversation_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE SECURITY DEFINER
+SET search_path TO 'public', 'auth'
+AS $function$
+DECLARE
+  v_head jsonb;
+  v_messages jsonb;
+BEGIN
+  PERFORM public._admin_require();
+
+  SELECT jsonb_build_object(
+    'id', c.id,
+    'created_at', c.created_at,
+    'updated_at', c.updated_at,
+    'deleted_at', c.deleted_at,
+    'oficio', coalesce(nullif(btrim(c.primary_trade), ''), ''),
+    'client_id', c.cliente_id,
+    'client_name', coalesce(public._admin_full_name(pc.nombre, pc.apellido), ''),
+    'client_email', coalesce(uc.email, ''),
+    'client_role', 'cliente',
+    'worker_id', c.trabajador_id,
+    'worker_name', coalesce(public._admin_full_name(pw.nombre, pw.apellido), ''),
+    'worker_email', coalesce(uw.email, ''),
+    'worker_role', 'trabajador'
+  )
+  INTO v_head
+  FROM public.conversations c
+  LEFT JOIN public.profiles pc ON pc.id = c.cliente_id
+  LEFT JOIN auth.users uc ON uc.id = c.cliente_id
+  LEFT JOIN public.profiles pw ON pw.id = c.trabajador_id
+  LEFT JOIN auth.users uw ON uw.id = c.trabajador_id
+  WHERE c.id = p_conversation_id;
+
+  IF v_head IS NULL THEN
+    RAISE EXCEPTION 'Chat no encontrado';
+  END IF;
+
+  SELECT coalesce(jsonb_agg(jsonb_build_object(
+    'id', m.id,
+    'sender_id', m.sender_id,
+    'sender_name', coalesce(public._admin_full_name(p.nombre, p.apellido), 'Usuario'),
+    'sender_role', CASE
+      WHEN m.sender_id = (v_head->>'client_id')::uuid THEN 'cliente'
+      WHEN m.sender_id = (v_head->>'worker_id')::uuid THEN 'trabajador'
+      ELSE 'otro'
+    END,
+    'body', coalesce(m.body, ''),
+    'image_url', coalesce(
+      nullif(
+        btrim(
+          coalesce(
+            m.metadata->>'image_url',
+            m.metadata->>'url',
+            m.metadata->>'path',
+            m.metadata->>'storage_path',
+            ''
+          )
+        ),
+        ''
+      ),
+      CASE
+        WHEN nullif(btrim(coalesce(m.metadata->>'image_path', '')), '') IS NOT NULL THEN
+          '/storage/v1/object/authenticated/'
+          || coalesce(nullif(btrim(m.metadata->>'image_bucket'), ''), 'chat')
+          || '/'
+          || btrim(m.metadata->>'image_path')
+      END
+    ),
+    'created_at', m.created_at,
+    'kind', coalesce(m.type, 'text')
+  ) ORDER BY m.created_at ASC), '[]'::jsonb)
+  INTO v_messages
+  FROM public.messages m
+  LEFT JOIN public.profiles p ON p.id = m.sender_id
+  WHERE m.conversation_id = p_conversation_id;
+
+  RETURN v_head || jsonb_build_object('messages', coalesce(v_messages, '[]'::jsonb));
+END;
+$function$;
