@@ -68,6 +68,7 @@ type OrderRevealRow = {
   contact_revealed?: boolean;
   verification_pin?: string | null;
   store_address?: string | null;
+  store_phone?: string | null;
   store_name?: string | null;
 };
 
@@ -90,6 +91,7 @@ function applyOrderReveal(row: ClientPickupOrderRow, reveal: OrderRevealRow): Cl
     store_address: address ?? row.store_address ?? null,
     store_name:
       storeName && !storeName.includes('oculto') ? storeName : row.store_name,
+    store_phone: reveal.store_phone ?? null,
     verification_pin: reveal.verification_pin ?? null,
   };
 }
