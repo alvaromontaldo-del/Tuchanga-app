@@ -19,6 +19,7 @@ import { ModeratedTextField } from '../../components/common/ModeratedTextField';
 import { useAppToast } from '../../components/toast/toast';
 import { TradeSearchModal } from '../../components/search/TradeSearchModal';
 import { ImagePickerComponent } from '../../components/common/ImagePickerComponent';
+import { IntroVideoEditor } from '../../components/profile/IntroVideoEditor';
 import { colors, radii, spacing } from '../../constants/theme';
 import { isSupabaseConfigured } from '../../config/supabase';
 import {
@@ -795,6 +796,8 @@ export function WorkerABMScreen({ navigation }: Props) {
               <Text style={styles.inlineError}>{fieldErrors.professionalDescription}</Text>
             ) : null}
             </View>
+
+            {isSupabaseConfigured() && userId ? <IntroVideoEditor userId={userId} /> : null}
 
             <View style={styles.actionsSpacer} />
 

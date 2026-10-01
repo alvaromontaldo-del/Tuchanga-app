@@ -2,6 +2,7 @@ import { getSupabaseClient } from '../lib/supabase';
 import type { WorkerPublicProfile } from '../types/feed';
 import { MAX_WORKER_TRADES } from '../types/feed';
 import { completedJobsFromPayload } from '../utils/workerReputation';
+import { fetchIntroVideoPath, playbackUrlForPath } from './introVideoSupabase';
 import { fetchMyProfilePrivate } from './supabaseUser';
 
 const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?u=profile';
@@ -72,6 +73,8 @@ export async function fetchWorkerPublicProfileFromSupabase(
   workerUserId: string,
 ): Promise<WorkerPublicProfile | null> {
   const sb = getSupabaseClient();
+
+  const introPathPromise = fetchIntroVideoPath(workerUserId);
 
   const { data: profile, error: pe } = await sb
     .from('profiles')
@@ -145,10 +148,13 @@ export async function fetchWorkerPublicProfileFromSupabase(
     birthDate = priv?.birth_date ?? '';
   }
 
+  const introVideoUrl = playbackUrlForPath(await introPathPromise);
+
   return {
     id: profile.id,
     firstName,
     trade: primary.nombre_oficio,
+    introVideoUrl,
     avatarUrl:
       profile.avatar_url?.trim() ||
       `${DEFAULT_AVATAR}&id=${encodeURIComponent(profile.id)}`,

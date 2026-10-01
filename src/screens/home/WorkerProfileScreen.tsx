@@ -26,6 +26,7 @@ import { getWorkerById } from '../../data/mockFeed';
 import { openAuthModal } from '../../navigation/openAuthModal';
 import { openOrCreateChat } from '../../services/messaging';
 import { fetchWorkerPublicProfileFromSupabase } from '../../services/workerProfileSupabase';
+import { IntroVideoPlayer } from '../../components/profile/IntroVideoPlayer';
 import { StarRating } from '../../components/profile/StarRating';
 import { canShowWorkerReputation } from '../../utils/workerReputation';
 import type {
@@ -388,6 +389,7 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
 
         <ClickableAvatar uri={worker.avatarUrl} style={styles.avatar} />
         <Text style={styles.name}>{worker.firstName}</Text>
+        {worker.introVideoUrl ? <IntroVideoPlayer uri={worker.introVideoUrl} /> : null}
         {ageLabel ? <Text style={styles.age}>{ageLabel}</Text> : null}
 
         <View style={styles.tradesSummary}>
