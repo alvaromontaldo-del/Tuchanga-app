@@ -1,5 +1,10 @@
 import { File as ExpoFsFile } from 'expo-file-system';
 import { getSupabaseClient } from '../lib/supabase';
+import {
+  CHAT_IMAGE_BUCKET,
+  CHAT_IMAGE_SIGNED_TTL_SEC,
+  type ChatImageStorageRef,
+} from '../utils/chatImageStorage';
 import { mapChatSendError } from '../utils/chatErrors';
 import { normalizeLocalImageUri } from '../utils/normalizeLocalImage';
 import { storageOwnerFolder } from '../utils/storageOwnerFolder';
@@ -74,7 +79,7 @@ async function uploadChatImage(params: {
     throw new Error('La imagen quedó vacía. Probá con otra foto.');
   }
 
-  const { error } = await sb.storage.from('job-photos').upload(path, bytes, {
+  const { error } = await sb.storage.from(CHAT_IMAGE_BUCKET).upload(path, bytes, {
     upsert: false,
     contentType: 'image/jpeg',
     cacheControl: '3600',
@@ -87,8 +92,23 @@ async function uploadChatImage(params: {
     );
   }
 
-  const { data } = sb.storage.from('job-photos').getPublicUrl(path);
-  return data.publicUrl;
+  return path;
+}
+
+export async function createChatImageSignedUrl(
+  ref: ChatImageStorageRef,
+): Promise<{ url: string; expiresAtMs: number }> {
+  const sb = getSupabaseClient();
+  const { data, error } = await sb.storage
+    .from(ref.bucket)
+    .createSignedUrl(ref.path, CHAT_IMAGE_SIGNED_TTL_SEC);
+  if (error || !data?.signedUrl) {
+    throw new Error(error?.message || 'No se pudo abrir la imagen.');
+  }
+  return {
+    url: data.signedUrl,
+    expiresAtMs: Date.now() + CHAT_IMAGE_SIGNED_TTL_SEC * 1000,
+  };
 }
 
 /**
@@ -114,11 +134,15 @@ export async function sendChatImageMessageSupabase(
     throw new Error('Solo el cliente puede enviar imágenes en este chat.');
   }
 
-  const imageUrl = await uploadChatImage({
+  const imagePath = await uploadChatImage({
     userId: user.id,
     conversationId,
     uri: localImageUri,
   });
+  const metadata = {
+    image_bucket: CHAT_IMAGE_BUCKET,
+    image_path: imagePath,
+  };
 
   const { data, error } = await sb
     .from('messages')
@@ -127,7 +151,7 @@ export async function sendChatImageMessageSupabase(
       sender_id: user.id,
       body: IMAGE_BODY_PREVIEW,
       type: 'image',
-      metadata: { image_url: imageUrl },
+      metadata,
     })
     .select('id,conversation_id,sender_id,body,type,metadata,created_at')
     .single();
@@ -144,7 +168,7 @@ export async function sendChatImageMessageSupabase(
     status: 'sent',
     created_at: data.created_at,
     type: 'image',
-    metadata: (data.metadata as Record<string, unknown> | null) ?? { image_url: imageUrl },
+    metadata: (data.metadata as Record<string, unknown> | null) ?? metadata,
   };
 }
 
