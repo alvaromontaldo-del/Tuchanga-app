@@ -1,6 +1,6 @@
 -- YaChanga — seguimiento de #63. El PIN de retiro también lo ve quien creó la solicitud.
 --
--- NO aplicar este archivo a producción desde el agente. Lo corre un revisor.
+-- APLICADO en producción el 2026-10-01 (migración card_63_pin_requester), después de la fase 2 de #63.
 -- Reemplaza solo los tres RPC de revelado de
 -- supabase/20261001_p0_store_hidden_until_paid_card_63.sql.
 -- No toca get_my_store_contact ni completar_orden_material_con_pin:
