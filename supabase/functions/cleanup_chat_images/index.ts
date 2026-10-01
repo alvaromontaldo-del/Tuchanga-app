@@ -8,7 +8,7 @@
  * - Retención: chat_cleanup_retention_days() — hoy 0 (inmediato)
  *
  * 1) archive_eligible_chats_and_list_images → hide ambos + lista imágenes
- * 2) Borra objetos en job-photos
+ * 2) Borra objetos en el bucket de cada foto (chat privado, o job-photos legado)
  * 3) DELETE messages type=image
  *
  * Lo dispara el cron (header x-function-secret) o los triggers SQL
@@ -22,16 +22,23 @@ type ExpiredRow = {
   conversation_id: string;
   image_url: string | null;
   storage_path: string | null;
+  storage_bucket?: string | null;
   closed_at: string;
 };
 
-function uniquePaths(rows: ExpiredRow[]): string[] {
-  const set = new Set<string>();
+function pathsByBucket(rows: ExpiredRow[]): Map<string, string[]> {
+  const grouped = new Map<string, Set<string>>();
   for (const r of rows) {
     const p = (r.storage_path ?? "").trim();
-    if (p) set.add(p);
+    if (!p) continue;
+    const bucket = (r.storage_bucket ?? "").trim() || "job-photos";
+    const set = grouped.get(bucket) ?? new Set<string>();
+    set.add(p);
+    grouped.set(bucket, set);
   }
-  return [...set];
+  const out = new Map<string, string[]>();
+  for (const [bucket, set] of grouped) out.set(bucket, [...set]);
+  return out;
 }
 
 Deno.serve(async (req) => {
@@ -113,18 +120,22 @@ Deno.serve(async (req) => {
     });
   }
 
-  const paths = uniquePaths(expired);
+  const byBucket = pathsByBucket(expired);
   let storageRemoved = 0;
+  let storagePaths = 0;
   const storageErrors: string[] = [];
 
   const BATCH = 100;
-  for (let i = 0; i < paths.length; i += BATCH) {
-    const chunk = paths.slice(i, i + BATCH);
-    const { data, error } = await admin.storage.from("job-photos").remove(chunk);
-    if (error) {
-      storageErrors.push(error.message);
-    } else {
-      storageRemoved += Array.isArray(data) ? data.length : chunk.length;
+  for (const [bucket, paths] of byBucket) {
+    storagePaths += paths.length;
+    for (let i = 0; i < paths.length; i += BATCH) {
+      const chunk = paths.slice(i, i + BATCH);
+      const { data, error } = await admin.storage.from(bucket).remove(chunk);
+      if (error) {
+        storageErrors.push(error.message);
+      } else {
+        storageRemoved += Array.isArray(data) ? data.length : chunk.length;
+      }
     }
   }
 
@@ -149,7 +160,7 @@ Deno.serve(async (req) => {
     retention_days: retentionDays,
     candidates: expired.length,
     conversations: [...new Set(expired.map((r) => r.conversation_id))].length,
-    storage_paths: paths.length,
+    storage_paths: storagePaths,
     storage_removed: storageRemoved,
     storage_errors: storageErrors.length ? storageErrors : undefined,
     messages_deleted: Number(deletedCount) || 0,

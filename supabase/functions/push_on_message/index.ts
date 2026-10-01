@@ -3,6 +3,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendExpoPush } from "../_shared/expoPush.ts";
 import { requireFunctionSecret } from "../_shared/functionSecretGuard.ts";
+import {
+  claimPushDelivery,
+  uniqueExpoTokens,
+} from "../_shared/pushIdempotency.ts";
 
 type WebhookPayload<T> = {
   type: "INSERT" | "UPDATE" | "DELETE";
@@ -22,7 +26,10 @@ type MessageRow = {
   created_at?: string;
 };
 
-function firstNameFromProfile(profile: { nombre?: string | null; apellido?: string | null } | null, fallback: string): string {
+function firstNameFromProfile(
+  profile: { nombre?: string | null; apellido?: string | null } | null,
+  fallback: string,
+): string {
   const raw = profile
     ? `${profile.nombre ?? ""} ${profile.apellido ?? ""}`.trim()
     : "";
@@ -36,15 +43,6 @@ function json(status: number, body: unknown) {
   });
 }
 
-async function sendExpoPushMessage(params: {
-  to: string;
-  title: string;
-  body: string;
-  data?: Record<string, unknown>;
-}) {
-  return sendExpoPush(params);
-}
-
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
 
@@ -52,9 +50,15 @@ Deno.serve(async (req) => {
   if (denied) return denied;
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-  const SERVICE_ROLE = Deno.env.get("SERVICE_ROLE_KEY") ?? "";
+  const SERVICE_ROLE =
+    Deno.env.get("SERVICE_ROLE_KEY") ??
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
+    "";
   if (!SUPABASE_URL || !SERVICE_ROLE) {
-    return json(500, { error: "missing_env", need: ["SUPABASE_URL", "SERVICE_ROLE_KEY"] });
+    return json(500, {
+      error: "missing_env",
+      need: ["SUPABASE_URL", "SERVICE_ROLE_KEY"],
+    });
   }
 
   let payload: WebhookPayload<MessageRow>;
@@ -69,12 +73,11 @@ Deno.serve(async (req) => {
     return json(400, { error: "missing_message_fields" });
   }
 
-  // Solo INSERT
+  // Solo INSERT (updates no re-disparan push).
   if (payload.type && payload.type !== "INSERT") {
     return json(200, { ok: true, ignored: true });
   }
 
-  // Webhooks a veces mandan metadata como string JSON.
   let meta: { audience?: string; event?: string } | null = null;
   if (msg.metadata && typeof msg.metadata === "object") {
     meta = msg.metadata;
@@ -90,7 +93,11 @@ Deno.serve(async (req) => {
     auth: { persistSession: false },
   });
 
-  // Resolver destinatario mirando la conversación.
+  const eventKey = `message:${msg.id}`;
+  if (!(await claimPushDelivery(sb, eventKey))) {
+    return json(200, { ok: true, skipped: "already_sent", eventKey });
+  }
+
   const { data: conv, error: ce } = await sb
     .from("conversations")
     .select("id,cliente_id,trabajador_id")
@@ -125,19 +132,18 @@ Deno.serve(async (req) => {
     return json(200, { ok: true, skipped: "no_recipient" });
   }
 
-  // Mensajes system con audiencia: el sender_id puede ser el mismo rol (p. ej. seña pagada).
   if (!audience && recipient === sender) {
     return json(200, { ok: true, skipped: "same_sender_recipient" });
   }
 
-  // Buscar token del receptor.
   const { data: prof, error: pe } = await sb
     .from("profiles")
     .select("expo_push_token,nombre,apellido")
     .eq("id", recipient)
     .maybeSingle();
 
-  if (pe || !prof?.expo_push_token) {
+  const tokens = uniqueExpoTokens([prof?.expo_push_token]);
+  if (pe || tokens.length === 0) {
     return json(200, { ok: true, skipped: "no_push_token" });
   }
 
@@ -163,15 +169,19 @@ Deno.serve(async (req) => {
     if (audience !== "cliente") {
       return json(200, { ok: true, skipped: "trabajo_finalizado_not_for_worker" });
     }
-    body = "El profesional marcó el trabajo como finalizado. Podés dejar tu reseña.";
+    body =
+      "El profesional marcó el trabajo como finalizado. Podés dejar tu reseña.";
   } else if (event === "seña_pagada_trabajador") {
-    body = "El costo de servicio de YaChanga fue pagado. Revisá el chat para coordinar la visita.";
+    body =
+      "El costo de servicio de YaChanga fue pagado. Revisá el chat para coordinar la visita.";
   } else if (event === "seña_pagada_cliente") {
     body = "Tu costo de servicio de YaChanga fue acreditado correctamente.";
   } else if (event === "saldo_pagado_trabajador") {
-    body = "El cliente indicó que pagó el saldo. Confirmá la recepción del pago en el chat.";
+    body =
+      "El cliente indicó que pagó el saldo. Confirmá la recepción del pago en el chat.";
   } else if (event === "saldo_pagado_cliente") {
-    body = "Indicaste que pagaste el saldo. Aguardá la confirmación del profesional.";
+    body =
+      "Indicaste que pagaste el saldo. Aguardá la confirmación del profesional.";
   } else if (event === "saldo_confirmado_cliente") {
     body = "El profesional confirmó que recibió el pago del saldo.";
   } else if (event === "saldo_confirmado_trabajador") {
@@ -187,8 +197,8 @@ Deno.serve(async (req) => {
   }
 
   try {
-    await sendExpoPushMessage({
-      to: prof.expo_push_token,
+    await sendExpoPush({
+      to: tokens,
       title,
       body,
       data: {
@@ -204,4 +214,3 @@ Deno.serve(async (req) => {
 
   return json(200, { ok: true });
 });
-

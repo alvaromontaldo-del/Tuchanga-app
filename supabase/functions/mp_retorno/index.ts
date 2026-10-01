@@ -87,63 +87,24 @@ async function resolveApprovedPayment(
 
 async function fallbackMarkPaid(orderId: string, payment: MpPayment): Promise<void> {
   const sb = createAdminClient();
-  const { data: order, error: oe } = await sb
-    .from("orders")
-    .select("id, quote_id, payment_group_id, verification_pin")
-    .eq("id", orderId)
-    .maybeSingle();
-  if (oe || !order) throw new Error(oe?.message ?? "order_not_found");
-
-  const groupId = (order as { payment_group_id?: string | null }).payment_group_id ?? null;
-  const ids: string[] = [orderId];
-  if (groupId) {
-    const { data: siblings } = await sb.from("orders").select("id, quote_id").eq("payment_group_id", groupId);
-    for (const s of siblings ?? []) ids.push(String((s as { id: string }).id));
-  }
-
-  const now = new Date().toISOString();
-  for (const id of [...new Set(ids)]) {
-    const pin =
-      id === orderId && (order as { verification_pin?: string | null }).verification_pin
-        ? String((order as { verification_pin: string }).verification_pin).padStart(4, "0")
-        : String(Math.floor(1000 + Math.random() * 9000));
-    const { error: uo } = await sb
-      .from("orders")
-      .update({
-        deposit_status: "paid",
-        status: "deposit_paid",
-        contact_revealed_at: now,
-        verification_pin: pin,
-        updated_at: now,
-      })
-      .eq("id", id)
-      .neq("status", "completed");
-    if (uo) throw new Error(uo.message);
-
-    const { data: row } = await sb.from("orders").select("quote_id").eq("id", id).maybeSingle();
-    const quoteId = (row as { quote_id?: string } | null)?.quote_id;
-    if (quoteId) {
-      await sb.from("quotes").update({ status: "accepted", updated_at: now }).eq("id", quoteId);
-    }
-  }
-
-  if (groupId) {
-    await sb.from("material_checkouts").update({ status: "paid", updated_at: now }).eq("id", groupId);
-  }
-
-  await sb
-    .from("transacciones_pago")
-    .update({
-      estado_mp: "approved",
-      mp_payment_id: String(payment.id),
-      updated_at: now,
-    })
-    .eq("material_order_id", orderId);
+  const idempotencyKey = `mp_retorno_fallback:${payment.id}:${orderId}`;
+  const { error } = await sb.rpc("registrar_sena_material_aprobada", {
+    p_order_id: orderId,
+    p_monto: Number(payment.transaction_amount ?? 0),
+    p_mp_payment_id: String(payment.id),
+    p_mp_preference_id: payment.preference_id ? String(payment.preference_id) : null,
+    p_idempotency_key: idempotencyKey,
+    p_external_reference: buildMaterialOrderExternalReference(orderId),
+  });
+  if (error) throw new Error(error.message);
 }
 
 /**
  * back_url HTTPS de Checkout Pro.
  * Acredita el pago EN EL SERVIDOR (no depende del deep link de la app).
+ *
+ * IMPORTANTE: Supabase Edge reescribe text/html → text/plain (no se puede servir HTML).
+ * Por eso respondemos 302 al deep link + cuerpo texto plano legible.
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -186,7 +147,7 @@ Deno.serve(async (req) => {
   let credited = false;
   let creditError = "";
 
-  if (status === "approved" && (paymentId || materialOrderId)) {
+  if (status === "approved" && (paymentId || materialOrderId || contratacionId)) {
     try {
       const payment = await resolveApprovedPayment(paymentId, materialOrderId);
       if (!payment) {
@@ -195,7 +156,7 @@ Deno.serve(async (req) => {
       const ctx = (await resolvePaymentContext(payment)) ?? {
         orderId: materialOrderId || undefined,
         contratacionId: contratacionId || undefined,
-        tipoPago: materialOrderId ? "seña_materiales" as const : "seña_inicial" as const,
+        tipoPago: materialOrderId ? ("seña_materiales" as const) : ("seña_inicial" as const),
         externalReference: materialOrderId
           ? buildMaterialOrderExternalReference(materialOrderId)
           : "",
@@ -232,10 +193,8 @@ Deno.serve(async (req) => {
   if (paymentId) qs.set("payment_id", paymentId);
   if (materialOrderId) qs.set("material_order_id", materialOrderId);
   if (contratacionId) qs.set("contratacion_id", contratacionId);
+  if (credited) qs.set("credited", "1");
   const deepLink = `tuchanga-app://pagos/retorno?${qs.toString()}`;
-  const intentLink =
-    `intent://pagos/retorno?${qs.toString()}` +
-    `#Intent;scheme=tuchanga-app;package=com.cuervolinkedout.tuchanga;end`;
 
   const title =
     status === "approved"
@@ -249,66 +208,35 @@ Deno.serve(async (req) => {
     status === "approved"
       ? credited
         ? "Ya podes volver a YaChanga. El pedido quedo confirmado."
-        : "Estamos acreditando el pago. Cerra esta pantalla y volve a YaChanga."
+        : "Estamos acreditando el pago. Volve a YaChanga."
       : "Volve a YaChanga para continuar.";
 
-  const payload = JSON.stringify({
-    type: "mp_retorno",
-    status,
-    paymentId,
-    materialOrderId,
-    contratacionId,
-    credited,
-  });
+  // Texto plano a proposito: Supabase no permite servir HTML desde Edge Functions
+  // (Content-Type text/html se reescribe a text/plain y el navegador muestra el codigo fuente).
+  const plain = [
+    "YaChanga",
+    "",
+    title,
+    subtitle,
+    "",
+    "Para volver a la app, abri este enlace:",
+    deepLink,
+    "",
+    "Si no abre sola, volve a YaChanga manualmente: el pago ya quedo registrado en el servidor.",
+    creditError ? `(ref: ${creditError.slice(0, 120)})` : "",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
 
-  // ASCII-safe HTML + bytes UTF-8: evita text/plain / mojibake en Chrome al volver de MP.
-  const html = `<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-  <title>YaChanga - Pago</title>
-  <style>
-    body { font-family: system-ui, sans-serif; text-align: center; padding: 48px 20px; color: #111; background: #fff; }
-    p { color: #555; line-height: 1.4; }
-    a.btn { display: inline-block; margin-top: 16px; padding: 14px 22px; background: #9A0F12; color: #fff; text-decoration: none; border-radius: 10px; font-weight: 700; }
-    a.secondary { display: block; margin-top: 18px; color: #9A0F12; font-weight: 700; }
-  </style>
-</head>
-<body data-yc-mp-retorno="1" data-yc-status="${status}" data-yc-credited="${credited ? "1" : "0"}">
-  <h1>${title}</h1>
-  <p>${subtitle}</p>
-  <p><a class="btn" href="${deepLink}">Abrir YaChanga</a></p>
-  <p><a class="secondary" href="${intentLink}">Abrir app (Android)</a></p>
-  <!-- ${creditError.replace(/--/g, "")} -->
-  <script>
-    (function () {
-      var payload = ${payload};
-      var deep = ${JSON.stringify(deepLink)};
-      var intent = ${JSON.stringify(intentLink)};
-      try {
-        if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
-          window.ReactNativeWebView.postMessage(JSON.stringify(payload));
-        }
-      } catch (e) {}
-      try { window.location.replace(deep); } catch (e) {}
-      setTimeout(function () {
-        try { window.location.href = intent; } catch (e2) {}
-      }, 400);
-    })();
-  </script>
-</body>
-</html>`;
-
-  const body = new TextEncoder().encode(html);
-  return new Response(body, {
-    status: 200,
+  return new Response(plain, {
+    status: 302,
     headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "X-Content-Type-Options": "nosniff",
+      Location: deepLink,
+      "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-store",
       "Access-Control-Allow-Origin": "*",
+      // Fallback en navegadores que respetan Refresh con custom schemes
+      Refresh: `0;url=${deepLink}`,
     },
   });
 });

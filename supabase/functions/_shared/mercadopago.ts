@@ -1,5 +1,4 @@
 import { createAdminClient } from "./supabaseAdmin.ts";
-import { sendExpoPush } from "./expoPush.ts";
 import {
   buildExternalReference,
   buildMaterialOrderExternalReference,
@@ -636,50 +635,8 @@ export async function processApprovedMpPayment(
     });
     if (error) throw new Error(`registrar_sena_material_failed:${error.message}`);
 
-    // Backup push al comercio (además de store_push_events + webhook).
-    try {
-      const { data: ord } = await sb
-        .from("orders")
-        .select("order_code, quotes!inner ( store_id )")
-        .eq("id", orderId)
-        .maybeSingle();
-      const qRel = (ord as { quotes?: { store_id?: string } | { store_id?: string }[] } | null)
-        ?.quotes;
-      const storeId = Array.isArray(qRel) ? qRel[0]?.store_id : qRel?.store_id;
-      if (storeId) {
-        const { data: store } = await sb
-          .from("stores")
-          .select("user_id")
-          .eq("id", storeId)
-          .maybeSingle();
-        if (store?.user_id) {
-          const { data: prof } = await sb
-            .from("profiles")
-            .select("expo_push_token")
-            .eq("id", store.user_id)
-            .maybeSingle();
-          if (prof?.expo_push_token) {
-            const code = String((ord as { order_code?: string } | null)?.order_code ?? "");
-            await sendExpoPush({
-              to: prof.expo_push_token,
-              title: "YaChanga",
-              body: code
-                ? `Pedido confirmado: el cliente pagó el costo de servicio. Prepará el pedido ${code}.`
-                : "Pedido confirmado: el cliente pagó el costo de servicio.",
-              data: {
-                type: "store_board",
-                column: "confirmadas",
-                orderId,
-                orderCode: code || null,
-                storeId,
-              },
-            });
-          }
-        }
-      }
-    } catch {
-      /* no bloquea el acreditado */
-    }
+    // Push al comercio: solo vía enqueue_store_push → store_push_events → webhook
+    // push_on_store_board (sin backup directo a Expo; evita duplicados).
 
     return { outcome: "processed" };
   }
