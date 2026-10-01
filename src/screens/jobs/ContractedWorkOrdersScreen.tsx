@@ -22,6 +22,7 @@ import {
   workerGivenName,
   type ContractedWorkSection,
 } from '../../utils/contractedWorkDisplay';
+import { COSTO_SERVICIO_PAGADO } from '../../constants/serviceCostCopy';
 import { warrantyAnchorIso, warrantyCountdown } from '../../utils/warrantyDays';
 
 type Props = AccountStackScreenProps<'ContractedWorkOrders'>;
@@ -60,7 +61,7 @@ function statusBadge(row: OrderRow): { label: string; tone: 'pending' | 'paid' |
     return { label: 'Finalizado · Pagado', tone: 'done' };
   }
   if (done) return { label: 'Finalizado', tone: 'done' };
-  if (paid) return { label: 'Costo de servicio pagado', tone: 'paid' };
+  if (paid) return { label: COSTO_SERVICIO_PAGADO, tone: 'paid' };
   if (row.estado_trabajo === 'cancelado') return { label: 'Cancelado', tone: 'pending' };
   return { label: 'En curso', tone: 'pending' };
 }

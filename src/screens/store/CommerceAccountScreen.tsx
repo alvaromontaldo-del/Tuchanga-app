@@ -37,7 +37,6 @@ export function CommerceAccountScreen({ navigation }: Props) {
     stores,
     clearCommerceIntent,
     clearSessionRole,
-    chooseSessionRole,
     refresh,
   } = useCommerceShell();
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -49,8 +48,8 @@ export function CommerceAccountScreen({ navigation }: Props) {
     setStoreAvatarUri(primaryStore?.avatarUrl ?? null);
   }, [primaryStore?.avatarUrl]);
 
-  const onSwitchToClient = () => {
-    void chooseSessionRole('client');
+  const onChooseRole = () => {
+    void clearSessionRole();
   };
 
   const onSignOut = () => {
@@ -217,14 +216,14 @@ export function CommerceAccountScreen({ navigation }: Props) {
 
       <Pressable
         style={({ pressed }) => [styles.rowBtn, pressed && styles.pressed]}
-        onPress={onSwitchToClient}
+        onPress={onChooseRole}
         accessibilityRole="button"
-        accessibilityLabel="Ir a módulo cliente o profesional"
+        accessibilityLabel="Elegir otro rol"
       >
         <Ionicons name="people-outline" size={22} color={colors.primary} />
         <View style={styles.switchText}>
-          <Text style={styles.rowBtnText}>Ir a cliente / profesional</Text>
-          <Text style={styles.switchSub}>Chat, trabajos y publicaciones</Text>
+          <Text style={styles.rowBtnText}>Elegir otro rol</Text>
+          <Text style={styles.switchSub}>Cliente, profesional o comercio</Text>
         </View>
       </Pressable>
 
