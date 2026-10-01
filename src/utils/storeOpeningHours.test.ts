@@ -6,6 +6,7 @@ import {
   normalizeStoreWeekSchedule,
   patchStoreDaySlot,
   setStoreDayClosed,
+  setStoreDaySplit,
   STORE_HOURS_TIME_ROW,
   STORE_WEEKDAY_LABELS,
   storeOpeningHoursEditorRows,
@@ -122,5 +123,118 @@ describe('editor de horarios del comercio', () => {
     const days = patchStoreDaySlot(defaultStoreWeekSchedule(), 1, 0, { open: '9' });
     expect(days[0].slots[0].open).toBe('9');
     expect(validateStoreWeekSchedule(days)).toBe('Lun: Usá horarios en formato HH:MM (ej. 09:00).');
+  });
+
+  it('pasa un día de corrido a cortado (mañana + 15:00–19:00) y vuelve a una franja', () => {
+    const split = setStoreDaySplit(defaultStoreWeekSchedule(), 1, true);
+    expect(split.find((day) => day.day === 1)?.slots).toEqual([
+      { open: '09:00', close: '13:00' },
+      { open: '15:00', close: '19:00' },
+    ]);
+    expect(validateStoreWeekSchedule(split)).toBeNull();
+    expect(split.find((day) => day.day === 2)?.slots).toEqual([{ open: '09:00', close: '18:00' }]);
+
+    let days = patchStoreDaySlot(split, 1, 0, { open: '08:00', close: '12:00' });
+    const json = storeWeekScheduleToJson(days);
+    expect(json.schedule.find((day) => day.day === 1)?.slots).toEqual([
+      { open: '08:00', close: '12:00' },
+      { open: '15:00', close: '19:00' },
+    ]);
+    expect(formatPickupOpeningHours(json)).toBe(
+      'Lun: 08:00 a 12:00 y de 15:00 a 19:00 · Mar, Mié, Jue, Vie, Sáb, Dom: 09:00 a 18:00',
+    );
+
+    const reloaded = normalizeStoreWeekSchedule(json);
+    expect(storeOpeningHoursEditorRows(reloaded).find((row) => row.day === 1)?.slots).toEqual([
+      { open: '08:00', close: '12:00' },
+      { open: '15:00', close: '19:00' },
+    ]);
+    expect(validateStoreWeekSchedule(days)).toBeNull();
+
+    days = setStoreDaySplit(days, 1, false);
+    expect(days.find((day) => day.day === 1)?.slots).toEqual([{ open: '08:00', close: '12:00' }]);
+    expect(storeWeekScheduleToJson(days).schedule.find((day) => day.day === 1)?.slots).toEqual([
+      { open: '08:00', close: '12:00' },
+    ]);
+  });
+
+  it('copia las dos franjas del martes a miércoles, jueves y viernes', () => {
+    let days = setStoreDaySplit(defaultStoreWeekSchedule(), 2, true);
+    days = patchStoreDaySlot(days, 2, 0, { open: '08:00', close: '12:00' });
+    days = patchStoreDaySlot(days, 2, 1, { open: '15:00', close: '19:00' });
+    days = patchStoreDaySlot(days, 1, 0, { open: '09:00', close: '13:00' });
+
+    const copied = copyTuesdayHoursToFriday(days);
+    for (const day of [2, 3, 4, 5]) {
+      expect(copied.find((item) => item.day === day)?.slots).toEqual([
+        { open: '08:00', close: '12:00' },
+        { open: '15:00', close: '19:00' },
+      ]);
+    }
+    expect(copied.find((item) => item.day === 1)?.slots).toEqual([{ open: '09:00', close: '13:00' }]);
+    expect(copied.find((item) => item.day === 6)?.slots).toHaveLength(1);
+
+    const json = storeWeekScheduleToJson(copied);
+    expect(json.schedule.find((day) => day.day === 4)?.slots).toEqual([
+      { open: '08:00', close: '12:00' },
+      { open: '15:00', close: '19:00' },
+    ]);
+    expect(formatPickupOpeningHours(json)).toBe(
+      'Lun: 09:00 a 13:00 · Mar, Mié, Jue, Vie: 08:00 a 12:00 y de 15:00 a 19:00 · Sáb, Dom: 09:00 a 18:00',
+    );
+
+    copied.find((item) => item.day === 5)!.slots[1].close = '20:00';
+    expect(days.find((item) => item.day === 2)?.slots[1].close).toBe('19:00');
+  });
+
+  it('una semana por defecto en cortado pasa la validación del guardado', () => {
+    let days = defaultStoreWeekSchedule();
+    for (const day of [1, 2, 3, 4, 5, 6, 7]) {
+      days = setStoreDaySplit(days, day, true);
+    }
+    expect(days.map((day) => day.slots)).toEqual(
+      [1, 2, 3, 4, 5, 6, 7].map(() => [
+        { open: '09:00', close: '13:00' },
+        { open: '15:00', close: '19:00' },
+      ]),
+    );
+    expect(validateStoreWeekSchedule(days)).toBeNull();
+
+    const corrido = setStoreDaySplit(days, 2, false);
+    expect(corrido.find((day) => day.day === 2)?.slots).toEqual([{ open: '09:00', close: '13:00' }]);
+    expect(validateStoreWeekSchedule(corrido)).toBeNull();
+  });
+
+  it('copiar el martes cortado a viernes deja la semana válida', () => {
+    const splitTuesday = setStoreDaySplit(defaultStoreWeekSchedule(), 2, true);
+    const copied = copyTuesdayHoursToFriday(splitTuesday);
+    for (const day of [2, 3, 4, 5]) {
+      expect(copied.find((item) => item.day === day)?.slots).toEqual([
+        { open: '09:00', close: '13:00' },
+        { open: '15:00', close: '19:00' },
+      ]);
+    }
+    expect(copied.find((item) => item.day === 1)?.slots).toEqual([{ open: '09:00', close: '18:00' }]);
+    expect(validateStoreWeekSchedule(copied)).toBeNull();
+  });
+
+  it('rechaza dos franjas que se pisan', () => {
+    let days = setStoreDaySplit(defaultStoreWeekSchedule(), 1, true);
+    days = patchStoreDaySlot(days, 1, 0, { open: '08:00', close: '16:00' });
+    days = patchStoreDaySlot(days, 1, 1, { open: '15:00', close: '19:00' });
+    expect(validateStoreWeekSchedule(days)).toBe(
+      'Lun: El segundo tramo debe empezar después del primero.',
+    );
+    expect(storeWeekScheduleToJson(days).schedule).toEqual(
+      expect.arrayContaining([
+        {
+          day: 1,
+          slots: [
+            { open: '08:00', close: '16:00' },
+            { open: '15:00', close: '19:00' },
+          ],
+        },
+      ]),
+    );
   });
 });

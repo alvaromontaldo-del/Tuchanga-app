@@ -311,6 +311,59 @@ export function setStoreDayClosed(
   );
 }
 
+const SPLIT_MORNING_SLOT: StoreHoursSlot = { open: '09:00', close: '13:00' };
+const SPLIT_AFTERNOON_SLOT: StoreHoursSlot = { open: '15:00', close: '19:00' };
+
+function copySlot(slot: StoreHoursSlot): StoreHoursSlot {
+  return { open: slot.open, close: slot.close };
+}
+
+function slotsPassValidation(slots: StoreHoursSlot[]): boolean {
+  return slots.length > 0 && validateStoreOpeningHours(slots) == null;
+}
+
+/**
+ * Cortado: mañana + tarde. Si la franja actual pisa la tarde, la mañana pasa
+ * a 09:00–13:00 para que la tarde empiece después. Si aun así no entra, queda
+ * el par 09:00–13:00 y 15:00–19:00.
+ */
+function cortadoSlots(existing: StoreHoursSlot[]): StoreHoursSlot[] {
+  const first = existing[0] ?? defaultStoreOpeningHours()[0];
+  const second = existing[1] ?? SPLIT_AFTERNOON_SLOT;
+  const asIs = [copySlot(first), copySlot(second)];
+  if (slotsPassValidation(asIs)) return asIs;
+
+  const morningFixed = [copySlot(SPLIT_MORNING_SLOT), copySlot(second)];
+  if (slotsPassValidation(morningFixed)) return morningFixed;
+
+  return [copySlot(SPLIT_MORNING_SLOT), copySlot(SPLIT_AFTERNOON_SLOT)];
+}
+
+/** Corrido: una sola franja válida. Si la mañana no cierra después de abrir, 09:00–18:00. */
+function corridoSlots(existing: StoreHoursSlot[]): StoreHoursSlot[] {
+  const first = existing[0];
+  if (first) {
+    const slot = copySlot(first);
+    if (slotsPassValidation([slot])) return [slot];
+  }
+  return defaultStoreOpeningHours();
+}
+
+/**
+ * Corrido deja solo la primera franja, si es válida.
+ * Cortado agrega la tarde (15:00–19:00) y acorta la mañana si se superponen.
+ */
+export function setStoreDaySplit(
+  days: StoreDaySchedule[],
+  day: number,
+  split: boolean,
+): StoreDaySchedule[] {
+  return ensureStoreWeekShape(days).map((row) => {
+    if (row.day !== day) return row;
+    return { ...row, slots: split ? cortadoSlots(row.slots) : corridoSlots(row.slots) };
+  });
+}
+
 export function patchStoreDaySlot(
   days: StoreDaySchedule[],
   day: number,
