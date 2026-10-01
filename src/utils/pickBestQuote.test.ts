@@ -144,12 +144,28 @@ describe('selección por material', () => {
     ],
   });
 
-  it('preselecciona la opción más barata en cada tarjeta, no solo en la mejor', () => {
+  it('la selección por defecto toca solo la mejor cotización del rubro', () => {
+    const otherRubro = card({
+      quoteId: 'other',
+      groupRubroId: 'r2',
+      total: 10,
+      items: [
+        item({
+          quoteItemId: 'c1',
+          requestItemId: 'arena',
+          description: 'Arena',
+          lineTotal: 10,
+          unitPrice: 10,
+        }),
+      ],
+    });
     expect(pickBestQuoteId([far, near])).toBe('near');
-    const selected = initialSelectedItemIdsByQuote([far, near]);
-    expect(selected.far).toEqual(new Set(['a2', 'a3']));
+    const selected = initialSelectedItemIdsByQuote([far, near, otherRubro]);
+    expect(Object.keys(selected).sort()).toEqual(['near', 'other']);
     expect(selected.near).toEqual(new Set(['b2']));
-    expect(defaultSelectedItemIds(far).size).toBe(2);
+    expect(selected.other).toEqual(new Set(['c1']));
+    expect(selected.far).toBeUndefined();
+    expect(defaultSelectedItemIds(near)).toEqual(new Set(['b2']));
   });
 
   it('mantiene el mismo material en dos comercios y avisa', () => {
@@ -221,7 +237,7 @@ describe('agrupación de variantes', () => {
 });
 
 describe('fee pendiente por grupo', () => {
-  it('no suma deposit_amount: usa el service_fee del checkout y la orden más antigua', () => {
+  it('el fee se cuenta una sola vez aunque el grupo tenga dos comercios', () => {
     const groups = pendingServiceFeeGroups([
       {
         orderId: 'o2',
@@ -245,6 +261,10 @@ describe('fee pendiente por grupo', () => {
     expect(groups).toEqual([
       { groupKey: 'grp-1', primaryOrderId: 'o1', serviceFee: 1500, storeCount: 2 },
     ]);
+    expect(groups[0].serviceFee).not.toBe(1500 + 1500);
+    expect(pendingFeePayLabel('$ 1.500', groups[0].storeCount, groups.length)).toBe(
+      'Pagar costo de servicio $ 1.500',
+    );
   });
 
   it('sin checkout toma el máximo de deposit_amount, no la suma', () => {

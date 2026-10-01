@@ -241,7 +241,10 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
     (quoteId: string, quoteItemId: string, requestItemId: string) => {
       setSelectedItems((prev) => {
         const card = selectableQuotes.find((q) => q.quoteId === quoteId);
-        const current = new Set(prev[quoteId] ?? (card ? defaultSelectedItemIds(card) : []));
+        const isBest = card != null && bestQuoteIdByRubro.get(card.groupRubroId) === quoteId;
+        const current = new Set(
+          prev[quoteId] ?? (isBest && card ? defaultSelectedItemIds(card) : []),
+        );
         if (current.has(quoteItemId)) {
           current.delete(quoteItemId);
         } else {
@@ -256,7 +259,7 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
         return { ...prev, [quoteId]: current };
       });
     },
-    [selectableQuotes],
+    [bestQuoteIdByRubro, selectableQuotes],
   );
 
   const ensureDefaults = useCallback(
@@ -266,7 +269,7 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
         if (prev[card.quoteId] || !isClientSelectableQuote(card)) return prev;
         return {
           ...prev,
-          [card.quoteId]: defaultSelectedItemIds(card),
+          [card.quoteId]: isBest ? defaultSelectedItemIds(card) : new Set<string>(),
         };
       });
       setIncludeFreight((prev) => {
@@ -499,6 +502,9 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
                   Tenés órdenes con costo de servicio pendiente. Pagalo para confirmar la
                   cotización y ver los datos del comercio.
                 </Text>
+                {/* Una preferencia de MP cobra una orden y acredita solo su payment_group.
+                    Un checkout con varios comercios es un botón. Otro checkout pendiente
+                    es otro botón: no entra en la misma preferencia. */}
                 {pendingFeeGroups.map((group) => {
                   const label = pendingFeePayLabel(
                     formatMoneyAr(group.serviceFee),

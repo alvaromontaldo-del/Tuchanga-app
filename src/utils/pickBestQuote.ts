@@ -92,14 +92,27 @@ export function groupQuoteItemsByRequest(
   return [...map.values()];
 }
 
-/** Todas las cotizaciones todavía elegibles arrancan con la opción más barata por material. */
+/**
+ * Preselección inicial: solo la mejor cotización de cada rubro
+ * (`pickBestQuoteId`), y dentro de ella la variante más barata por material.
+ * El resto arranca vacío; el cliente puede sumar comercios a mano.
+ */
 export function initialSelectedItemIdsByQuote(
   quotes: ClientQuoteCard[],
 ): Record<string, Set<string>> {
-  const out: Record<string, Set<string>> = {};
+  const byRubro = new Map<string, ClientQuoteCard[]>();
   for (const card of quotes) {
-    if (!isClientSelectableQuote(card)) continue;
-    out[card.quoteId] = defaultSelectedItemIds(card);
+    const list = byRubro.get(card.groupRubroId) ?? [];
+    list.push(card);
+    byRubro.set(card.groupRubroId, list);
+  }
+  const out: Record<string, Set<string>> = {};
+  for (const group of byRubro.values()) {
+    const bestId = pickBestQuoteId(group);
+    if (!bestId) continue;
+    const card = group.find((quote) => quote.quoteId === bestId);
+    if (!card) continue;
+    out[bestId] = defaultSelectedItemIds(card);
   }
   return out;
 }
@@ -196,8 +209,11 @@ function finitePositive(values: Array<number | null | undefined>): number[] {
 }
 
 /**
- * Un botón de pago por grupo. El fee es el de material_checkouts, o si no
- * el máximo de deposit_amount: cada orden guarda el total del grupo.
+ * Un botón por payment_group. mp_crear_preferencia cobra una sola order_id
+ * (deposit_amount de esa orden) y al acreditar marca solo ese grupo.
+ * No se pueden juntar dos checkouts en una preferencia.
+ * El fee es material_checkouts.service_fee o, si no está, max(deposit_amount):
+ * cada orden guarda el total del grupo, así que no se suma.
  */
 export function pendingServiceFeeGroups(cards: PendingFeeCard[]): PendingServiceFeeGroup[] {
   const pending = cards.filter(
