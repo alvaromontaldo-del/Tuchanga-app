@@ -272,19 +272,27 @@ export async function fetchMyStoreForEdit(storeId: string): Promise<{
 
   const { data, error } = await sb
     .from('stores')
-    .select('id, name, phone, address, latitude, longitude, opening_hours')
+    .select('id, name, latitude, longitude, opening_hours')
     .eq('id', storeId)
     .eq('user_id', user.id)
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
 
+  const { data: contact, error: contactError } = await sb.rpc('get_my_store_contact', {
+    p_store_id: storeId,
+  });
+  if (contactError) throw contactError;
+  const contactRow = (Array.isArray(contact) ? contact[0] : contact) as
+    | { phone?: string | null; address?: string | null }
+    | null;
+
   const rubroIds = await fetchMyStoreRubroIds(storeId);
   return {
     id: String(data.id),
     name: String(data.name ?? ''),
-    phone: String(data.phone ?? ''),
-    address: String(data.address ?? ''),
+    phone: String(contactRow?.phone ?? ''),
+    address: String(contactRow?.address ?? ''),
     latitude: Number(data.latitude),
     longitude: Number(data.longitude),
     rubroIds,
