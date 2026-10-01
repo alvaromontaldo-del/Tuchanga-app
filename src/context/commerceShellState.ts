@@ -1,4 +1,4 @@
-export type SessionRole = 'client' | 'commerce';
+export type SessionRole = 'client' | 'professional' | 'commerce';
 
 export type CommerceShellFlags = {
   isAuthed: boolean;

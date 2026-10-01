@@ -18,4 +18,19 @@ describe('Registrate → Comercio', () => {
       params: { asCommerce: false },
     });
   });
+
+  it('el cliente usa el mismo alta de persona', () => {
+    expect(registerAuthTarget('client')).toEqual({
+      screen: 'Register',
+      params: { asCommerce: false },
+    });
+  });
+
+  it('el profesional abre el alta de persona con oficios', () => {
+    expect(registerAuthTarget('professional')).toEqual({
+      screen: 'Register',
+      params: { asCommerce: false, asProfessional: true },
+    });
+    expect(registerAuthTarget('professional').screen).not.toBe('RegisterCommerce');
+  });
 });

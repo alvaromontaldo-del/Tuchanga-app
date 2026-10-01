@@ -16,6 +16,7 @@ import {
   parseMpWebViewNavigation,
   shouldBlockMpExternalNavigation,
 } from '../../config/mercadoPago';
+import { COSTO_SERVICIO_LABEL, SALDO_FUERA_DE_APP } from '../../constants/serviceCostCopy';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { isRenderableUri } from '../../utils/safeAsync';
 import { usePagoRetornoDeepLink } from '../../navigation/usePagoRetornoDeepLink';
@@ -166,13 +167,17 @@ export function PagoCheckoutScreen() {
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>Mercado Pago</Text>
           <Text style={styles.headerSubtitle}>
-            {isMaterialServiceFee
-              ? 'Costo de servicio YaChanga · checkout seguro'
-              : 'Costo de servicio YaChanga · checkout seguro'}
+            {`${COSTO_SERVICIO_LABEL} · checkout seguro`}
           </Text>
         </View>
         <View style={styles.backBtn} />
       </View>
+
+      {!isMaterialServiceFee ? (
+        <View style={styles.saldoBanner}>
+          <Text style={styles.saldoText}>{SALDO_FUERA_DE_APP}</Text>
+        </View>
+      ) : null}
 
       {sandbox ? (
         <View style={styles.sandboxBanner}>
@@ -253,6 +258,17 @@ const styles = StyleSheet.create({
   headerSubtitle: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   backBtn: { minWidth: 72 },
   backText: { color: colors.primary, fontWeight: '700' },
+  saldoBanner: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+    padding: spacing.md,
+    borderRadius: radii.card,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  saldoText: { ...typography.body, color: colors.text },
   sandboxBanner: {
     marginHorizontal: spacing.md,
     marginTop: spacing.sm,

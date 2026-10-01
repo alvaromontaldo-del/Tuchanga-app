@@ -396,8 +396,8 @@ export function MyWorkOrdersScreen() {
           <Text style={styles.earningsValue}>{fmtMoney(displayedTotal)}</Text>
           <Text style={styles.earningsHint}>
             {filter === 'all'
-              ? 'Neto acumulado del profesional (sin el costo de servicio de YaChanga).'
-              : 'Neto del profesional en el período elegido (sin el costo de servicio de YaChanga).'}
+              ? 'Neto acumulado del profesional (sin el costo de servicio YaChanga).'
+              : 'Neto del profesional en el período elegido (sin el costo de servicio YaChanga).'}
           </Text>
           {filter !== 'all' ? (
             <Text style={styles.earningsAccumulated}>

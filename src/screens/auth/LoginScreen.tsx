@@ -21,6 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useCommerceShell, COMMERCE_SHELL_STATUSES } from '../../context/CommerceShellContext';
 import { showPendingCommerceNoticeOnce } from '../../context/pendingCommerceNotice';
 import { closeAuthModalAndGoToInicio, closeAuthModalAndRedirect } from '../../navigation/openAuthModal';
+import { RoleChoiceList } from '../../components/auth/RoleChoiceList';
 import { registerAuthTarget } from '../../navigation/registerEntry';
 import type { AuthStackScreenProps } from '../../navigation/types';
 import { signIn } from '../../services/auth';
@@ -236,33 +237,13 @@ export function LoginScreen({ navigation, route }: Props) {
             ) : null}
 
             <View style={styles.footer}>
-              <Text style={styles.muted}>¿No tenés cuenta? Registrate como</Text>
-              <View style={styles.registerChoices}>
-                <Pressable
-                  style={({ pressed }) => [styles.registerChip, pressed && styles.pressed]}
-                  onPress={() => {
-                    const target = registerAuthTarget('particular');
-                    navigation.navigate(target.screen, target.params);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Registrate como particular"
-                >
-                  <Ionicons name="person-outline" size={18} color={colors.primary} />
-                  <Text style={styles.registerChipText}>Particular</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [styles.registerChip, pressed && styles.pressed]}
-                  onPress={() => {
-                    const target = registerAuthTarget('commerce');
-                    navigation.navigate(target.screen, target.params);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Registrate como comercio"
-                >
-                  <Ionicons name="storefront-outline" size={18} color={colors.primary} />
-                  <Text style={styles.registerChipText}>Comercio</Text>
-                </Pressable>
-              </View>
+              <Text style={styles.muted}>¿No tenés cuenta? Elegí cómo registrarte</Text>
+              <RoleChoiceList
+                onPick={(role) => {
+                  const target = registerAuthTarget(role);
+                  navigation.navigate(target.screen, target.params);
+                }}
+              />
             </View>
           </View>
         </ScrollView>

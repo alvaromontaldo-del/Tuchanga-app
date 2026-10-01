@@ -2,12 +2,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppScreen } from '../../components/layout/AppScreen';
 import { colors, radii, spacing } from '../../constants/theme';
+import { RoleChoiceList } from '../../components/auth/RoleChoiceList';
 import { openAuthModal } from '../../navigation/openAuthModal';
 import { registerAuthTarget } from '../../navigation/registerEntry';
 import { accountUi } from './accountUi';
 
 /**
- * Tab Perfil sin sesión: login, registro particular o registro de comercio.
+ * Tab Perfil sin sesión: login o alta de Cliente, Profesional o Comercio.
  */
 export function AccountGuestScreen() {
   return (
@@ -30,35 +31,16 @@ export function AccountGuestScreen() {
           <Text style={styles.primaryBtnText}>Iniciar sesión</Text>
         </Pressable>
 
-        <Pressable
-          style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}
-          onPress={() => {
-            const target = registerAuthTarget('particular');
-            openAuthModal(target.screen, target.params);
-          }}
-          accessibilityRole="button"
-          accessibilityLabel="Crear cuenta particular"
-        >
-          <Text style={styles.secondaryBtnText}>Crear cuenta particular</Text>
-        </Pressable>
       </View>
 
       <View style={[accountUi.card, styles.authCard]}>
-        <Text style={styles.commerceHint}>
-          ¿Tenés un corralón, ferretería u otro local? Creá la cuenta del comercio.
-        </Text>
-        <Pressable
-          style={({ pressed }) => [styles.commerceBtn, pressed && styles.pressed]}
-          onPress={() => {
-            const target = registerAuthTarget('commerce');
+        <Text style={styles.commerceHint}>Creá tu cuenta. Cada rol entra a su formulario.</Text>
+        <RoleChoiceList
+          onPick={(role) => {
+            const target = registerAuthTarget(role);
             openAuthModal(target.screen, target.params);
           }}
-          accessibilityRole="button"
-          accessibilityLabel="Registrarme como comercio"
-        >
-          <Ionicons name="storefront-outline" size={22} color={colors.primary} />
-          <Text style={styles.commerceBtnText}>Registrarme como comercio</Text>
-        </Pressable>
+        />
       </View>
     </AppScreen>
   );

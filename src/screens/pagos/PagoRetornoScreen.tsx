@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { COSTO_SERVICIO_ACREDITADO, SALDO_FUERA_DE_APP } from '../../constants/serviceCostCopy';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { useContratacionPagoRealtime } from '../../hooks/useContratacionPagoRealtime';
 import {
@@ -137,7 +138,7 @@ export function PagoRetornoScreen() {
   const showFailureHint = initialStatus === 'failure' && !done && !waiting && !retrying;
 
   const title = done
-    ? 'Costo de servicio acreditado'
+    ? COSTO_SERVICIO_ACREDITADO
     : showFailureHint
       ? 'Pago no completado'
       : waiting || retrying
@@ -149,11 +150,11 @@ export function PagoRetornoScreen() {
   const subtitle = done
     ? isMaterial
       ? 'Volviendo a la orden con el código y el PIN…'
-      : 'Volviendo al chat con tu PIN y los avisos de seguridad…'
+      : `Volviendo al chat con tu PIN. ${SALDO_FUERA_DE_APP}`
     : syncError
       ? syncError
         : showFailureHint
-        ? 'El pago no se acreditó en Mercado Pago. Volvé a intentar el checkout.'
+        ? 'El pago no se acreditó en Mercado Pago. Volvé a intentar el checkout. El saldo del trabajo no se cobra acá.'
         : waiting || retrying
           ? 'Estamos verificando tu pago con Mercado Pago…'
           : timedOut
