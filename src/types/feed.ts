@@ -70,6 +70,8 @@ export type WorkerPublicProfile = {
   totalJobsDone: number;
   /** Oficios ofrecidos (máximo 5) */
   trades: WorkerTradeEntry[];
+  /** URL pública del video de presentación. Ausente = no tiene o la columna no está. */
+  introVideoUrl?: string | null;
 };
 
 export const MAX_WORKER_TRADES = 5;
