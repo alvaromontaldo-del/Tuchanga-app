@@ -17,6 +17,18 @@ import {
 import { useNavigation, useRoute, useFocusEffect, type RouteProp } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExpandableText } from '../../components/common/ExpandableText';
+import { ReportarProblemaModal } from '../../components/jobs/ReportarProblemaModal';
+import { SaldoFueraDeAppNotice } from '../../components/jobs/SaldoFueraDeAppNotice';
+import {
+  CONFORMIDAD_NEGATIVA,
+  CONFORMIDAD_POSITIVA,
+  CONFORMIDAD_PREGUNTA,
+  CONFORMIDAD_PROBLEMA,
+  CONFORMIDAD_SI,
+  COSTO_SERVICIO_LABEL,
+  SALDO_PAGADO_AL_PROFESIONAL,
+  textoVisibleSinSena,
+} from '../../constants/serviceCostCopy';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useAppToast } from '../../components/toast/toast';
@@ -27,6 +39,7 @@ import {
   aceptarRecotizacion,
   aplicarSeñaConCredito,
   clienteNotificarPagoOffline,
+  clienteResponderConformidad,
   fetchContratacionById,
   fetchDisponibilidadOpciones,
   obtenerDireccionCliente,
@@ -193,6 +206,10 @@ export function DetalleServicioScreen() {
     field: PickerField;
     draft: Date;
   } | null>(null);
+  const [problemaOpen, setProblemaOpen] = useState(false);
+  const [conformidadAviso, setConformidadAviso] = useState<typeof CONFORMIDAD_POSITIVA | null>(
+    null,
+  );
 
   const openPicker = useCallback(
     (slotId: string, field: PickerField) => {
@@ -343,7 +360,10 @@ export function DetalleServicioScreen() {
       await reload();
       if (okMsg) toast.success(okMsg, 'Servicio');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'No se pudo completar', 'Servicio');
+      toast.error(
+        textoVisibleSinSena(e instanceof Error ? e.message : 'No se pudo completar'),
+        'Servicio',
+      );
     } finally {
       setBusy(false);
     }
@@ -399,7 +419,7 @@ export function DetalleServicioScreen() {
         {myRole === 'cliente' ? (
           <>
             <Text style={styles.priceLine}>
-              Costo de servicio de YaChanga:{' '}
+              {COSTO_SERVICIO_LABEL}:{' '}
               <Text style={styles.strong}>{formatMoneyCeilAr(row.comision_app)}</Text>
             </Text>
             <Text style={styles.priceLine}>
@@ -408,10 +428,11 @@ export function DetalleServicioScreen() {
                 {formatMoneyCeilAr(computeSaldoPendiente(row.precio_final, row.comision_app))}
               </Text>
             </Text>
+            <SaldoFueraDeAppNotice />
           </>
         ) : (
           <Text style={styles.priceLine}>
-            Costo de servicio de YaChanga:{' '}
+            {COSTO_SERVICIO_LABEL}:{' '}
             <Text style={styles.strong}>{formatMoneyCeilAr(row.comision_app)}</Text>
           </Text>
         )}
@@ -683,6 +704,46 @@ export function DetalleServicioScreen() {
           </Pressable>
         ) : null}
 
+        {myRole === 'cliente' && row.estado_trabajo === 'pendiente_conformidad' ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{CONFORMIDAD_PREGUNTA}</Text>
+            <SaldoFueraDeAppNotice />
+            <View style={styles.actions}>
+              <Pressable
+                style={[styles.btnGhost, busy && styles.btnDisabled]}
+                disabled={busy}
+                onPress={() => setProblemaOpen(true)}
+              >
+                <Text style={styles.btnGhostText}>{CONFORMIDAD_PROBLEMA}</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.btnPrimary, busy && styles.btnDisabled]}
+                disabled={busy}
+                onPress={() =>
+                  void runAction(async () => {
+                    await clienteResponderConformidad({ contratacionId: row.id, conforme: true });
+                    setConformidadAviso(CONFORMIDAD_POSITIVA);
+                  }, 'Conformidad')
+                }
+              >
+                <Text style={styles.btnPrimaryText}>{CONFORMIDAD_SI}</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+
+        {conformidadAviso ? (
+          <Text style={styles.hint}>
+            Estado: {conformidadAviso.estado}. Próximo paso: {conformidadAviso.paso}
+          </Text>
+        ) : null}
+
+        {myRole === 'cliente' && row.estado_trabajo === 'disputa' ? (
+          <Text style={styles.hint}>
+            Estado: {CONFORMIDAD_NEGATIVA.estado}. Próximo paso: {CONFORMIDAD_NEGATIVA.paso}
+          </Text>
+        ) : null}
+
         {showNotificarPagoOffline ? (
           <Pressable
             style={[styles.btnGhost, { marginTop: spacing.md }, busy && styles.btnDisabled]}
@@ -691,10 +752,17 @@ export function DetalleServicioScreen() {
               void runAction(() => clienteNotificarPagoOffline(row.id), 'Pago offline notificado')
             }
           >
-            <Text style={styles.btnGhostText}>Saldo pagado al profesional</Text>
+            <Text style={styles.btnGhostText}>{SALDO_PAGADO_AL_PROFESIONAL}</Text>
           </Pressable>
         ) : null}
       </ScrollView>
+
+      <ReportarProblemaModal
+        visible={problemaOpen}
+        contratacionId={row.id}
+        onClose={() => setProblemaOpen(false)}
+        onDone={() => void reload()}
+      />
 
       {picker && Platform.OS === 'android' ? (
         <DateTimePicker

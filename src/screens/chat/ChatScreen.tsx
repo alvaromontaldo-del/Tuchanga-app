@@ -46,8 +46,6 @@ import {
 } from '../../services/chatSecuritySupabase';
 import { deleteConversation, loadMessages, subscribeChatMessages } from '../../services/messaging';
 import {
-  COMISION_APP_RATE,
-  computeFinalAmount,
   createQuote,
   createReview,
   fetchConversationParticipants,
@@ -61,6 +59,7 @@ import {
   type QuoteStatus,
 } from '../../services/quotesSupabase';
 import { postPinWorkerChatCopy } from '../../utils/postPinWorkUi';
+import { calculateYachangaServiceFee } from '../../utils/yachangaJobServiceFee';
 import {
   quoteWarrantyLabel,
   WARRANTY_DAYS_MAX,
@@ -75,10 +74,26 @@ import {
   type ServiceJob,
 } from '../../services/serviceJobsSupabase';
 import { AgendaOpcionesCliente } from '../../components/servicios/AgendaOpcionesCliente';
+import { ReportarProblemaModal } from '../../components/jobs/ReportarProblemaModal';
+import { SaldoFueraDeAppNotice } from '../../components/jobs/SaldoFueraDeAppNotice';
+import {
+  CONFORMIDAD_NEGATIVA,
+  CONFORMIDAD_POSITIVA,
+  CONFORMIDAD_PREGUNTA,
+  CONFORMIDAD_PROBLEMA,
+  CONFORMIDAD_SI,
+  COSTO_SERVICIO_LABEL,
+  COSTO_SERVICIO_PAGADO,
+  COSTO_SERVICIO_PENDIENTE,
+  puedeIniciarPagoCostoServicio,
+  SALDO_PAGADO_AL_PROFESIONAL,
+  textoVisibleSinSena,
+} from '../../constants/serviceCostCopy';
 import {
   aceptarDisponibilidadOpcion,
   aceptarPrecioCotizado,
   clienteNotificarPagoOffline,
+  clienteResponderConformidad,
   trabajadorConfirmarRecepcionOffline,
   fetchDisponibilidadOpciones,
   obtenerPinCliente,
@@ -423,20 +438,25 @@ export function ChatScreen({
   const [agendaOpciones, setAgendaOpciones] = useState<DisponibilidadOpcion[]>([]);
   const [agendaBusy, setAgendaBusy] = useState(false);
   const [saldoBusy, setSaldoBusy] = useState(false);
+  const [aceptaSaldoFuera, setAceptaSaldoFuera] = useState(false);
+  const [problemaOpen, setProblemaOpen] = useState(false);
+  const [conformidadBusy, setConformidadBusy] = useState(false);
+  const [conformidadAviso, setConformidadAviso] = useState<typeof CONFORMIDAD_POSITIVA | null>(
+    null,
+  );
   const jobRef = useRef(job);
   const participantsRef = useRef(participants);
   jobRef.current = job;
   participantsRef.current = participants;
 
-  const feeRate = COMISION_APP_RATE;
   const quoteNetNum = useMemo(() => Math.max(0, Math.floor(quoteNetAmount)), [quoteNetAmount]);
-  const quoteFinalPreview = useMemo(
-    () => computeFinalAmount(quoteNetNum, feeRate),
-    [quoteNetNum, feeRate],
-  );
   const quoteFeePreview = useMemo(
-    () => Math.max(0, quoteFinalPreview - quoteNetNum),
-    [quoteFinalPreview, quoteNetNum],
+    () => calculateYachangaServiceFee(quoteNetNum),
+    [quoteNetNum],
+  );
+  const quoteFinalPreview = useMemo(
+    () => quoteNetNum + quoteFeePreview,
+    [quoteNetNum, quoteFeePreview],
   );
 
   const quoteById = useMemo(() => {
@@ -530,6 +550,20 @@ export function ChatScreen({
       job.estado_trabajo === 'finalizado' &&
       !reviewSubmitted &&
       !review,
+  );
+  const showClientConformidadBar = Boolean(
+    job &&
+      participants?.myRole === 'cliente' &&
+      job.estado_trabajo === 'pendiente_conformidad' &&
+      job.conformidad_aceptada !== true,
+  );
+  const showWorkerConformidadBar = Boolean(
+    job &&
+      participants?.myRole === 'trabajador' &&
+      job.estado_trabajo === 'pendiente_conformidad',
+  );
+  const showClientDisputaBar = Boolean(
+    job && participants?.myRole === 'cliente' && job.estado_trabajo === 'disputa',
   );
 
   useEffect(() => {
@@ -1016,9 +1050,12 @@ export function ChatScreen({
         const j = await fetchLatestJobByConversation(conversationId);
         if (j) setJob(j);
         await refreshMessages();
-        toast.success('Saldo marcado como pagado', 'Pago');
+        toast.success('Saldo marcado como pagado al profesional, fuera de la app', 'Pago');
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'No se pudo registrar el pago', 'Pago');
+        toast.error(
+          textoVisibleSinSena(e instanceof Error ? e.message : 'No se pudo registrar el pago'),
+          'Pago',
+        );
       } finally {
         setSaldoBusy(false);
       }
@@ -1034,9 +1071,12 @@ export function ChatScreen({
         const j = await fetchLatestJobByConversation(conversationId);
         if (j) setJob(j);
         await refreshMessages();
-        toast.success('Trabajo pagado', 'Pago');
+        toast.success('Confirmaste el saldo que te pagó el cliente, fuera de la app', 'Pago');
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'No se pudo confirmar', 'Pago');
+        toast.error(
+          textoVisibleSinSena(e instanceof Error ? e.message : 'No se pudo confirmar'),
+          'Pago',
+        );
       } finally {
         setSaldoBusy(false);
       }
@@ -1067,10 +1107,13 @@ export function ChatScreen({
         const j = await fetchLatestJobByConversation(conversationId);
         setJob(j);
         await refreshMessages();
-        toast.success('Trabajo finalizado', 'Servicio');
+        toast.success('Le pedimos la conformidad al cliente', 'Servicio');
       })
       .catch((e) => {
-        toast.error(e instanceof Error ? e.message : 'No se pudo completar', 'Servicio');
+        toast.error(
+          textoVisibleSinSena(e instanceof Error ? e.message : 'No se pudo completar'),
+          'Servicio',
+        );
       })
       .finally(() => setQuoteBusy('none'));
   }, [conversationId, job?.id, quoteBusy, refreshMessages, toast]);
@@ -1090,6 +1133,27 @@ export function ChatScreen({
     }
     runMarcarTrabajoFinalizado();
   }, [job?.id, job?.offline_pago_notificado_at, quoteBusy, runMarcarTrabajoFinalizado]);
+
+  const handleConformidadSi = useCallback(() => {
+    if (conformidadBusy || !job?.id) return;
+    setConformidadBusy(true);
+    void (async () => {
+      try {
+        await clienteResponderConformidad({ contratacionId: job.id, conforme: true });
+        setConformidadAviso(CONFORMIDAD_POSITIVA);
+        const j = await fetchLatestJobByConversation(conversationId);
+        if (j) setJob(j);
+        await refreshMessages();
+      } catch (e) {
+        toast.error(
+          textoVisibleSinSena(e instanceof Error ? e.message : 'No se pudo confirmar'),
+          'Conformidad',
+        );
+      } finally {
+        setConformidadBusy(false);
+      }
+    })();
+  }, [conformidadBusy, conversationId, job?.id, refreshMessages, toast]);
 
   // Reseña 1:1 por job_id (robusto: soporta múltiples trabajos por conversación).
   useEffect(() => {
@@ -1469,7 +1533,7 @@ export function ChatScreen({
         return (
           <View style={styles.systemRow}>
             <View style={styles.systemCard}>
-              <Text style={styles.systemText}>{item.text}</Text>
+              <Text style={styles.systemText}>{textoVisibleSinSena(item.text)}</Text>
               <Text style={styles.systemMeta}>{formatTime(item.created_at)}</Text>
             </View>
           </View>
@@ -1578,7 +1642,7 @@ export function ChatScreen({
                 ? { label: 'Rechazado', icon: 'close-circle-outline' as const, tone: 'rejected' as const }
                 : status === 'seña_pagada'
                   ? {
-                      label: 'Costo de servicio pagado',
+                      label: COSTO_SERVICIO_PAGADO,
                       icon: 'card-outline' as const,
                       tone: 'seña_pagada' as const,
                     }
@@ -1636,7 +1700,7 @@ export function ChatScreen({
                   {myRole === 'cliente' ? (
                     <>
                       <Text style={styles.quoteLine}>
-                        Costo de servicio de YaChanga:{' '}
+                        {COSTO_SERVICIO_LABEL}:{' '}
                         <Text style={styles.quoteStrong}>
                           {formatMoney(Math.max(q.final_amount - q.net_amount, 0))}
                         </Text>
@@ -1647,6 +1711,7 @@ export function ChatScreen({
                           {formatMoney(computeSaldoPendiente(q.final_amount, q.final_amount - q.net_amount))}
                         </Text>
                       </Text>
+                      <SaldoFueraDeAppNotice />
                     </>
                   ) : null}
 
@@ -1891,9 +1956,10 @@ export function ChatScreen({
         {isSupabaseConfigured() && showClientSaldoPagadoBar && job ? (
           <View style={[styles.completeBar, styles.completeBarStacked]}>
             <Text style={styles.paySubtitle}>
-              Pagá el saldo restante ({formatMoney(saldoPendiente)}) al profesional y confirmá acá cuando
-              lo hayas hecho.
+              Pagá el saldo restante ({formatMoney(saldoPendiente)}) directo al profesional, fuera de la
+              app, y confirmá acá cuando lo hayas hecho.
             </Text>
+            <SaldoFueraDeAppNotice />
             <Pressable
               style={({ pressed }) => [
                 styles.payBtn,
@@ -1905,7 +1971,7 @@ export function ChatScreen({
               onPress={handleSaldoPagadoCliente}
             >
               <Text style={styles.payBtnText}>
-                {saldoBusy ? 'Registrando…' : 'Saldo pagado al profesional'}
+                {saldoBusy ? 'Registrando…' : SALDO_PAGADO_AL_PROFESIONAL}
               </Text>
             </Pressable>
           </View>
@@ -1915,7 +1981,8 @@ export function ChatScreen({
           <View style={styles.completeBar}>
             <View style={styles.payBarText}>
               <Text style={styles.paySubtitle}>
-                Indicaste que pagaste el saldo. Aguardá a que el profesional confirme la recepción.
+                Indicaste que pagaste el saldo directo al profesional. Aguardá a que confirme la
+                recepción. Eso no genera un comprobante de Mercado Pago.
               </Text>
             </View>
           </View>
@@ -1926,7 +1993,8 @@ export function ChatScreen({
             <View style={styles.payBarText}>
               <Text style={styles.payTitle}>Saldo pagado por el cliente</Text>
               <Text style={styles.paySubtitle}>
-                El cliente indicó que pagó el saldo restante. Confirmá que lo recibiste.
+                El cliente indicó que te pagó el saldo restante, fuera de la app. Confirmá que lo
+                recibiste. No hay comprobante de Mercado Pago de ese saldo.
               </Text>
             </View>
             <Pressable
@@ -1951,23 +2019,33 @@ export function ChatScreen({
         {isSupabaseConfigured() && showPay && job ? (
           <View style={styles.payBar}>
             <View style={styles.payBarText}>
-              <Text style={styles.payTitle}>Costo de servicio pendiente</Text>
+              <Text style={styles.payTitle}>{COSTO_SERVICIO_PENDIENTE}</Text>
               <Text style={styles.paySubtitle}>
                 Para compartir tu ubicación al profesional, se requiere el pago del costo de servicio
-                de YaChanga.
+                YaChanga.
               </Text>
               <Text style={[styles.paySubtitle, { marginTop: spacing.xs }]}>
-                Costo de servicio {formatMoney(job.seña)} · Saldo pendiente{' '}
+                {COSTO_SERVICIO_LABEL} {formatMoney(job.seña)} · Saldo pendiente{' '}
                 {formatMoney(computeSaldoPendiente(job.amount, job.seña))}
               </Text>
+              <SaldoFueraDeAppNotice
+                accepted={aceptaSaldoFuera}
+                onToggle={() => setAceptaSaldoFuera((value) => !value)}
+              />
             </View>
             <Pressable
-              style={({ pressed }) => [styles.payBtn, pressed && styles.pressed]}
+              style={({ pressed }) => [
+                styles.payBtn,
+                (!puedeIniciarPagoCostoServicio(aceptaSaldoFuera) || quoteBusy !== 'none') &&
+                  styles.quoteBtnDisabled,
+                pressed && puedeIniciarPagoCostoServicio(aceptaSaldoFuera) && styles.pressed,
+              ]}
+              disabled={!puedeIniciarPagoCostoServicio(aceptaSaldoFuera) || quoteBusy !== 'none'}
               onPress={() => {
-                if (quoteBusy !== 'none') return;
-                // Checkout de la seña de esta contratación (PagoCheckout / Mercado Pago).
+                if (!puedeIniciarPagoCostoServicio(aceptaSaldoFuera) || quoteBusy !== 'none') return;
+                // Checkout del costo de servicio de esta contratación (PagoCheckout / Mercado Pago).
                 // La etiqueta es fija y no depende del flag de Mercado Pago de la OTA.
-                // No es el flujo de materiales ni «Ver servicio».
+                // No es el flujo de materiales ni «Ver servicio». El saldo no se cobra acá.
                 setQuoteBusy('paid');
                 void (async () => {
                   try {
@@ -1976,7 +2054,7 @@ export function ChatScreen({
                       const j = await fetchLatestJobByConversation(conversationId);
                       setJob(j);
                       await refreshMessages();
-                      toast.success('El costo de servicio ya estaba acreditado', 'Pago');
+                      toast.success(`${COSTO_SERVICIO_LABEL} ya estaba acreditado`, 'Pago');
                       return;
                     }
                     const result = await crearPreferenciaSeña(job.id);
@@ -1995,7 +2073,7 @@ export function ChatScreen({
                     });
                   } catch (e) {
                     toast.error(
-                      e instanceof Error ? e.message : 'No se pudo iniciar el pago',
+                      textoVisibleSinSena(e instanceof Error ? e.message : 'No se pudo iniciar el pago'),
                       'Pago',
                     );
                   } finally {
@@ -2004,7 +2082,7 @@ export function ChatScreen({
                 })();
               }}
               accessibilityRole="button"
-              accessibilityLabel="Pagar costo de servicio de YaChanga"
+              accessibilityLabel="Pagar costo de servicio YaChanga"
             >
               <Text style={styles.payBtnText}>Pagar</Text>
             </Pressable>
@@ -2014,12 +2092,13 @@ export function ChatScreen({
         {isSupabaseConfigured() && showClientPinBar && job ? (
           <View style={styles.payBar}>
             <View style={styles.payBarText}>
-              <Text style={styles.payTitle}>Costo de servicio pagado</Text>
+              <Text style={styles.payTitle}>{COSTO_SERVICIO_PAGADO}</Text>
               <Text style={styles.paySubtitle}>
                 {clientPin
                   ? `Tu PIN: ${clientPin} · Compartilo con el profesional al iniciar el trabajo.`
                   : 'Generando tu PIN de verificación…'}
               </Text>
+              <SaldoFueraDeAppNotice />
             </View>
             <Pressable
               style={({ pressed }) => [styles.payBtn, pressed && styles.pressed]}
@@ -2040,9 +2119,10 @@ export function ChatScreen({
         {isSupabaseConfigured() && showWorkerSeñaPagadaBar && job ? (
           <View style={styles.completeBar}>
             <View style={styles.payBarText}>
-              <Text style={styles.payTitle}>Costo de servicio pagado</Text>
+              <Text style={styles.payTitle}>{COSTO_SERVICIO_PAGADO}</Text>
               <Text style={styles.paySubtitle}>
-                Al llegar al domicilio, pedile el PIN al cliente para iniciar el trabajo.
+                Al llegar al domicilio, pedile el PIN al cliente para iniciar el trabajo. El saldo
+                restante te lo paga directo, fuera de la app.
               </Text>
             </View>
             <Pressable
@@ -2058,6 +2138,74 @@ export function ChatScreen({
             >
               <Text style={styles.payBtnText}>Ver servicio</Text>
             </Pressable>
+          </View>
+        ) : null}
+
+        {isSupabaseConfigured() && showClientConformidadBar && job ? (
+          <View style={[styles.completeBar, styles.completeBarStacked]}>
+            <Text style={styles.paySubtitle}>{CONFORMIDAD_PREGUNTA}</Text>
+            <SaldoFueraDeAppNotice />
+            <View style={styles.conformidadActions}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.conformidadBtnGhost,
+                    conformidadBusy && styles.quoteBtnDisabled,
+                    pressed && !conformidadBusy && styles.pressed,
+                  ]}
+                  disabled={conformidadBusy}
+                  onPress={() => setProblemaOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel={CONFORMIDAD_PROBLEMA}
+                >
+                  <Text style={styles.conformidadBtnGhostText}>{CONFORMIDAD_PROBLEMA}</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.conformidadBtnPrimary,
+                    conformidadBusy && styles.quoteBtnDisabled,
+                    pressed && !conformidadBusy && styles.pressed,
+                  ]}
+                  disabled={conformidadBusy}
+                  onPress={handleConformidadSi}
+                  accessibilityRole="button"
+                  accessibilityLabel={CONFORMIDAD_SI}
+                >
+                  <Text style={styles.conformidadBtnPrimaryText}>
+                    {conformidadBusy ? 'Enviando…' : CONFORMIDAD_SI}
+                  </Text>
+                </Pressable>
+              </View>
+          </View>
+        ) : null}
+
+        {isSupabaseConfigured() && showWorkerConformidadBar && job ? (
+          <View style={styles.completeBar}>
+            <View style={styles.payBarText}>
+              <Text style={styles.paySubtitle}>
+                Marcaste el trabajo como realizado. Esperamos que el cliente confirme si quedó
+                conforme.
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        {isSupabaseConfigured() && conformidadAviso && job ? (
+          <View style={styles.completeBar}>
+            <View style={styles.payBarText}>
+              <Text style={styles.paySubtitle}>
+                Estado: {conformidadAviso.estado}. Próximo paso: {conformidadAviso.paso}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        {isSupabaseConfigured() && showClientDisputaBar && job ? (
+          <View style={styles.completeBar}>
+            <View style={styles.payBarText}>
+              <Text style={styles.paySubtitle}>
+                Estado: {CONFORMIDAD_NEGATIVA.estado}. Próximo paso: {CONFORMIDAD_NEGATIVA.paso}
+              </Text>
+            </View>
           </View>
         ) : null}
 
@@ -2216,13 +2364,20 @@ export function ChatScreen({
       reviewSending,
       saldoBusy,
       saldoPendiente,
+      aceptaSaldoFuera,
+      conformidadAviso,
+      conformidadBusy,
+      handleConformidadSi,
       showClientAgendaBar,
+      showClientConformidadBar,
+      showClientDisputaBar,
       showClientPinBar,
       showClientSaldoEsperandoBar,
       showClientSaldoPagadoBar,
       showClientWaitingAvailabilityBar,
       showPay,
       showReviewForm,
+      showWorkerConformidadBar,
       showWorkerAgendaSentBar,
       showWorkerAvailabilityBar,
       showWorkerSaldoRecibidoBar,
@@ -2372,6 +2527,19 @@ export function ChatScreen({
         onClose={() => !reportSubmitting && setReportModalOpen(false)}
         onConfirm={handleSubmitReport}
       />
+      <ReportarProblemaModal
+        visible={problemaOpen && Boolean(job?.id)}
+        contratacionId={job?.id ?? ''}
+        onClose={() => setProblemaOpen(false)}
+        onDone={() => {
+          void fetchLatestJobByConversation(conversationId)
+            .then((next) => {
+              if (next) setJob(next);
+            })
+            .catch(() => undefined);
+          void refreshMessages();
+        }}
+      />
       <Modal
         visible={Boolean(previewImageMeta)}
         transparent
@@ -2416,7 +2584,7 @@ export function ChatScreen({
                   >
                     <Text style={styles.modalTitle}>Cotizar</Text>
                     <Text style={styles.modalText}>
-                      Ingresá el monto neto que querés cobrar. YaChanga suma un 22% (ej. $100 → costo de servicio $22).
+                      Ingresá el monto neto que querés cobrar. YaChanga suma el costo de servicio por tramos sobre ese monto: 10% hasta $50.000, 6% de $50.000 a $200.000 y 3% de $200.000 a $500.000, con un piso de $5.000 y un tope de $23.000. El precio final es tu neto más ese costo.
                     </Text>
 
                     <Text style={styles.fieldLabel}>Monto neto</Text>
@@ -2437,7 +2605,7 @@ export function ChatScreen({
                     </View>
 
                     <View style={styles.quotePreviewRow}>
-                      <Text style={styles.quotePreviewLabel}>Costo de servicio YaChanga (22%)</Text>
+                      <Text style={styles.quotePreviewLabel}>Costo de servicio YaChanga</Text>
                       <Text style={styles.quotePreviewValue}>{formatMoney(quoteFeePreview || 0)}</Text>
                     </View>
 
@@ -2538,7 +2706,6 @@ export function ChatScreen({
                                 workerId: participants.workerId,
                                 clientId: participants.clientId,
                                 netAmount: quoteNetNum,
-                                feeRate,
                                 serviceDetail: quoteDetail,
                                 replacesQuoteId,
                                 warrantyDays: incluyeGarantia ? warrantyDaysNum : null,

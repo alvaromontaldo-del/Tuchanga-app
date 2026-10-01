@@ -105,6 +105,7 @@ export type AccountStackParamList = {
   ClientMaterialPickups: undefined;
   Favorites: undefined;
   ChangePassword: undefined;
+  Faq: undefined;
   ChatConversation: ChatScreenParams;
   WorkerProfile: { workerId: string; conversationId?: string };
   WorkerPosts: { workerId: string };
@@ -136,6 +137,7 @@ export type CommerceStackParamList = {
   };
   StoreCloseOrder: { orderCode?: string } | undefined;
   CommerceAccount: undefined;
+  Faq: undefined;
 };
 
 export type MainTabParamList = {

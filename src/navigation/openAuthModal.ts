@@ -6,6 +6,8 @@ export type OpenAuthModalOptions = {
   redirectTo?: string;
   /** Login / registro orientado a comercio. */
   asCommerce?: boolean;
+  /** Alta de persona con oficios de profesional ya activos. */
+  asProfessional?: boolean;
 };
 
 export function openAuthModal(
@@ -32,10 +34,11 @@ export function openAuthModal(
 
   if (screen === 'Register') {
     const params =
-      options?.redirectTo || options?.asCommerce
+      options?.redirectTo || options?.asCommerce || options?.asProfessional
         ? {
             ...(options.redirectTo ? { redirectTo: options.redirectTo } : {}),
             ...(options.asCommerce ? { asCommerce: true } : {}),
+            ...(options.asProfessional ? { asProfessional: true } : {}),
           }
         : undefined;
     navigationRef.navigate('AuthModal', { screen: 'Register', params });

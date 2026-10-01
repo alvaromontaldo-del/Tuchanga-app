@@ -43,6 +43,16 @@ describe('isCommerceShell', () => {
     expect(isCommerceShell(authed)).toBe(true);
   });
 
+  it('es false con rol profesional aunque el comercio esté aprobado', () => {
+    expect(
+      isCommerceShell({
+        ...authed,
+        sessionRole: 'professional',
+        hasApprovedStore: true,
+      }),
+    ).toBe(false);
+  });
+
   it('es false con rol cliente aunque el comercio esté aprobado', () => {
     expect(
       isCommerceShell({

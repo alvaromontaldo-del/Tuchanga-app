@@ -727,7 +727,7 @@ const QuoteCard = memo(function QuoteCard({
         <Text style={styles.bestBadge}>Menor total en este rubro</Text>
       ) : null}
       {isFeePaid ? (
-        <Text style={styles.acceptedBadge}>Costo de servicio pago</Text>
+        <Text style={styles.acceptedBadge}>Costo de servicio YaChanga pagado</Text>
       ) : null}
       {isRejected ? <Text style={styles.rejectedBadge}>Rechazada</Text> : null}
 
