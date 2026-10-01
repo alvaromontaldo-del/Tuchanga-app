@@ -133,6 +133,7 @@ export function RegisterScreen({ navigation, route }: Props) {
   const toast = useAppToast();
   const redirectTo = route.params?.redirectTo;
   const asCommerce = Boolean(route.params?.asCommerce);
+  const asProfessional = Boolean(route.params?.asProfessional) && !asCommerce;
 
   useEffect(() => {
     if (!flashMessage) return;
@@ -205,8 +206,8 @@ export function RegisterScreen({ navigation, route }: Props) {
   const [locationHint, setLocationHint] = useState<string | null>(null);
   const [devicePos, setDevicePos] = useState<{ lat: number; lng: number } | null>(null);
 
-  // Modo trabajador
-  const [offerServices, setOfferServices] = useState(false);
+  // Modo trabajador. El alta de profesional lo deja activo; el de comercio lo apaga.
+  const [offerServices, setOfferServices] = useState(asProfessional);
   const [coverageKm, setCoverageKm] = useState('10');
   const [trades, setTrades] = useState<WorkerTradeDraft[]>([]);
   const [primaryTradeId, setPrimaryTradeId] = useState<string | null>(null);
@@ -221,6 +222,17 @@ export function RegisterScreen({ navigation, route }: Props) {
     setCoverageKm('10');
     setProfessionalDescription('');
   }, [asCommerce, enterCommerceIntent]);
+
+  useEffect(() => {
+    if (!asProfessional) return;
+    setOfferServices(true);
+    setTrades((prev) => {
+      if (prev.length > 0) return prev;
+      const id = `trade-prof-${Date.now()}`;
+      setPrimaryTradeId(id);
+      return [{ id, name: getDefaultRubroNombre() || 'Albañilería', details: '' }];
+    });
+  }, [asProfessional]);
 
   useEffect(() => {
     if (!asCommerce) return;
@@ -930,12 +942,18 @@ export function RegisterScreen({ navigation, route }: Props) {
               />
             </View>
             <Text style={styles.title}>
-              {asCommerce ? 'Crear cuenta de comercio' : 'Crear cuenta'}
+              {asCommerce
+                ? 'Crear cuenta de comercio'
+                : asProfessional
+                  ? 'Crear cuenta de profesional'
+                  : 'Crear cuenta'}
             </Text>
             <Text style={styles.subtitle}>
               {asCommerce
                 ? 'Cargá los datos del titular (como una cuenta particular) y los del local: foto o logo, dirección, rubros y horario. El comercio queda pendiente de aprobación.'
-                : 'Perfil único: empezás como cliente y, si querés, activás funciones de trabajador.'}
+                : asProfessional
+                  ? 'Cargá tus oficios y tu zona para que los clientes te encuentren.'
+                  : 'Perfil único: empezás como cliente y, si querés, activás funciones de trabajador.'}
             </Text>
 
             {asCommerce ? (
@@ -1635,7 +1653,13 @@ export function RegisterScreen({ navigation, route }: Props) {
             ) : null}
 
             <AppButton
-              title={asCommerce ? 'Crear cuenta de comercio' : 'Crear cuenta'}
+              title={
+                asCommerce
+                  ? 'Crear cuenta de comercio'
+                  : asProfessional
+                    ? 'Crear cuenta de profesional'
+                    : 'Crear cuenta'
+              }
               onPress={handleSubmit}
               loading={loading}
               style={styles.submitButton}

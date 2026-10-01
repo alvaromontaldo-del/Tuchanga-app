@@ -1,3 +1,7 @@
+import {
+  COSTO_SERVICIO_PAGADO,
+  COSTO_SERVICIO_PENDIENTE,
+} from '../constants/serviceCostCopy';
 import type {
   Contratacion,
   ContratacionEstadoPago,
@@ -13,8 +17,8 @@ export function localDateIso(d = new Date()): string {
 
 export function formatContratacionEstadoPago(estado: ContratacionEstadoPago): string {
   const labels: Record<ContratacionEstadoPago, string> = {
-    pendiente_seña: 'Costo de servicio pendiente',
-    seña_pagada: 'Costo de servicio pagado',
+    pendiente_seña: COSTO_SERVICIO_PENDIENTE,
+    seña_pagada: COSTO_SERVICIO_PAGADO,
     totalmente_pagado: 'Trabajo pagado',
   };
   return labels[estado] ?? estado;

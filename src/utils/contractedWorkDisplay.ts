@@ -1,3 +1,4 @@
+import { COSTO_SERVICIO_LABEL } from '../constants/serviceCostCopy';
 import { formatMoneyCeilAr } from './formatMoney';
 import type { WarrantyCountdown } from './warrantyDays';
 
@@ -59,7 +60,7 @@ export function contractedWorkMoneyDisplay(row: {
   return {
     professionalLabel: 'Pago al profesional',
     professionalAmount: formatMoneyCeilAr(professionalPayoutAmount(row)),
-    serviceFeeLabel: 'Costo de servicio YaChanga',
+    serviceFeeLabel: COSTO_SERVICIO_LABEL,
     serviceFeeAmount: formatMoneyCeilAr(yachangaServiceFeeAmount(row)),
   };
 }

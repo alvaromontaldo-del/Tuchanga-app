@@ -44,7 +44,7 @@ type CommerceShellContextValue = {
   isCommerceShell: boolean;
   commerceIntent: boolean;
   sessionRole: SessionRole | null;
-  /** User has store(s) and must pick client vs commerce (provisional testing). */
+  /** Cuenta con comercio habilitado que todavía no eligió Cliente, Profesional o Comercio. */
   needsRoleChoice: boolean;
   primaryStore: MyStoreSummary | null;
   hasCommerceStore: boolean;
@@ -78,7 +78,7 @@ export function CommerceShellProvider({ children }: { children: ReactNode }) {
         ]);
         if (cancelled) return;
         setCommerceIntent(intentRaw === '1');
-        if (roleRaw === 'client' || roleRaw === 'commerce') {
+        if (roleRaw === 'client' || roleRaw === 'professional' || roleRaw === 'commerce') {
           setSessionRole(roleRaw);
         }
       } catch {
@@ -201,8 +201,7 @@ export function CommerceShellProvider({ children }: { children: ReactNode }) {
   const hasPendingCommerceStore = stores.some((s) => s.status === COMMERCE_PENDING_STATUS);
 
   /**
-   * Provisional: si tiene comercio y aún no eligió rol en esta sesión hidratada,
-   * pedir elección (mismo email cliente + comercio).
+   * Si tiene un comercio habilitado y todavía no eligió rol, mostrar el selector.
    */
   const needsRoleChoice = Boolean(
     isAuthed &&

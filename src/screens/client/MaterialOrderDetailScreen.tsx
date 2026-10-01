@@ -79,7 +79,7 @@ export function MaterialOrderDetailScreen({ navigation, route }: Props) {
         const synced = await confirmarCostoServicioMaterialesMp(orderId);
         if (synced.ok || synced.already_paid) {
           await refresh();
-          toast.success('Costo de servicio acreditado.', 'Pago');
+          toast.success('Costo de servicio YaChanga acreditado.', 'Pago');
           return;
         }
         const result = await crearPreferenciaCostoServicioMateriales(orderId);

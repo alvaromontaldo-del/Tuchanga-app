@@ -1,17 +1,31 @@
-import { Ionicons } from '@expo/vector-icons';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, StyleSheet, Text, View } from 'react-native';
+import { RoleChoiceList } from './RoleChoiceList';
+import { sessionRoleForSignup, type SignupRoleId } from '../../constants/sessionRoles';
 import { colors, radii, spacing } from '../../constants/theme';
-import { useCommerceShell, type SessionRole } from '../../context/CommerceShellContext';
+import { useCommerceShell } from '../../context/CommerceShellContext';
+import { useUserMode } from '../../context/UserModeContext';
+import { navigationRef } from '../../navigation/navigationRef';
 
 /**
- * Provisional: mismo email puede ser cliente/trabajador y comercio.
- * Obliga a elegir con qué rol entrar.
+ * Cuenta con comercio habilitado: elige Cliente, Profesional o Comercio.
+ * Cada opción entra a su módulo (y, si falta el alta profesional, al formulario).
  */
 export function SessionRolePickerModal() {
-  const { needsRoleChoice, chooseSessionRole, primaryStore } = useCommerceShell();
+  const { needsRoleChoice, chooseSessionRole } = useCommerceShell();
+  const { isWorker } = useUserMode();
 
-  const pick = (role: SessionRole) => {
-    void chooseSessionRole(role);
+  const pick = (role: SignupRoleId) => {
+    const sessionRole = sessionRoleForSignup(role);
+    void chooseSessionRole(sessionRole).then(() => {
+      if (role !== 'professional' || isWorker) return;
+      setTimeout(() => {
+        if (!navigationRef.isReady()) return;
+        navigationRef.navigate('Main', {
+          screen: 'Perfil',
+          params: { screen: 'WorkerABM' },
+        });
+      }, 50);
+    });
   };
 
   return (
@@ -19,37 +33,8 @@ export function SessionRolePickerModal() {
       <View style={styles.backdrop}>
         <View style={styles.card}>
           <Text style={styles.title}>¿Cómo querés ingresar?</Text>
-          <Text style={styles.sub}>
-            Esta cuenta tiene perfil de usuario
-            {primaryStore ? ` y el comercio “${primaryStore.name}”` : ' y un comercio registrado'}.
-            Elegí el módulo (provisorio para testing).
-          </Text>
-
-          <Pressable
-            style={({ pressed }) => [styles.option, pressed && styles.pressed]}
-            onPress={() => pick('client')}
-            accessibilityRole="button"
-            accessibilityLabel="Entrar como cliente o profesional"
-          >
-            <Ionicons name="people-outline" size={26} color={colors.primary} />
-            <View style={styles.optionText}>
-              <Text style={styles.optionTitle}>Cliente / Profesional</Text>
-              <Text style={styles.optionSub}>Chat, trabajos, publicaciones</Text>
-            </View>
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [styles.option, pressed && styles.pressed]}
-            onPress={() => pick('commerce')}
-            accessibilityRole="button"
-            accessibilityLabel="Entrar como comercio"
-          >
-            <Ionicons name="storefront-outline" size={26} color={colors.primary} />
-            <View style={styles.optionText}>
-              <Text style={styles.optionTitle}>Comercio</Text>
-              <Text style={styles.optionSub}>Pedidos de materiales y cotizaciones</Text>
-            </View>
-          </Pressable>
+          <Text style={styles.sub}>Elegí el rol con el que vas a usar YaChanga.</Text>
+          <RoleChoiceList onPick={pick} />
         </View>
       </View>
     </Modal>
@@ -73,18 +58,4 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 20, fontWeight: '900', color: colors.text },
   sub: { fontSize: 14, color: colors.textSecondary, lineHeight: 20 },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.md,
-    borderRadius: radii.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
-  },
-  optionText: { flex: 1, gap: 2 },
-  optionTitle: { fontSize: 16, fontWeight: '800', color: colors.text },
-  optionSub: { fontSize: 13, color: colors.textSecondary },
-  pressed: { opacity: 0.9 },
 });

@@ -90,7 +90,7 @@ export function MaterialOrderSummaryScreen({ navigation, route }: Props) {
       if (isMercadoPagoEnabled()) {
         const synced = await confirmarCostoServicioMaterialesMp(orderId);
         if (synced.ok || synced.already_paid) {
-          toast.success('Costo de servicio acreditado.', 'Pago');
+          toast.success('Costo de servicio YaChanga acreditado.', 'Pago');
           navigation.replace('MaterialOrderDetail', { orderId });
           return;
         }
