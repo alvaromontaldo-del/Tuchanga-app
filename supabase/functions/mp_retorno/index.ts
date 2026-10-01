@@ -205,22 +205,22 @@ Deno.serve(async (req) => {
 
       try {
         const result = await processApprovedMpPayment(payment, ctx);
-        credited = result === "processed";
+        credited = result.outcome === "processed" || result.reason === "already_credited";
+        if (!credited) {
+          creditError = result.reason ?? "not_credited";
+          console.error("[mp_retorno] credit_rejected", creditError);
+        }
       } catch (e) {
         creditError = String(e instanceof Error ? e.message : e);
         console.error("[mp_retorno] registrar_failed", creditError);
-        if (materialOrderId) {
+        const rpcFailed = /registrar_sena/.test(creditError);
+        if (materialOrderId && rpcFailed) {
           await fallbackMarkPaid(materialOrderId, payment);
           credited = true;
           creditError = "";
-        } else {
+        } else if (!materialOrderId) {
           throw e;
         }
-      }
-
-      if (!credited && materialOrderId) {
-        await fallbackMarkPaid(materialOrderId, payment);
-        credited = true;
       }
     } catch (e) {
       creditError = String(e instanceof Error ? e.message : e);

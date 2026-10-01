@@ -1,3 +1,4 @@
+import { edgeFunctionSecretHeaders } from './edgeFunctionSecret';
 import { getSupabaseClient } from '../lib/supabase';
 import type { MaterialItemDraft, NearbyStore, StoreRubro } from '../types/materials';
 
@@ -307,6 +308,7 @@ export async function createMaterialRequestWithTargets(
   for (const storeId of input.storeIds) {
     void sb.functions
       .invoke('push_on_store_board', {
+        headers: edgeFunctionSecretHeaders(),
         body: {
           store_id: storeId,
           title: 'YaChanga',

@@ -8,6 +8,11 @@ import {
   resolvePaymentContext,
   type MpPayment,
 } from "../_shared/mercadopago.ts";
+import {
+  mpWebhookSecretStatus,
+  normalizeMpDataId,
+  verifyMpWebhookSignature,
+} from "../_shared/mpWebhookValidation.ts";
 import { createAdminClient, json } from "../_shared/supabaseAdmin.ts";
 
 type WebhookBody = {
@@ -69,43 +74,13 @@ function resolveTopic(req: Request, body: WebhookBody): WebhookTopic {
   return "unknown";
 }
 
-async function validateMpSignature(req: Request, dataId: string): Promise<boolean> {
-  const secret = (Deno.env.get("MP_WEBHOOK_SECRET") ?? "").trim();
-  if (!secret) return true;
-
-  const xSignature = req.headers.get("x-signature");
-  const xRequestId = req.headers.get("x-request-id");
-  if (!xSignature || !xRequestId) {
-    logError("signature_headers_missing", { dataId });
-    return false;
-  }
-
-  let ts = "";
-  let hash = "";
-  for (const part of xSignature.split(",")) {
-    const [key, value] = part.split("=").map((s) => s.trim());
-    if (key === "ts") ts = value ?? "";
-    if (key === "v1") hash = value ?? "";
-  }
-
-  const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(manifest));
-  const computed = Array.from(new Uint8Array(sig))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-
-  if (computed !== hash) {
-    logError("signature_mismatch", { dataId, xRequestId });
-    return false;
-  }
-  return true;
+function signatureDataId(req: Request, fallbackId: string): string {
+  const url = new URL(req.url);
+  const fromQuery =
+    url.searchParams.get("data.id") ??
+    url.searchParams.get("data_id") ??
+    url.searchParams.get("id");
+  return normalizeMpDataId(fromQuery ?? fallbackId);
 }
 
 function getPaymentSdk(): Payment {
@@ -165,7 +140,11 @@ async function processPaymentRecord(payment: MpPayment): Promise<ProcessResult> 
 
   if (status === "approved") {
     try {
-      await processApprovedMpPayment(payment, ctx);
+      const credit = await processApprovedMpPayment(payment, ctx);
+      if (credit.outcome !== "processed") {
+        logInfo("credit_skipped", { paymentId, reason: credit.reason });
+        return { skipped: credit.reason ?? "not_credited", payment_id: paymentId };
+      }
       await updateTransaccionEstado(
         {
           contratacionId: ctx.contratacionId,
@@ -294,6 +273,12 @@ Deno.serve(async (req) => {
     return json(405, { error: "method_not_allowed" });
   }
 
+  const webhookSecret = Deno.env.get("MP_WEBHOOK_SECRET") ?? "";
+  if (mpWebhookSecretStatus(webhookSecret) === 503) {
+    logError("webhook_secret_missing");
+    return json(503, { error: "webhook_secret_not_configured" });
+  }
+
   if (!getMpAccessToken()) {
     logError("mp_not_configured");
     return ok({ ok: false, error: "mp_not_configured" });
@@ -309,14 +294,20 @@ Deno.serve(async (req) => {
   }
 
   const resourceId = extractResourceId(req, body);
+  const signatureOk = await verifyMpWebhookSignature({
+    secret: webhookSecret,
+    dataId: signatureDataId(req, resourceId ?? ""),
+    xSignature: req.headers.get("x-signature"),
+    xRequestId: req.headers.get("x-request-id"),
+  });
+  if (!signatureOk) {
+    logError("invalid_signature", { resourceId });
+    return json(401, { error: "invalid_signature" });
+  }
+
   if (!resourceId) {
     logInfo("skipped_no_resource_id", { method: req.method });
     return ok({ ok: true, skipped: "no_resource_id" });
-  }
-
-  const signatureOk = await validateMpSignature(req, resourceId);
-  if (!signatureOk) {
-    return ok({ ok: false, error: "invalid_signature" });
   }
 
   const topic = resolveTopic(req, body);

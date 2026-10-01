@@ -1,63 +1,28 @@
 import { createAdminClient } from "./supabaseAdmin.ts";
 import { sendExpoPush } from "./expoPush.ts";
+import {
+  buildExternalReference,
+  buildMaterialOrderExternalReference,
+  parseExternalReference,
+  type TipoPagoMp,
+} from "./mpReference.ts";
+import {
+  paymentMatchesExpectedFee,
+  type ExpectedFeeTarget,
+} from "./mpWebhookValidation.ts";
 
-/** Valores del enum Postgres `transaccion_tipo_pago`. */
-export type TipoPagoMp = "seña_inicial" | "diferencia_seña" | "seña_materiales";
-
-/** Códigos ASCII en external_reference (sin ñ — MP los corrompe en búsquedas). */
-export type TipoPagoMpRef = "sena_inicial" | "diferencia_sena" | "sena_materiales";
-
-export type ParsedExternalReference = {
-  contratacionId?: string;
-  orderId?: string;
-  tipoPago: TipoPagoMp;
-};
-
-export function tipoPagoToRef(tipo: TipoPagoMp): TipoPagoMpRef {
-  if (tipo === "seña_inicial") return "sena_inicial";
-  if (tipo === "diferencia_seña") return "diferencia_sena";
-  return "sena_materiales";
-}
-
-export function tipoPagoFromRef(raw: string): TipoPagoMp | null {
-  if (raw === "sena_inicial" || raw === "seña_inicial") return "seña_inicial";
-  if (raw === "diferencia_sena" || raw === "diferencia_seña") return "diferencia_seña";
-  if (raw === "sena_materiales" || raw === "seña_materiales") return "seña_materiales";
-  return null;
-}
-
-export function buildExternalReference(
-  contratacionId: string,
-  tipoPago: TipoPagoMp,
-): string {
-  return `contratacion_id:${contratacionId}|tipo_pago:${tipoPagoToRef(tipoPago)}`;
-}
-
-export function buildMaterialOrderExternalReference(orderId: string): string {
-  return `order_id:${orderId}|tipo_pago:sena_materiales`;
-}
-
-export function parseExternalReference(ref: string): ParsedExternalReference | null {
-  const parts = ref.split("|").map((p) => p.trim());
-  let contratacionId: string | undefined;
-  let orderId: string | undefined;
-  let tipoPago: TipoPagoMp | null = null;
-  for (const part of parts) {
-    if (part.startsWith("contratacion_id:")) {
-      contratacionId = part.slice("contratacion_id:".length);
-    }
-    if (part.startsWith("order_id:")) {
-      orderId = part.slice("order_id:".length);
-    }
-    if (part.startsWith("tipo_pago:")) {
-      const raw = part.slice("tipo_pago:".length);
-      tipoPago = tipoPagoFromRef(raw);
-    }
-  }
-  if (!tipoPago) return null;
-  if (!contratacionId && !orderId) return null;
-  return { contratacionId, orderId, tipoPago };
-}
+export type {
+  ParsedExternalReference,
+  TipoPagoMp,
+  TipoPagoMpRef,
+} from "./mpReference.ts";
+export {
+  buildExternalReference,
+  buildMaterialOrderExternalReference,
+  parseExternalReference,
+  tipoPagoFromRef,
+  tipoPagoToRef,
+} from "./mpReference.ts";
 
 export function getMpAccessToken(): string {
   return (Deno.env.get("MP_ACCESS_TOKEN") ?? "").trim();
@@ -383,6 +348,142 @@ export type PaymentConfirmContext = {
   externalReference: string;
 };
 
+export type CreditResult = {
+  outcome: "processed" | "skipped";
+  reason?: string;
+};
+
+function ceilMoney(n: number): number {
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.ceil(n);
+}
+
+function safeId(id: string): string {
+  return id.replace(/[^a-zA-Z0-9_-]/g, "");
+}
+
+async function isPaymentAlreadyCredited(paymentId: string): Promise<boolean> {
+  const id = safeId(paymentId);
+  if (!id) return false;
+  const sb = createAdminClient();
+  const { data: byPayment, error: payErr } = await sb
+    .from("transacciones_pago")
+    .select("id")
+    .eq("estado_mp", "approved")
+    .eq("mp_payment_id", id)
+    .limit(1);
+  if (!payErr && (byPayment ?? []).length > 0) return true;
+
+  const { data: byKey, error: keyErr } = await sb
+    .from("transacciones_pago")
+    .select("id")
+    .eq("estado_mp", "approved")
+    .eq("idempotency_key", `mp_payment:${id}`)
+    .limit(1);
+  if (keyErr) return false;
+  return (byKey ?? []).length > 0;
+}
+
+async function loadExpectedFee(
+  payment: MpPayment,
+  ctx: PaymentConfirmContext,
+): Promise<ExpectedFeeTarget | null> {
+  const sb = createAdminClient();
+  const ref = String(payment.external_reference ?? ctx.externalReference ?? "").trim();
+  const parsed = parseExternalReference(ref);
+  const contratacionId = parsed?.contratacionId ?? ctx.contratacionId;
+  const orderId = parsed?.orderId ?? ctx.orderId;
+
+  if (orderId) {
+    const { data: order, error } = await sb
+      .from("orders")
+      .select("id, deposit_amount, payment_group_id")
+      .eq("id", orderId)
+      .maybeSingle();
+    if (error || !order) return null;
+
+    const groupId = (order.payment_group_id as string | null) ?? null;
+    let groupOrderIds = [String(order.id)];
+    let amount = ceilMoney(Number(order.deposit_amount) || 0);
+
+    if (groupId) {
+      const { data: siblings } = await sb
+        .from("orders")
+        .select("id, deposit_amount")
+        .eq("payment_group_id", groupId);
+      if (siblings?.length) {
+        groupOrderIds = siblings.map((s) => String(s.id));
+        const siblingAmount = ceilMoney(Number(siblings[0]?.deposit_amount) || 0);
+        if (siblingAmount > 0) amount = siblingAmount;
+      }
+      const { data: checkout } = await sb
+        .from("material_checkouts")
+        .select("service_fee")
+        .eq("id", groupId)
+        .maybeSingle();
+      const fee = ceilMoney(Number(checkout?.service_fee) || 0);
+      if (fee > 0) amount = fee;
+    }
+
+    const { data: txs } = await sb
+      .from("transacciones_pago")
+      .select("monto, external_reference")
+      .in("material_order_id", groupOrderIds)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    const rows = txs ?? [];
+    const matchRow = rows.find((r) => String(r.external_reference ?? "") === ref);
+    if (matchRow && Number(matchRow.monto) > 0) {
+      amount = Number(matchRow.monto);
+    }
+
+    return {
+      amount,
+      externalReference: String(matchRow?.external_reference ?? "") ||
+        buildMaterialOrderExternalReference(orderId),
+      orderId: String(order.id),
+      paymentGroupId: groupId,
+      groupOrderIds,
+    };
+  }
+
+  if (!contratacionId) return null;
+
+  const { data: row, error } = await sb
+    .from("contrataciones")
+    .select("id, comision_app")
+    .eq("id", contratacionId)
+    .maybeSingle();
+  if (error || !row) return null;
+
+  let amount = ceilMoney(Number(row.comision_app) || 0);
+  const { data: txs } = await sb
+    .from("transacciones_pago")
+    .select("monto, external_reference, estado_mp, tipo_pago")
+    .eq("contratacion_id", contratacionId)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  const rows = txs ?? [];
+  const matchRow = rows.find((r) => String(r.external_reference ?? "") === ref);
+  if (matchRow && Number(matchRow.monto) > 0) {
+    amount = Number(matchRow.monto);
+  } else if ((parsed?.tipoPago ?? ctx.tipoPago) === "diferencia_seña") {
+    const paid = rows
+      .filter((r) => r.estado_mp === "approved")
+      .reduce((acc, r) => acc + Number(r.monto ?? 0), 0);
+    amount = ceilMoney(Math.max(Number(row.comision_app) - paid, 0));
+  }
+
+  return {
+    amount,
+    externalReference:
+      String(matchRow?.external_reference ?? "") ||
+      ref ||
+      buildExternalReference(contratacionId, parsed?.tipoPago ?? ctx.tipoPago),
+    contratacionId,
+  };
+}
+
 export async function searchMpApprovedPaymentsForContratacion(
   contratacionId: string,
 ): Promise<MpPayment[]> {
@@ -485,7 +586,7 @@ export async function findApprovedMpPayment(ctx: PaymentConfirmContext): Promise
 export async function processApprovedMpPayment(
   payment: MpPayment,
   ctx?: PaymentConfirmContext,
-): Promise<"processed" | "skipped"> {
+): Promise<CreditResult> {
   const parsed = parseExternalReference(String(payment.external_reference ?? ""));
   const contratacionId = parsed?.contratacionId ?? ctx?.contratacionId;
   const orderId = parsed?.orderId ?? ctx?.orderId;
@@ -495,7 +596,30 @@ export async function processApprovedMpPayment(
   ).trim();
 
   const status = String(payment.status ?? "").toLowerCase();
-  if (status !== "approved") return "skipped";
+  if (status !== "approved") return { outcome: "skipped", reason: "not_approved" };
+
+  if (await isPaymentAlreadyCredited(String(payment.id ?? ""))) {
+    return { outcome: "skipped", reason: "already_credited" };
+  }
+
+  const confirmCtx: PaymentConfirmContext = {
+    contratacionId,
+    orderId,
+    tipoPago: tipoPago ?? ctx?.tipoPago ?? "seña_inicial",
+    externalReference,
+  };
+  const expected = await loadExpectedFee(payment, confirmCtx);
+  if (!expected) return { outcome: "skipped", reason: "fee_target_missing" };
+
+  const match = paymentMatchesExpectedFee(
+    {
+      status,
+      transactionAmount: Number(payment.transaction_amount ?? NaN),
+      externalReference,
+    },
+    expected,
+  );
+  if (!match.ok) return { outcome: "skipped", reason: match.reason };
 
   const sb = createAdminClient();
   const idempotencyKey = `mp_payment:${payment.id}`;
@@ -557,10 +681,10 @@ export async function processApprovedMpPayment(
       /* no bloquea el acreditado */
     }
 
-    return "processed";
+    return { outcome: "processed" };
   }
 
-  if (!contratacionId || !tipoPago) return "skipped";
+  if (!contratacionId || !tipoPago) return { outcome: "skipped", reason: "fee_target_missing" };
 
   const { error } = await sb.rpc("registrar_seña_aprobada", {
     p_contratacion_id: contratacionId,
@@ -573,5 +697,5 @@ export async function processApprovedMpPayment(
   });
 
   if (error) throw new Error(`registrar_seña_failed:${error.message}`);
-  return "processed";
+  return { outcome: "processed" };
 }

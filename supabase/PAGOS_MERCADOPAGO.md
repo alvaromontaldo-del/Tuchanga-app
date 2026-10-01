@@ -25,7 +25,7 @@ contratacion_id:{uuid}|tipo_pago:{seña_inicial|diferencia_seña}
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role (también acepta `SERVICE_ROLE_KEY`) |
 | `SUPABASE_ANON_KEY` | Anon key (validar JWT en `mp_crear_preferencia`) |
 | `MP_NOTIFICATION_URL` | *(opcional)* URL pública del webhook si difiere de la default |
-| `MP_WEBHOOK_SECRET` | *(opcional)* Clave de firma de webhooks (Mercado Pago → Webhooks) |
+| `MP_WEBHOOK_SECRET` | **Obligatorio.** Clave de firma de webhooks (Mercado Pago → Webhooks). Si falta, `mp_webhook` responde 503. Firma `x-signature` inválida → 401. |
 | `MP_APP_RETURN_SCHEME` | *(opcional)* Default: `tuchanga-app` |
 
 ## Deploy
@@ -35,7 +35,10 @@ cd tuchanga-app
 supabase functions deploy mp_crear_preferencia
 supabase functions deploy mp_confirmar_sena
 supabase functions deploy mp_webhook --no-verify-jwt
+supabase functions deploy mp_retorno --no-verify-jwt
 ```
+
+`mp_crear_preferencia` y `mp_confirmar_sena` van con `verify_jwt = true` (`supabase/config.toml`). No uses `--no-verify-jwt` en esas dos. El Bearer de la anon key se rechaza adentro con `auth.getUser`.
 
 Webhook URL (default):
 

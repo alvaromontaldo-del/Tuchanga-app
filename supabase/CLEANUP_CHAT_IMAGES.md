@@ -31,12 +31,16 @@ RETURNS integer LANGUAGE sql IMMUTABLE AS $$ SELECT 15; $$;
 ## Edge Function
 
 ```bash
-npx supabase functions deploy cleanup_chat_images --project-ref kyxehrxcdealbujvvnxp
+npx supabase functions deploy cleanup_chat_images --no-verify-jwt
 ```
 
-La app también la invoca al dejar reseña / confirmar pago (además de triggers SQL que ocultan el chat al instante).
+Hace falta el secret `EDGE_FUNCTION_SECRET` (o el alias `CLEANUP_CRON_SECRET`). Sin secreto la función responde 503. Un Bearer anónimo, la anon key o la service role sola responden 401.
+
+La app intenta invocarla al dejar reseña / confirmar pago. Ese invoke solo pasa si el cliente manda `x-function-secret` (no lo pongas en `EXPO_PUBLIC_*`). El camino de producción es el cron y los triggers de `supabase/20261001_edge_function_secret_headers.sql` (no está aplicado solo: hay que correrlo en el SQL editor).
 
 ## Schedule (respaldo)
 
 Dashboard → Edge Functions → `cleanup_chat_images` → Schedules  
-Cron: `0 * * * *` o diario; Method POST; Authorization con service role.
+Cron: `0 * * * *` o diario; Method POST.  
+Header `x-function-secret` con el mismo valor que `EDGE_FUNCTION_SECRET`.  
+`Authorization: Bearer <service_role>` ya no alcanza. `x-cleanup-secret` sigue siendo un alias del mismo valor.

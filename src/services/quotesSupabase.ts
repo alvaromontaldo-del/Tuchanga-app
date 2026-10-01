@@ -6,6 +6,7 @@ import {
   subscribeContratacionesByConversation,
   computeFinalAmount,
 } from './contratacionesSupabase';
+import { edgeFunctionSecretHeaders } from './edgeFunctionSecret';
 import type { Contratacion } from '../types/contrataciones';
 import { COMISION_APP_RATE } from '../types/contrataciones';
 
@@ -300,6 +301,7 @@ export async function createReview(params: {
   // Push al trabajador (misma forma de payload que Database Webhook → push_on_review).
   try {
     const { error: pushErr } = await sb.functions.invoke('push_on_review', {
+      headers: edgeFunctionSecretHeaders(),
       body: {
         type: 'INSERT',
         table: 'worker_reviews',

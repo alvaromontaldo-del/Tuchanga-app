@@ -2,6 +2,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendExpoPush } from "../_shared/expoPush.ts";
+import { requireFunctionSecret } from "../_shared/functionSecretGuard.ts";
 import {
   claimPushDelivery,
   uniqueExpoTokens,
@@ -47,12 +48,15 @@ Deno.serve(async (req) => {
       headers: {
         "access-control-allow-origin": "*",
         "access-control-allow-headers":
-          "authorization, x-client-info, apikey, content-type",
+          "authorization, x-client-info, apikey, content-type, x-function-secret, x-cleanup-secret",
       },
     });
   }
 
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
+
+  const denied = requireFunctionSecret(req);
+  if (denied) return denied;
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
   const SERVICE_ROLE =

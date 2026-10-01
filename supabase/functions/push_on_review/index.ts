@@ -2,6 +2,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendExpoPush } from "../_shared/expoPush.ts";
+import { requireFunctionSecret } from "../_shared/functionSecretGuard.ts";
 
 type WebhookPayload<T> = {
   type: "INSERT" | "UPDATE" | "DELETE";
@@ -30,6 +31,9 @@ function json(status: number, body: unknown) {
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
+
+  const denied = requireFunctionSecret(req);
+  if (denied) return denied;
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
   const SERVICE_ROLE = Deno.env.get("SERVICE_ROLE_KEY") ?? "";

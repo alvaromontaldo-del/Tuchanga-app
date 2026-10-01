@@ -1,3 +1,4 @@
+import { edgeFunctionSecretHeaders } from './edgeFunctionSecret';
 import { getSupabaseClient } from '../lib/supabase';
 import { isSupabaseConfigured } from '../config/supabase';
 
@@ -19,6 +20,7 @@ export async function requestChatCleanupAfterJobComplete(
       });
     }
     await sb.functions.invoke('cleanup_chat_images', {
+      headers: edgeFunctionSecretHeaders(),
       body: id ? { contratacion_id: id } : {},
     });
   } catch {
