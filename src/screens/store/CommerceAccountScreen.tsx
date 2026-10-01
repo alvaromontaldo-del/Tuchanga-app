@@ -7,6 +7,7 @@ import {
   Linking,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -23,6 +24,8 @@ import { storeStatusLabel } from '../../services/storeRegistrationSupabase';
 import { updateMyStoreAvatarFromUri } from '../../services/storeQuotesSupabase';
 import { normalizeLocalImageUri } from '../../utils/normalizeLocalImage';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { TermsAndConditionsModal } from '../../components/legal/TermsAndConditionsModal';
+import { TERMS_VERSION } from '../../constants/terms';
 
 type Props = NativeStackScreenProps<CommerceStackParamList, 'CommerceAccount'>;
 
@@ -41,6 +44,7 @@ export function CommerceAccountScreen({ navigation }: Props) {
     refresh,
   } = useCommerceShell();
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
   const [storeAvatarUri, setStoreAvatarUri] = useState<string | null>(
     primaryStore?.avatarUrl ?? null,
   );
@@ -132,6 +136,11 @@ export function CommerceAccountScreen({ navigation }: Props) {
 
   return (
     <AppScreen style={styles.flex} edges={['bottom', 'left', 'right']}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
       <Pressable
         style={({ pressed }) => [styles.avatarCard, pressed && styles.pressed]}
         onPress={() => void pickAndUploadAvatar()}
@@ -229,18 +238,39 @@ export function CommerceAccountScreen({ navigation }: Props) {
       </Pressable>
 
       <Pressable
+        style={({ pressed }) => [styles.rowBtn, pressed && styles.pressed]}
+        onPress={() => setTermsOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel="Términos y condiciones"
+      >
+        <Ionicons name="document-text-outline" size={22} color={colors.text} />
+        <View style={styles.switchText}>
+          <Text style={[styles.rowBtnText, { color: colors.text }]}>Términos y condiciones</Text>
+          <Text style={styles.switchSub}>Versión {TERMS_VERSION}</Text>
+        </View>
+      </Pressable>
+
+      <Pressable
         style={({ pressed }) => [styles.logoutBtn, pressed && styles.pressed]}
         onPress={onSignOut}
       >
         <Ionicons name="log-out-outline" size={22} color={colors.error} />
         <Text style={styles.logoutText}>Cerrar sesión</Text>
       </Pressable>
+      </ScrollView>
+
+      <TermsAndConditionsModal
+        visible={termsOpen}
+        mode="read"
+        onClose={() => setTermsOpen(false)}
+      />
     </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: colors.background, padding: spacing.lg, gap: spacing.md },
+  flex: { flex: 1, backgroundColor: colors.background },
+  scroll: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xl },
   avatarCard: {
     flexDirection: 'row',
     alignItems: 'center',

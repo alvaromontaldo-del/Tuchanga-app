@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Platform,
   Pressable,
@@ -10,43 +10,232 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { TERMS_UPDATED_LABEL, TERMS_VERSION } from '../../constants/terms';
 import { colors, radii, spacing } from '../../constants/theme';
 
 type Props = {
   visible: boolean;
-  onClose: () => void;
-  onAccept: () => void;
+  /** `read`: solo consulta. `accept`: hay que tocar Acepto para seguir. */
+  mode: 'read' | 'accept';
+  onClose?: () => void;
+  onAccept?: () => void;
+  accepting?: boolean;
+  acceptError?: string | null;
 };
 
-function formatTodayEs(): string {
-  const d = new Date();
-  return d.toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' });
+function Section({ title, children }: { title: string; children: string }) {
+  return (
+    <>
+      <Text style={styles.h}>{title}</Text>
+      <Text style={styles.p}>{children}</Text>
+    </>
+  );
 }
 
-export function TermsAndConditionsModal({ visible, onClose, onAccept }: Props) {
-  const [checked, setChecked] = useState(false);
+function TermsBody() {
+  return (
+    <>
+      <Text style={styles.p}>
+        Estos Términos y Condiciones (los “Términos”) regulan el acceso y el uso de la aplicación
+        YaChanga (la “Plataforma”), operada por [RAZÓN SOCIAL], CUIT [CUIT], con domicilio en
+        [DOMICILIO LEGAL]. Al crear una cuenta, o al aceptar una versión nueva, declarás que leíste
+        estos Términos y que los aceptás. Esa aceptación queda registrada con la fecha y la versión
+        vigente.
+      </Text>
 
-  const today = useMemo(() => formatTodayEs(), []);
+      <Section title="1. Quiénes pueden usar YaChanga">
+        La Plataforma es para personas mayores de 18 años. Hay tres formas de uso, y una misma
+        cuenta puede reunir más de una cuando la app lo permite. Cliente: pedís trabajos y, si hace
+        falta, materiales. Profesional o trabajador: ofrecés oficios, cotizás y realizás el trabajo.
+        Para aparecer en las búsquedas cargás oficios, una descripción y una zona de cobertura.
+        Comercio: un local que cotiza y vende materiales. El alta del local puede quedar pendiente
+        de aprobación de un administrador antes de operar.
+      </Section>
+
+      <Section title="2. Qué hace YaChanga">
+        YaChanga es un intermediario tecnológico. Pone en contacto a clientes, profesionales y
+        comercios, muestra cotizaciones y cobra el costo de servicio de la Plataforma. No es el
+        empleador de los profesionales, no los dirige como personal propio y no es parte del acuerdo
+        de trabajo entre cliente y profesional ni de la compraventa entre cliente y comercio. Cada
+        profesional y cada comercio actúa por su cuenta.
+      </Section>
+
+      <Section title="3. La cuenta">
+        Para registrarte se piden, según el caso, nombre, apellido, documento, fecha de nacimiento,
+        correo, teléfono, contraseña, foto y una dirección. Si ofrecés servicios, también una
+        descripción, los oficios y un radio de cobertura. Si das de alta un comercio, los datos del
+        local (nombre, foto o logo, dirección, rubros y horario) son distintos de los del titular.
+        Sos responsable de que los datos sean verdaderos y de cuidar tu contraseña. Podés dar de
+        baja el perfil profesional y seguir usando la cuenta como cliente: en ese caso dejás de
+        aparecer en las búsquedas como trabajador y tus publicaciones dejan de verse en el inicio.
+      </Section>
+
+      <Section title="4. Cotizaciones y precio del trabajo">
+        El profesional cotiza el trabajo desde el chat. El precio final que ve el cliente incluye el
+        costo de servicio de YaChanga. Ese costo de servicio se paga con Mercado Pago. El importe
+        del profesional se arregla entre cliente y profesional; la app permite avisar ese pago y
+        confirmarlo. Si la cotización cambia, el costo de servicio que muestra la app puede
+        actualizarse, y la diferencia de ese costo también se paga por Mercado Pago. YaChanga no
+        guarda los datos de tu tarjeta: el cobro lo procesa Mercado Pago.
+      </Section>
+
+      <Section title="5. PIN para iniciar el trabajo">
+        Cuando el costo de servicio queda acreditado, el cliente recibe un PIN. El profesional lo
+        ingresa para dar por iniciado el trabajo. No lo compartas con terceros. Varios intentos
+        incorrectos pueden bloquear la verificación por un tiempo.
+      </Section>
+
+      <Section title="6. Cierre del trabajo y del chat">
+        El profesional marca el trabajo como terminado y el cliente da su conformidad. El chat entre
+        esas dos personas se quita de la app cuando el trabajo está finalizado, las dos partes lo
+        confirmaron y el pago figura completo. También se quita cuando un reclamo de garantía se
+        cierra con la conformidad del cliente. Si entre las mismas personas queda otro trabajo en
+        curso o un reclamo abierto, ese chat sigue disponible. Al cerrarse el chat, su contenido y
+        las imágenes asociadas pueden eliminarse.
+      </Section>
+
+      <Section title="7. Garantía y reclamos">
+        Al cotizar, el profesional puede incluir una garantía de 1 a 60 días, o no incluir ninguna.
+        El plazo empieza cuando el trabajo queda finalizado por primera vez. Durante ese plazo el
+        cliente puede iniciar un reclamo, que se coordina por un chat de la Plataforma. El
+        profesional puede marcar el arreglo como hecho y el cliente lo confirma. Si el cliente no
+        responde dentro de las 72 horas desde que el profesional marcó el arreglo, el reclamo puede
+        cerrarse de forma automática.
+      </Section>
+
+      <Section title="8. Calificaciones">
+        Cuando el trabajo está finalizado, el cliente puede calificar y dejar un comentario sobre el
+        profesional. Esas reseñas pueden mostrarse en el perfil del profesional, junto con el
+        promedio.
+      </Section>
+
+      <Section title="9. Chat y moderación">
+        El chat es el canal entre cliente y profesional para coordinar el trabajo. No está permitido
+        enviar teléfonos ni correos electrónicos en los mensajes: la Plataforma puede rechazarlos.
+        También puede limitar la extensión, la frecuencia y las imágenes. Podés bloquear a otra
+        persona; mientras el bloqueo esté activo no se envían mensajes entre ustedes. Los avisos de
+        sistema (por ejemplo un pago, un PIN o un reclamo) los genera la Plataforma.
+      </Section>
+
+      <Section title="10. Materiales y comercios">
+        Un cliente o un profesional puede pedir materiales a comercios. El comercio ve el pedido
+        para cotizarlo. Si se indicó una dirección de entrega, el comercio la usa para el flete. El
+        teléfono, el correo y el documento del cliente no se comparten con el comercio por la app.
+        El nombre, el teléfono y la dirección del comercio se muestran al cliente recién cuando está
+        pago el costo de servicio YaChanga de ese pedido, que se abona con Mercado Pago. El precio
+        de los materiales se paga al comercio, aparte de ese costo de servicio. El comercio puede
+        cotizar retiro en el local, envío sin cargo o envío con costo. Si hay un costo de flete,
+        quien pide elige si ese envío entra en la orden.
+      </Section>
+
+      <Section title="11. PIN de retiro de materiales">
+        Al pagar el costo de servicio de materiales, quien pagó ve un código de orden y un PIN de
+        retiro. Si el profesional que cargó el pedido es quien pagó, o la app lo identifica como
+        cliente de esa orden, también puede verlos. El comercio nunca ve el PIN: lo ingresa para
+        cerrar la entrega. No lo publiques ni se lo pases a terceros.
+      </Section>
+
+      <Section title="12. Ubicación">
+        La dirección de tu perfil se usa para operar la cuenta y, si sos profesional, para la zona
+        de cobertura. La dirección del trabajo se comparte con el profesional cuando el costo de
+        servicio está pago. La dirección del comercio y, si corresponde, la de entrega de materiales
+        se usan para cotizar, retirar o enviar.
+      </Section>
+
+      <Section title="13. Notificaciones">
+        Si autorizás las notificaciones del dispositivo, guardamos un identificador para avisarte de
+        la actividad de tu cuenta, por ejemplo trabajos, mensajes o pedidos. Podés desactivarlas
+        desde la configuración del teléfono.
+      </Section>
+
+      <Section title="14. Datos personales">
+        Tratamos datos personales según la Ley 25.326 de Protección de Datos Personales de la
+        República Argentina. Pueden incluir identidad y contacto, documento, fecha de nacimiento,
+        foto, dirección y ubicación, oficios, mensajes, reseñas, datos del comercio y el
+        identificador de notificaciones. Los usamos para crear y administrar la cuenta, conectar a
+        las partes, cobrar el costo de servicio, prevenir abusos y cumplir la ley. Tenés derecho de
+        acceso, de rectificación y de supresión de tus datos. Para ejercerlos escribinos a [EMAIL DE
+        CONTACTO]. La autoridad de aplicación es la Agencia de Acceso a la Información Pública.
+      </Section>
+
+      <Section title="15. Conducta prohibida">
+        No uses la Plataforma para fraudes, suplantación de identidad, acoso, discriminación,
+        contenido ilícito ni para eludir los pagos o los controles de la app. No cargues datos
+        falsos ni interfieras con el funcionamiento del servicio.
+      </Section>
+
+      <Section title="16. Suspensión de la cuenta">
+        YaChanga puede suspender o dar de baja una cuenta ante un incumplimiento de estos Términos,
+        un uso abusivo o un requerimiento legal. Una cuenta dada de baja no puede ingresar hasta que
+        se reactive. Para pedir la reactivación escribinos a [EMAIL DE CONTACTO].
+      </Section>
+
+      <Section title="17. Límite de responsabilidad">
+        En la medida en que la ley lo permita, YaChanga no responde por la ejecución del trabajo, la
+        calidad o la entrega de los materiales, los daños personales o materiales, los robos, las
+        demoras, los desacuerdos entre usuarios ni por la veracidad de lo que cada persona declara
+        en su perfil. Las recomendaciones de la app no reemplazan tu propio criterio.
+      </Section>
+
+      <Section title="18. Cambios de estos Términos">
+        Podemos actualizar estos Términos. La versión y la fecha de actualización figuran al
+        comienzo. Si la versión cambia, la app te pide aceptarla para seguir usándola. Si no
+        aceptás, no vas a poder continuar con esa cuenta.
+      </Section>
+
+      <Section title="19. Ley y jurisdicción">
+        Estos Términos se rigen por las leyes de la República Argentina. Para cualquier controversia
+        son competentes los tribunales ordinarios de [JURISDICCIÓN], sin perjuicio de las normas de
+        defensa del consumidor que resulten irrenunciables.
+      </Section>
+
+      <Section title="20. Contacto">
+        [RAZÓN SOCIAL] — [EMAIL DE CONTACTO]
+      </Section>
+    </>
+  );
+}
+
+export function TermsAndConditionsModal({
+  visible,
+  mode,
+  onClose,
+  onAccept,
+  accepting = false,
+  acceptError = null,
+}: Props) {
+  const readOnly = mode === 'read';
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={() => {
+        if (readOnly) onClose?.();
+      }}
+    >
       <View style={styles.backdrop}>
         <SafeAreaView style={styles.sheetSafe} edges={['bottom', 'left', 'right']}>
           <View style={styles.sheet}>
             <View style={styles.header}>
               <View style={styles.headerLeft}>
                 <Text style={styles.title}>Términos y Condiciones</Text>
-                <Text style={styles.subtitle}>Última actualización: {today}</Text>
+                <Text style={styles.subtitle}>
+                  Última actualización: {TERMS_UPDATED_LABEL} · Versión {TERMS_VERSION}
+                </Text>
               </View>
-              <Pressable
-                onPress={onClose}
-                accessibilityRole="button"
-                accessibilityLabel="Cerrar términos y condiciones"
-                hitSlop={10}
-                style={({ pressed }) => [styles.iconBtn, pressed && styles.iconBtnPressed]}
-              >
-                <Ionicons name="close" size={20} color={colors.textSecondary} />
-              </Pressable>
+              {readOnly ? (
+                <Pressable
+                  onPress={onClose}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cerrar términos y condiciones"
+                  hitSlop={10}
+                  style={({ pressed }) => [styles.iconBtn, pressed && styles.iconBtnPressed]}
+                >
+                  <Ionicons name="close" size={20} color={colors.textSecondary} />
+                </Pressable>
+              ) : null}
             </View>
 
             <ScrollView
@@ -54,138 +243,45 @@ export function TermsAndConditionsModal({ visible, onClose, onAccept }: Props) {
               contentContainerStyle={styles.bodyContent}
               showsVerticalScrollIndicator={false}
             >
-              <Text style={styles.p}>
-                Este documento (los “Términos”) regula el acceso y uso de la aplicación YaChanga (la
-                “Plataforma”). Al registrarte, declarás que leíste y comprendiste estos Términos y
-                aceptás quedar vinculado/a por ellos.
-              </Text>
-
-              <Text style={styles.h}>1. Rol de la Plataforma (intermediario tecnológico)</Text>
-              <Text style={styles.p}>
-                La Plataforma actúa exclusivamente como un intermediario tecnológico que facilita el
-                contacto entre personas usuarias que solicitan servicios (“Clientes”) y personas usuarias
-                que ofrecen servicios (“Trabajadores”). La Plataforma no presta, no supervisa ni garantiza
-                la ejecución de los servicios contratados entre Usuarios.
-              </Text>
-
-              <Text style={styles.h}>2. Relación entre Usuarios</Text>
-              <Text style={styles.p}>
-                Cualquier acuerdo, negociación, precio, alcance, condiciones, plazos y forma de pago del
-                servicio es celebrado directamente entre Cliente y Trabajador. La Plataforma no es parte
-                del contrato de prestación de servicios que pudiera existir entre Usuarios.
-              </Text>
-
-              <Text style={styles.h}>3. Exención de responsabilidad (limitación)</Text>
-              <Text style={styles.p}>
-                En la medida máxima permitida por la normativa aplicable, la Plataforma no será
-                responsable, directa ni indirectamente, por:
-              </Text>
-              <View style={styles.bullets}>
-                <Text style={styles.bullet}>
-                  • Daños físicos, lesiones, accidentes o cualquier perjuicio personal ocurrido durante o
-                  con motivo de la prestación del servicio.
-                </Text>
-                <Text style={styles.bullet}>
-                  • Daños materiales a bienes, inmuebles o herramientas, incluyendo desperfectos,
-                  deterioros o pérdidas.
-                </Text>
-                <Text style={styles.bullet}>
-                  • Robos, hurtos, pérdidas de propiedad, extravíos o apropiación indebida de bienes
-                  durante o con motivo del servicio.
-                </Text>
-                <Text style={styles.bullet}>
-                  • Incidentes derivados de la prestación del servicio, incluyendo incumplimientos,
-                  demoras, resultados insatisfactorios o conflictos entre Usuarios.
-                </Text>
-                <Text style={styles.bullet}>
-                  • La veracidad absoluta, exactitud, actualidad o autenticidad de perfiles, identidad,
-                  credenciales, matrículas, antecedentes, habilitaciones, experiencia o referencias
-                  declaradas por los Usuarios.
-                </Text>
-              </View>
-
-              <Text style={styles.h}>4. Recomendaciones de seguridad</Text>
-              <Text style={styles.p}>
-                Recomendamos verificar referencias, acordar condiciones por escrito dentro del chat de la
-                Plataforma cuando sea posible, y tomar precauciones razonables antes, durante y después
-                de la prestación del servicio (por ejemplo, requerir presupuestos, comprobantes y
-                documentación pertinente).
-              </Text>
-
-              <Text style={styles.h}>5. Contenido, conducta y uso</Text>
-              <Text style={styles.p}>
-                El Usuario se obliga a utilizar la Plataforma de manera lícita, sin publicar contenido
-                engañoso, discriminatorio, violento o que infrinja derechos de terceros. La Plataforma
-                podrá suspender cuentas ante sospecha razonable de fraude o incumplimiento de estos
-                Términos.
-              </Text>
-
-              <Text style={styles.h}>6. Tratamiento de datos (resumen)</Text>
-              <Text style={styles.p}>
-                La Plataforma podrá tratar datos necesarios para operar el servicio (por ejemplo, perfil,
-                ubicación base y mensajes). Placeholder: aquí se integrará una Política de Privacidad
-                completa (finalidad, base legal, plazos, derechos ARCO, etc.).
-              </Text>
-
-              <Text style={styles.h}>7. Modificaciones</Text>
-              <Text style={styles.p}>
-                La Plataforma puede actualizar estos Términos. Te notificaremos cambios materiales por
-                medios razonables. El uso continuado tras la vigencia de cambios implica aceptación.
-              </Text>
-
-              <Text style={styles.h}>8. Jurisdicción y ley aplicable</Text>
-              <Text style={styles.p}>
-                Placeholder: indicar ley aplicable, jurisdicción competente y domicilio legal de la
-                Plataforma.
-              </Text>
+              <TermsBody />
             </ScrollView>
 
             <View style={styles.footer}>
-              <Pressable
-                onPress={() => setChecked((v) => !v)}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked }}
-                accessibilityLabel="He leído y acepto los términos"
-                hitSlop={6}
-                style={({ pressed }) => [styles.checkRow, pressed && styles.checkRowPressed]}
-              >
-                <View style={[styles.checkbox, checked && styles.checkboxOn]}>
-                  {checked ? <Ionicons name="checkmark" size={16} color="#fff" /> : null}
-                </View>
-                <Text style={styles.checkText}>He leído y acepto los términos</Text>
-              </Pressable>
-
-              <View style={styles.actions}>
+              {readOnly ? (
                 <Pressable
                   onPress={onClose}
                   accessibilityRole="button"
                   style={({ pressed }) => [styles.secondaryBtn, pressed && styles.btnPressed]}
                 >
-                  <Text style={styles.secondaryBtnText}>Volver</Text>
+                  <Text style={styles.secondaryBtnText}>Cerrar</Text>
                 </Pressable>
-
-                <Pressable
-                  disabled={!checked}
-                  onPress={() => {
-                    onAccept();
-                    setChecked(false);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: !checked }}
-                  style={({ pressed }) => [
-                    styles.primaryBtn,
-                    !checked && styles.primaryBtnDisabled,
-                    pressed && checked && styles.btnPressed,
-                  ]}
-                >
-                  <Text style={styles.primaryBtnText}>Continuar</Text>
-                </Pressable>
-              </View>
-
-              <Text style={styles.disclaimer}>
-                Al continuar, confirmás que aceptás estos Términos y que comprendés que YaChanga es un
-                intermediario tecnológico.
-              </Text>
+              ) : (
+                <>
+                  <Pressable
+                    disabled={accepting}
+                    onPress={onAccept}
+                    accessibilityRole="button"
+                    accessibilityLabel="Acepto los términos y condiciones"
+                    accessibilityState={{ disabled: accepting }}
+                    style={({ pressed }) => [
+                      styles.primaryBtn,
+                      accepting && styles.primaryBtnDisabled,
+                      pressed && !accepting && styles.btnPressed,
+                    ]}
+                  >
+                    {accepting ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.primaryBtnText}>Acepto</Text>
+                    )}
+                  </Pressable>
+                  {acceptError ? <Text style={styles.error}>{acceptError}</Text> : null}
+                  <Text style={styles.disclaimer}>
+                    Tenés que aceptar para seguir usando YaChanga. Al tocar Acepto confirmás esta
+                    versión ({TERMS_VERSION}).
+                  </Text>
+                </>
+              )}
             </View>
           </View>
         </SafeAreaView>
@@ -244,8 +340,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     lineHeight: 19,
   },
-  bullets: { marginTop: spacing.sm, gap: 8 },
-  bullet: { fontSize: 13, color: colors.textSecondary, lineHeight: 19, fontWeight: '600' },
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
@@ -254,33 +348,7 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     backgroundColor: colors.background,
   },
-  checkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radii.card,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  checkRowPressed: { opacity: 0.9 },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.background,
-  },
-  checkboxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  checkText: { flex: 1, fontSize: 13, fontWeight: '800', color: colors.text },
-  actions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.md },
   secondaryBtn: {
-    flex: 1,
     height: 48,
     borderRadius: radii.button,
     alignItems: 'center',
@@ -291,7 +359,6 @@ const styles = StyleSheet.create({
   },
   secondaryBtnText: { fontSize: 15, fontWeight: '900', color: colors.text },
   primaryBtn: {
-    flex: 1,
     height: 48,
     borderRadius: radii.button,
     alignItems: 'center',
@@ -301,6 +368,13 @@ const styles = StyleSheet.create({
   primaryBtnDisabled: { opacity: 0.55 },
   primaryBtnText: { fontSize: 15, fontWeight: '900', color: '#fff' },
   btnPressed: { opacity: 0.9 },
+  error: {
+    marginTop: spacing.sm,
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.error,
+    lineHeight: 16,
+  },
   disclaimer: {
     marginTop: spacing.md,
     fontSize: 11,

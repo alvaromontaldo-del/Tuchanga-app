@@ -13,6 +13,7 @@ import { usePasswordRecoveryDeepLink } from './usePasswordRecoveryDeepLink';
 import { FeedProvider } from '../context/FeedContext';
 import { SplashLoadingScreen } from '../components/splash/SplashLoadingScreen';
 import { SessionRolePickerModal } from '../components/auth/SessionRolePickerModal';
+import { TermsAcceptanceGate } from '../components/legal/TermsAcceptanceGate';
 import { PagoCheckoutScreen } from '../screens/pagos/PagoCheckoutScreen';
 import { PagoRetornoScreen } from '../screens/pagos/PagoRetornoScreen';
 import { usePagoRetornoDeepLink } from './usePagoRetornoDeepLink';
@@ -115,6 +116,7 @@ export function RootNavigator() {
   }
 
   return (
+    <>
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Main" component={MainScreen} />
       <Stack.Screen
@@ -146,5 +148,7 @@ export function RootNavigator() {
         }}
       />
     </Stack.Navigator>
+    <TermsAcceptanceGate />
+    </>
   );
 }

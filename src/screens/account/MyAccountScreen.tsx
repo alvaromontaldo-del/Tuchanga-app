@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useScrollToTop } from '@react-navigation/native';
 import {
   Alert,
@@ -26,6 +26,8 @@ import type { AccountStackScreenProps } from '../../navigation/accountTypes';
 import { navigateToInicioTab } from '../../navigation/openAuthModal';
 import { displayNameFromUser, initialsFromAuthUser } from '../../utils/profileDisplay';
 import { accountUi } from './accountUi';
+import { TermsAndConditionsModal } from '../../components/legal/TermsAndConditionsModal';
+import { TERMS_VERSION } from '../../constants/terms';
 
 type Props = AccountStackScreenProps<'MyAccount'>;
 
@@ -84,6 +86,7 @@ export function MyAccountScreen({ navigation }: Props) {
   const reviewCount = user?.reviewCount ?? 0;
   const totalJobsDone = user?.totalJobsDone;
   const scrollRef = useRef<ScrollView | null>(null);
+  const [termsOpen, setTermsOpen] = useState(false);
   useScrollToTop(scrollRef);
   return (
     <AppScreen style={accountUi.screenBg} edges={['top', 'bottom', 'left', 'right']}>
@@ -231,6 +234,13 @@ export function MyAccountScreen({ navigation }: Props) {
           />
 
           <Row
+            icon="document-text-outline"
+            title="Términos y condiciones"
+            subtitle={`Versión ${TERMS_VERSION}`}
+            onPress={() => setTermsOpen(true)}
+          />
+
+          <Row
             icon="log-out-outline"
             title="Cerrar sesión"
             destructive
@@ -263,6 +273,11 @@ export function MyAccountScreen({ navigation }: Props) {
           />
         </View>
       </ScrollView>
+      <TermsAndConditionsModal
+        visible={termsOpen}
+        mode="read"
+        onClose={() => setTermsOpen(false)}
+      />
     </AppScreen>
   );
 }
