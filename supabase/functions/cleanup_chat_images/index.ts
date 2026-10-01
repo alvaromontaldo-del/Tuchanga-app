@@ -11,8 +11,10 @@
  * 2) Borra objetos en el bucket de cada foto (chat privado, o job-photos legado)
  * 3) DELETE messages type=image
  *
- * Schedule diario de respaldo, o invoke desde la app al completar reseña/pago.
+ * Lo dispara el cron (header x-function-secret) o los triggers SQL
+ * trg_*_cleanup_chat_images. Un Bearer anónimo o la service role sola no alcanzan.
  */
+import { requireFunctionSecret } from "../_shared/functionSecretGuard.ts";
 import { createAdminClient, json } from "../_shared/supabaseAdmin.ts";
 
 type ExpiredRow = {
@@ -23,23 +25,6 @@ type ExpiredRow = {
   storage_bucket?: string | null;
   closed_at: string;
 };
-
-function authorize(req: Request): boolean {
-  const secret = (Deno.env.get("CLEANUP_CRON_SECRET") ?? "").trim();
-  const auth = req.headers.get("Authorization") ?? "";
-  const service =
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
-    Deno.env.get("SERVICE_ROLE_KEY") ??
-    "";
-  if (secret) {
-    const header = (req.headers.get("x-cleanup-secret") ?? "").trim();
-    if (header && header === secret) return true;
-  }
-  // Service role o usuario autenticado (invoke desde la app tras reseña/pago)
-  if (service && auth === `Bearer ${service}`) return true;
-  if (auth.toLowerCase().startsWith("bearer ") && auth.length > 20) return true;
-  return false;
-}
 
 function pathsByBucket(rows: ExpiredRow[]): Map<string, string[]> {
   const grouped = new Map<string, Set<string>>();
@@ -63,7 +48,7 @@ Deno.serve(async (req) => {
       headers: {
         "access-control-allow-origin": "*",
         "access-control-allow-headers":
-          "authorization, x-client-info, apikey, content-type, x-cleanup-secret",
+          "authorization, x-client-info, apikey, content-type, x-function-secret, x-cleanup-secret",
       },
     });
   }
@@ -72,9 +57,8 @@ Deno.serve(async (req) => {
     return json(405, { error: "method_not_allowed" });
   }
 
-  if (!authorize(req)) {
-    return json(401, { error: "unauthorized" });
-  }
+  const denied = await requireFunctionSecret(req);
+  if (denied) return denied;
 
   let retentionDays: number | null = null;
   let contratacionId: string | null = null;
