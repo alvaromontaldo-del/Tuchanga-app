@@ -1,6 +1,3 @@
-/** Comisión YaChanga = 22% del monto cotizado por el trabajador (ej. $100 → $22). */
-export const COMISION_APP_RATE = 0.22;
-
 export type ContratacionEstadoTrabajo =
   | 'pendiente'
   | 'precio_cotizado'
