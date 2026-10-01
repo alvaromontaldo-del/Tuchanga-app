@@ -53,7 +53,7 @@ export const FAQ_ITEMS: readonly FaqItem[] = [
     id: 'pin',
     question: '¿Para qué es el PIN y qué hago si lo pierdo?',
     answer:
-      'Cuando se acredita el costo de servicio del trabajo, el cliente ve un PIN en el chat, en el recuadro de costo de servicio pagado. Se lo dice al profesional al llegar: el profesional no lo ve en su pantalla y lo escribe para iniciar el trabajo. No se genera otro PIN. Si lo carga mal 5 veces, el ingreso queda bloqueado 15 minutos y después se puede reintentar. El PIN de materiales es otro: está en la orden, y se lo dictás al comercio para que cierre la entrega.',
+      'Cuando se acredita el costo de servicio del trabajo, el cliente ve un PIN en el chat, en el recuadro de costo de servicio pagado. Se lo dice al profesional al llegar: el profesional no lo ve en su pantalla y lo escribe para iniciar el trabajo. No se genera otro PIN. Si lo carga mal 5 veces, el ingreso queda bloqueado 15 minutos y después se puede reintentar. El PIN de materiales es otro: después de pagar el costo de servicio lo ven el cliente que pagó y el profesional que creó el pedido, aunque el profesional no haya pagado. Se lo dictan al comercio, que nunca lo ve y lo escribe para cerrar la entrega.',
   },
   {
     id: 'pago-no-acreditado',
@@ -77,7 +77,7 @@ export const FAQ_ITEMS: readonly FaqItem[] = [
     id: 'materiales',
     question: '¿Cómo funcionan los materiales, el flete y el PIN del comercio?',
     answer:
-      'El profesional arma el pedido y lo envía a comercios del rubro. Cada comercio cotiza. El cliente elige los ítems. El flete se suma solo si lo marca; si no, el retiro es en el local. El costo de servicio de YaChanga de esos materiales se paga con Mercado Pago. Los materiales se le pagan al comercio al retirar, fuera de la app. Hasta ese pago, el comercio queda oculto. Después, el cliente que pagó ve el nombre, el teléfono y la dirección del comercio, el código de orden y el PIN de retiro. El profesional que creó el pedido ve el nombre y la dirección en las solicitudes ya pagas. El PIN no se le muestra al comercio: lo escribe cuando se lo dictan, junto con el código, para cerrar la entrega. El comercio no ve el teléfono ni el mail del cliente. Sí puede ver el nombre de pila y, si el pedido tiene dirección de entrega, esa dirección para cotizar el flete.',
+      'El profesional arma el pedido y lo envía a comercios del rubro. Cada comercio cotiza. El cliente elige los ítems. El flete se suma solo si lo marca; si no, el retiro es en el local. El costo de servicio de YaChanga de esos materiales se paga con Mercado Pago. Los materiales se le pagan al comercio al retirar, fuera de la app. Hasta ese pago, el comercio queda oculto. Después, el cliente que pagó y el profesional que creó el pedido ven el teléfono, la dirección del comercio y el PIN de retiro, aunque el profesional no haya pagado. El comercio nunca ve el PIN: lo escribe cuando se lo dictan, junto con el código, para cerrar la entrega. El comercio no ve el teléfono ni el mail del cliente. Sí puede ver el nombre de pila y, si el pedido tiene dirección de entrega, esa dirección para cotizar el flete.',
   },
   {
     id: 'sin-material',

@@ -29,6 +29,14 @@ describe('preguntas frecuentes', () => {
     expect(text).not.toMatch(/\b22\b/);
   });
 
+  it('el PIN de materiales lo ven el cliente que pagó y el profesional que creó el pedido', () => {
+    const materials = FAQ_ITEMS.find((item) => item.id === 'materiales');
+    expect(materials?.answer).toMatch(/cliente que pagó y el profesional que creó el pedido/);
+    expect(materials?.answer).toMatch(/aunque el profesional no haya pagado/);
+    expect(materials?.answer).toMatch(/teléfono, la dirección del comercio y el PIN de retiro/);
+    expect(materials?.answer).toMatch(/El comercio nunca ve el PIN/);
+  });
+
   it('cubre los problemas que pide la tarjeta', () => {
     const questions = FAQ_ITEMS.map((item) => item.question).join('\n');
     expect(questions).toMatch(/no se presenta/);
