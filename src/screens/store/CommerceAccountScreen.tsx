@@ -216,6 +216,19 @@ export function CommerceAccountScreen({ navigation }: Props) {
 
       <Pressable
         style={({ pressed }) => [styles.rowBtn, pressed && styles.pressed]}
+        onPress={() => navigation.navigate('Faq')}
+        accessibilityRole="button"
+        accessibilityLabel="Preguntas frecuentes"
+      >
+        <Ionicons name="help-circle-outline" size={22} color={colors.text} />
+        <View style={styles.switchText}>
+          <Text style={[styles.rowBtnText, { color: colors.text }]}>Preguntas frecuentes</Text>
+          <Text style={styles.switchSub}>Cómo funciona YaChanga</Text>
+        </View>
+      </Pressable>
+
+      <Pressable
+        style={({ pressed }) => [styles.rowBtn, pressed && styles.pressed]}
         onPress={onChooseRole}
         accessibilityRole="button"
         accessibilityLabel="Elegir otro rol"

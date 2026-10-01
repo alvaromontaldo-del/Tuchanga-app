@@ -218,6 +218,12 @@ export function MyAccountScreen({ navigation }: Props) {
             subtitle="Actualizá tu clave de acceso"
             onPress={() => navigation.navigate('ChangePassword')}
           />
+          <Row
+            icon="help-circle-outline"
+            title="Preguntas frecuentes"
+            subtitle="Cómo funciona YaChanga"
+            onPress={() => navigation.navigate('Faq')}
+          />
 
           <Row
             icon="share-social-outline"
