@@ -10,6 +10,7 @@ import type {
   FreightType,
   MaterialRequestStatus,
 } from '../types/materials';
+import { formatPickupOpeningHours } from '../utils/clientMaterialPickups';
 import { normalizeOrderCodeInput, normalizePinInput } from '../utils/orderCode';
 import {
   buildMaterialCheckoutPayload,
@@ -206,6 +207,7 @@ type QuoteRow = {
         phone?: string | null;
         latitude: number | null;
         longitude: number | null;
+        opening_hours?: unknown;
         store_rubros:
           | {
               rubros: { id: string; name: string } | { id: string; name: string }[] | null;
@@ -219,6 +221,7 @@ type QuoteRow = {
         phone?: string | null;
         latitude: number | null;
         longitude: number | null;
+        opening_hours?: unknown;
         store_rubros:
           | {
               rubros: { id: string; name: string } | { id: string; name: string }[] | null;
@@ -341,6 +344,7 @@ export async function fetchClientQuotesForRequest(
           phone,
           latitude,
           longitude,
+          opening_hours,
           store_rubros (
             rubros ( id, name )
           )
@@ -397,6 +401,7 @@ export async function fetchClientQuotesForRequest(
             ${omitPhone ? '' : 'phone,'}
             latitude,
             longitude,
+            opening_hours,
             store_rubros (
               rubros ( id, name )
             )
@@ -445,6 +450,10 @@ export async function fetchClientQuotesForRequest(
     /** null si la columna no vino (entorno sin la migración de flete opcional). */
     includeFreight: boolean | null;
     acceptedTotal: number | null;
+    paymentGroupId: string | null;
+    /** Fee completo del grupo, repetido en cada orden. No sumar hermanas. */
+    depositAmount: number | null;
+    createdAt: string | null;
   };
   /** quote_id → orden pagada / revelada (nombre+dirección vía SECURITY DEFINER). */
   const paidOrderByQuote = new Map<string, RevealInfo>();
@@ -521,11 +530,14 @@ export async function fetchClientQuotesForRequest(
       contact_revealed_at?: string | null;
       include_freight?: boolean | null;
       accepted_total?: number | string | null;
+      payment_group_id?: string | null;
+      deposit_amount?: number | string | null;
+      created_at?: string | null;
     };
     const ordersWithFreight = await sb
       .from('orders')
       .select(
-        'id, quote_id, deposit_status, status, contact_revealed_at, include_freight, accepted_total',
+        'id, quote_id, deposit_status, status, contact_revealed_at, include_freight, accepted_total, payment_group_id, deposit_amount, created_at',
       )
       .in('quote_id', quoteIds);
     let paidOrders = (ordersWithFreight.data ?? null) as OrderSelectRow[] | null;
@@ -535,7 +547,9 @@ export async function fetchClientQuotesForRequest(
     ) {
       const legacyOrders = await sb
         .from('orders')
-        .select('id, quote_id, deposit_status, status, contact_revealed_at, accepted_total')
+        .select(
+          'id, quote_id, deposit_status, status, contact_revealed_at, accepted_total, payment_group_id, deposit_amount, created_at',
+        )
         .in('quote_id', quoteIds);
       paidOrders = (legacyOrders.data ?? null) as OrderSelectRow[] | null;
     }
@@ -546,16 +560,25 @@ export async function fetchClientQuotesForRequest(
       const dStatus = String((o as { deposit_status?: string }).deposit_status ?? '');
       const rawInclude = (o as { include_freight?: unknown }).include_freight;
       const rawAccepted = (o as { accepted_total?: number | string | null }).accepted_total;
+      const rawDeposit = (o as { deposit_amount?: number | string | null }).deposit_amount;
+      const rawCreated = (o as { created_at?: string | null }).created_at;
+      const rawGroup = (o as { payment_group_id?: string | null }).payment_group_id;
       if (!qid || !oid) continue;
       if (oStatus === 'cancelled') continue;
       const prevBrief = orderByQuote.get(qid);
-      const nextBrief = {
+      const nextBrief: OrderBrief = {
         orderId: oid,
         status: oStatus,
         depositStatus: dStatus,
         includeFreight: parseIncludeFreightFlag(rawInclude),
         acceptedTotal:
           rawAccepted != null && Number.isFinite(Number(rawAccepted)) ? Number(rawAccepted) : null,
+        paymentGroupId: typeof rawGroup === 'string' && rawGroup.trim() ? rawGroup : null,
+        depositAmount:
+          rawDeposit != null && rawDeposit !== '' && Number.isFinite(Number(rawDeposit))
+            ? money(Number(rawDeposit))
+            : null,
+        createdAt: typeof rawCreated === 'string' && rawCreated.trim() ? rawCreated : null,
       };
       if (!prevBrief) {
         orderByQuote.set(qid, nextBrief);
@@ -614,6 +637,9 @@ export async function fetchClientQuotesForRequest(
             depositStatus: '',
             includeFreight: flag,
             acceptedTotal: accepted,
+            paymentGroupId: null,
+            depositAmount: null,
+            createdAt: null,
           });
           continue;
         }
@@ -626,6 +652,36 @@ export async function fetchClientQuotesForRequest(
     }
   } catch {
     // Migración aún no aplicada.
+  }
+
+  const checkoutFeeByGroup = new Map<string, number>();
+  const paymentGroupIds = [
+    ...new Set(
+      [...orderByQuote.values()]
+        .map((order) => order.paymentGroupId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  if (paymentGroupIds.length > 0) {
+    try {
+      const { data: checkoutRows, error: checkoutErr } = await sb
+        .from('material_checkouts')
+        .select('id, service_fee')
+        .in('id', paymentGroupIds);
+      if (!checkoutErr && Array.isArray(checkoutRows)) {
+        for (const row of checkoutRows as Array<{
+          id?: string;
+          service_fee?: number | string | null;
+        }>) {
+          const id = String(row.id ?? '');
+          const fee = Number(row.service_fee);
+          if (!id || !Number.isFinite(fee)) continue;
+          checkoutFeeByGroup.set(id, money(fee));
+        }
+      }
+    } catch {
+      // Sin material_checkouts el fee sale de max(deposit_amount) por grupo.
+    }
   }
 
   const revealedQuoteIds = new Set(paidOrderByQuote.keys());
@@ -778,6 +834,13 @@ export async function fetchClientQuotesForRequest(
       notes: (row.notes ?? '').trim(),
       items,
       createdAt: row.created_at,
+      openingHoursLabel: formatPickupOpeningHours(store.opening_hours),
+      paymentGroupId: orderBrief?.paymentGroupId ?? null,
+      depositAmount: orderBrief?.depositAmount ?? null,
+      orderCreatedAt: orderBrief?.createdAt ?? null,
+      checkoutServiceFee: orderBrief?.paymentGroupId
+        ? (checkoutFeeByGroup.get(orderBrief.paymentGroupId) ?? null)
+        : null,
     };
 
     // Distancia para badge "El más cerca" (coords; no revela identidad).
