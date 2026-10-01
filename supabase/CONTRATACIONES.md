@@ -11,16 +11,28 @@ Renombrada desde `service_jobs`. Una fila nace cuando el trabajador envía el **
 - **Una contratación activa por conversación** (`estado_trabajo` ∉ `finalizado`, `cancelado`, `disputa`).
 - Tras `cancelado` o `disputa`, una nueva cotización crea **nueva fila** (no resetea la anterior).
 
-### Dinero (comisión 22% sobre precio final)
+### Dinero (costo de servicio por tramos, guardado al cotizar)
+
+El monto del profesional es `precio_trabajador`. El costo de servicio es marginal:
+
+- $0–$50.000: 10%
+- $50.000–$200.000: 6% sobre ese tramo
+- $200.000–$500.000: 3% sobre ese tramo
+- por encima de $500.000: tope fijo $23.000
+- piso $5.000
 
 ```
-precio_final   = round(precio_trabajador / (1 - 0.22), 2)
-comision_app   = precio_final - precio_trabajador
+comision_app   = calc_yachanga_service_fee(ceil(precio_trabajador))
+precio_final   = precio_trabajador + comision_app
 ```
+
+La función autoritativa es `public.calc_yachanga_service_fee`, llamada desde `calc_precios_contratacion`. `crear_cotizacion` y `recotizar_en_curso` guardan `comision_app` y `precio_final` en la fila. Una contratación ya creada no se recalcula sola.
+
+El costo de servicio de materiales es otra función (`calculate_material_service_fee`) y no usa estos tramos.
 
 - `precio_trabajador`: neto en mano del prestador (privado en UI del trabajador).
-- `comision_app`: seña inicial (MercadoPago) o diferencia en recotización mayor.
-- `precio_final`: visible para ambos.
+- `comision_app`: seña inicial (MercadoPago) o base de la diferencia en recotización mayor.
+- `precio_final`: visible para ambos. Incluye el costo de servicio.
 
 ### Enums
 

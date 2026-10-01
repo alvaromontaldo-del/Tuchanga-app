@@ -8,7 +8,6 @@ import {
 } from './contratacionesSupabase';
 import { edgeFunctionSecretHeaders } from './edgeFunctionSecret';
 import type { Contratacion } from '../types/contrataciones';
-import { COMISION_APP_RATE } from '../types/contrataciones';
 
 export type QuoteStatus = 'pending' | 'accepted' | 'rejected' | 'seña_pagada' | 'paid';
 
@@ -44,7 +43,18 @@ export type WorkerReview = {
   created_at: string;
 };
 
-export { COMISION_APP_RATE, computeFinalAmount };
+export { computeFinalAmount };
+
+/**
+ * Cotizaciones viejas que solo traen precio_final usaban neto * 1.22.
+ * Sirve para reconstruir el neto; no calcula el costo de una cotización nueva.
+ */
+const LEGACY_FINAL_PER_NET = 1.22;
+
+function feeRateFromStoredAmounts(netAmount: number, finalAmount: number): number {
+  if (!(netAmount > 0) || !(finalAmount >= netAmount)) return 0;
+  return (finalAmount - netAmount) / netAmount;
+}
 
 function toNum(v: unknown): number {
   const n = typeof v === 'number' ? v : Number(v);
@@ -67,8 +77,8 @@ export function chatQuoteFromMessageMetadata(
   const precioFinal = toNum(meta.precio_final);
   const precioTrabajador = toNum(meta.precio_trabajador);
   if (precioFinal <= 0 && precioTrabajador <= 0) return null;
-  const netAmount = precioTrabajador > 0 ? precioTrabajador : precioFinal / (1 + COMISION_APP_RATE);
-  const finalAmount = precioFinal > 0 ? precioFinal : computeFinalAmount(netAmount, COMISION_APP_RATE);
+  const netAmount = precioTrabajador > 0 ? precioTrabajador : precioFinal / LEGACY_FINAL_PER_NET;
+  const finalAmount = precioFinal > 0 ? precioFinal : computeFinalAmount(netAmount);
   const detail =
     typeof meta.service_detail === 'string' && meta.service_detail.trim()
       ? meta.service_detail.trim()
@@ -80,7 +90,7 @@ export function chatQuoteFromMessageMetadata(
     worker_id: typeof meta.worker_id === 'string' ? meta.worker_id : '',
     client_id: typeof meta.client_id === 'string' ? meta.client_id : '',
     net_amount: netAmount,
-    fee_rate: COMISION_APP_RATE,
+    fee_rate: feeRateFromStoredAmounts(netAmount, finalAmount),
     final_amount: finalAmount,
     service_detail: detail,
     status: 'pending',
@@ -114,7 +124,7 @@ export function contratacionToChatQuote(c: Contratacion): ChatQuote {
     worker_id: c.worker_id,
     client_id: c.client_id,
     net_amount: c.precio_trabajador,
-    fee_rate: COMISION_APP_RATE,
+    fee_rate: feeRateFromStoredAmounts(c.precio_trabajador, c.precio_final),
     final_amount: c.precio_final,
     service_detail: c.service_detail,
     status,

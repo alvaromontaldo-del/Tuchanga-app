@@ -46,8 +46,6 @@ import {
 } from '../../services/chatSecuritySupabase';
 import { deleteConversation, loadMessages, subscribeChatMessages } from '../../services/messaging';
 import {
-  COMISION_APP_RATE,
-  computeFinalAmount,
   createQuote,
   createReview,
   fetchConversationParticipants,
@@ -61,6 +59,7 @@ import {
   type QuoteStatus,
 } from '../../services/quotesSupabase';
 import { postPinWorkerChatCopy } from '../../utils/postPinWorkUi';
+import { calculateYachangaServiceFee } from '../../utils/yachangaJobServiceFee';
 import {
   quoteWarrantyLabel,
   WARRANTY_DAYS_MAX,
@@ -428,15 +427,14 @@ export function ChatScreen({
   jobRef.current = job;
   participantsRef.current = participants;
 
-  const feeRate = COMISION_APP_RATE;
   const quoteNetNum = useMemo(() => Math.max(0, Math.floor(quoteNetAmount)), [quoteNetAmount]);
-  const quoteFinalPreview = useMemo(
-    () => computeFinalAmount(quoteNetNum, feeRate),
-    [quoteNetNum, feeRate],
-  );
   const quoteFeePreview = useMemo(
-    () => Math.max(0, quoteFinalPreview - quoteNetNum),
-    [quoteFinalPreview, quoteNetNum],
+    () => calculateYachangaServiceFee(quoteNetNum),
+    [quoteNetNum],
+  );
+  const quoteFinalPreview = useMemo(
+    () => quoteNetNum + quoteFeePreview,
+    [quoteNetNum, quoteFeePreview],
   );
 
   const quoteById = useMemo(() => {
@@ -2416,7 +2414,7 @@ export function ChatScreen({
                   >
                     <Text style={styles.modalTitle}>Cotizar</Text>
                     <Text style={styles.modalText}>
-                      Ingresá el monto neto que querés cobrar. YaChanga suma un 22% (ej. $100 → costo de servicio $22).
+                      Ingresá el monto neto que querés cobrar. YaChanga suma el costo de servicio por tramos sobre ese monto: 10% hasta $50.000, 6% de $50.000 a $200.000 y 3% de $200.000 a $500.000, con un piso de $5.000 y un tope de $23.000. El precio final es tu neto más ese costo.
                     </Text>
 
                     <Text style={styles.fieldLabel}>Monto neto</Text>
@@ -2437,7 +2435,7 @@ export function ChatScreen({
                     </View>
 
                     <View style={styles.quotePreviewRow}>
-                      <Text style={styles.quotePreviewLabel}>Costo de servicio YaChanga (22%)</Text>
+                      <Text style={styles.quotePreviewLabel}>Costo de servicio YaChanga</Text>
                       <Text style={styles.quotePreviewValue}>{formatMoney(quoteFeePreview || 0)}</Text>
                     </View>
 

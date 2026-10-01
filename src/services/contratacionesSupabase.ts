@@ -1,7 +1,6 @@
 import { getSupabaseClient } from '../lib/supabase';
 import { removeSupabaseRealtimeTopic } from '../lib/supabaseRealtime';
 import {
-  COMISION_APP_RATE,
   type Contratacion,
   type ContratacionEstadoPago,
   type ContratacionEstadoTrabajo,
@@ -9,6 +8,7 @@ import {
   type DisponibilidadOpcionEstado,
 } from '../types/contrataciones';
 import { normalizeDisplayAddress } from '../utils/formatAddress';
+import { calculateYachangaServiceFee } from '../utils/yachangaJobServiceFee';
 import { assertWarrantyDays } from '../utils/warrantyDays';
 
 /**
@@ -163,19 +163,22 @@ function readWarrantyDays(v: unknown): number | null {
 }
 
 /**
- * Comisión YaChanga = 22% del monto cotizado por el trabajador (ej. $100 → $22),
- * siempre con Math.ceil. Precio final = neto + comisión.
+ * Espejo de display. El cobro lo fija el servidor en `calc_precios_contratacion`
+ * y queda guardado en la fila. Precio final = neto (CEIL) + costo de servicio.
  */
-export function computeComisionApp(netAmount: number, feeRate = COMISION_APP_RATE): number {
-  const net = Math.max(0, Math.ceil(Number(netAmount) || 0));
-  if (net <= 0 || feeRate <= 0) return 0;
-  return Math.ceil(net * feeRate);
+export function computeComisionApp(netAmount: number): number {
+  const net = Number(netAmount);
+  if (!Number.isFinite(net) || net < 0) return calculateYachangaServiceFee(net);
+  return calculateYachangaServiceFee(Math.ceil(net));
 }
 
-export function computeFinalAmount(netAmount: number, feeRate = COMISION_APP_RATE): number {
-  const net = Math.max(0, Math.ceil(Number(netAmount) || 0));
-  if (net <= 0) return 0;
-  return net + computeComisionApp(net, feeRate);
+export function computeFinalAmount(netAmount: number): number {
+  const net = Number(netAmount);
+  if (!Number.isFinite(net) || net < 0) {
+    throw new Error('El monto del trabajo tiene que ser numérico y no negativo');
+  }
+  const ceiled = Math.ceil(net);
+  return ceiled + calculateYachangaServiceFee(ceiled);
 }
 
 export async function calcPreciosContratacion(
