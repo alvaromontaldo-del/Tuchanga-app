@@ -11,6 +11,11 @@ import { rubroBlobMatchesQuery } from '../utils/rubroSearch';
 export type SearchableWorker = {
   id: string;
   firstName: string;
+  /**
+   * Inicial del apellido para la búsqueda pública.
+   * No es el apellido completo.
+   */
+  lastInitial?: string;
   /** Línea corta para la lista */
   summary: string;
   ratingAverage: number;
@@ -20,7 +25,10 @@ export type SearchableWorker = {
   avatarUrl: string;
   /** Rubros canónicos (nombres del catálogo `rubros.json`) */
   categories: string[];
-  /** Ubicación base del trabajador (misma idea que `profiles.location`). */
+  /**
+   * Punto grueso para un pin (~1 km). No es el domicilio exacto.
+   * La distancia de la tarjeta sale de `SearchWorkerHit.distanceKm`.
+   */
   lat: number;
   lng: number;
   /** Radio en km: solo aparece si el cliente está a ≤ esta distancia. */
