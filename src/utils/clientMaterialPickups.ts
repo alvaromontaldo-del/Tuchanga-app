@@ -25,6 +25,8 @@ export type ClientPickupCardModel = {
   storeName: string;
   title: string;
   address: string | null;
+  /** Teléfono del comercio, solo si el RPC lo devolvió (post-fee, no dueño). */
+  phone: string | null;
   openingHoursLabel: string | null;
   /** Código de orden (N° pedido). Nunca el id de la solicitud. */
   orderCode: string | null;
@@ -127,6 +129,7 @@ export type ClientPickupOrderRow = {
   title?: string | null;
   store_name?: string | null;
   store_address?: string | null;
+  store_phone?: string | null;
   store_opening_hours?: unknown;
   items?: RequestItemRow[] | null;
   quotes?: QuoteRow | QuoteRow[] | null;
@@ -485,6 +488,7 @@ export function mapClientPickupOrders(rows: ClientPickupOrderRow[]): ClientPicku
         storeName: (row.store_name ?? '').trim() || 'Comercio',
         title: (row.title ?? '').trim() || 'Pedido de materiales',
         address: normalizeDisplayAddress(row.store_address ?? '') || null,
+        phone: (row.store_phone ?? '').trim() || null,
         openingHoursLabel: formatPickupOpeningHours(row.store_opening_hours),
         orderCode: code,
         pin: formatPin(row.verification_pin),
@@ -514,6 +518,7 @@ export function mapClientPickupOrders(rows: ClientPickupOrderRow[]): ClientPicku
       storeName: (store?.name ?? '').trim() || 'Comercio',
       title: (request?.title ?? row.title ?? '').trim() || 'Pedido de materiales',
       address: address || null,
+      phone: (row.store_phone ?? '').trim() || null,
       openingHoursLabel: formatPickupOpeningHours(store?.opening_hours),
       orderCode: code,
       pin: formatPin(row.verification_pin),
@@ -565,6 +570,7 @@ export function buildClientPickupCardContent(card: ClientPickupCardModel): Clien
     label: 'Dirección del comercio',
     value: card.address || 'Dirección no informada',
   });
+  if (card.phone) fields.push({ label: 'Teléfono del comercio', value: card.phone });
   if (card.section === 'para_retirar') {
     const available = dateLabel(card.availableAt);
     if (available) fields.push({ label: 'Fecha de disponibilidad', value: available });

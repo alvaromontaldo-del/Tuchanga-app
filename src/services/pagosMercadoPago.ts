@@ -90,10 +90,8 @@ export async function crearPreferenciaSeña(
 export async function crearPreferenciaCostoServicioMateriales(
   orderId: string,
 ): Promise<{ ok: true; data: MpCheckoutResult } | { ok: false; code: MpCheckoutErrorCode; message: string }> {
-  if (!isMercadoPagoEnabled()) {
-    return { ok: false, code: 'mp_not_configured', message: 'MercadoPago no está habilitado en la app.' };
-  }
-
+  // Igual que la seña del chat: EXPO_PUBLIC_MP_ENABLED no viaja en el OTA de Testing.
+  // Si falta el token, mp_crear_preferencia responde mp_not_configured.
   const { data, error } = await invokeEdge('mp_crear_preferencia', {
     order_id: orderId,
   });
@@ -172,10 +170,7 @@ export async function confirmarCostoServicioMaterialesMp(
   orderId: string,
   mpPaymentId?: string,
 ): Promise<ConfirmarSeñaResult> {
-  if (!isMercadoPagoEnabled()) {
-    return { ok: false, message: 'MercadoPago no está habilitado.' };
-  }
-
+  // Mismo criterio que confirmar la seña: no cortar por el flag de la app.
   const { data, error } = await invokeEdge('mp_confirmar_sena', {
     order_id: orderId,
     ...(mpPaymentId ? { mp_payment_id: mpPaymentId } : {}),

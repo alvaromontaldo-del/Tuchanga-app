@@ -22,6 +22,7 @@ import { isSupabaseConfigured } from '../../config/supabase';
 import { useAuth } from '../../context/AuthContext';
 import type { AuthUser } from '../../services/auth';
 import { fetchSearchWorkerHitsFromSupabase } from '../../services/searchWorkersSupabase';
+import { publicWorkerLabel } from '../../utils/publicWorkerSearch';
 import { getSupabaseClient } from '../../lib/supabase';
 import { SearchHeaderBar } from '../../components/search/SearchHeaderBar';
 import { fetchActiveTradeNamesFromSupabase } from '../../services/workerTradesSupabase';
@@ -406,7 +407,7 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
           <WorkerResultCard
             worker={{
               id: item.worker.id,
-              firstName: item.worker.firstName,
+              firstName: publicWorkerLabel(item.worker.firstName, item.worker.lastInitial),
               summary: item.worker.summary,
               avatarUrl: item.worker.avatarUrl,
               ratingAverage: item.worker.ratingAverage,

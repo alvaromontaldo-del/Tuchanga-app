@@ -9,7 +9,6 @@ import {
 } from 'react-native';
 import { AppButton } from '../../components/common/AppButton';
 import { useAppToast } from '../../components/toast/toast';
-import { isMercadoPagoEnabled } from '../../config/mercadoPago';
 import { colors, radii, spacing } from '../../constants/theme';
 import { openPagoCheckout } from '../../navigation/openPagoCheckout';
 import {
@@ -54,9 +53,7 @@ export function MaterialOrderDetailScreen({ navigation, route }: Props) {
     setLoading(true);
     setError(null);
     try {
-      if (isMercadoPagoEnabled()) {
-        await confirmarCostoServicioMaterialesMp(orderId).catch(() => null);
-      }
+      await confirmarCostoServicioMaterialesMp(orderId).catch(() => null);
       const data = await fetchMaterialGroupReveals(orderId);
       setReveals(data);
     } catch (e) {
@@ -75,30 +72,26 @@ export function MaterialOrderDetailScreen({ navigation, route }: Props) {
   const onPayServiceFee = useCallback(async () => {
     setPaying(true);
     try {
-      if (isMercadoPagoEnabled()) {
-        const synced = await confirmarCostoServicioMaterialesMp(orderId);
-        if (synced.ok || synced.already_paid) {
-          await refresh();
-          toast.success('Costo de servicio YaChanga acreditado.', 'Pago');
-          return;
-        }
-        const result = await crearPreferenciaCostoServicioMateriales(orderId);
-        if (!result.ok) {
-          throw new Error(
-            result.code === 'mp_not_configured'
-              ? 'Mercado Pago no está configurado. No se puede acreditar sin pago.'
-              : result.message,
-          );
-        }
-        openPagoCheckout({
-          materialOrderId: orderId,
-          checkoutUrl: result.data.checkout_url,
-          sandbox: Boolean(result.data.sandbox),
-        });
+      const synced = await confirmarCostoServicioMaterialesMp(orderId);
+      if (synced.ok || synced.already_paid) {
+        await refresh();
+        toast.success('Costo de servicio YaChanga acreditado.', 'Pago');
         return;
       }
-
-      toast.error('Mercado Pago no está habilitado. No se puede acreditar sin pago.', 'Pago');
+      const result = await crearPreferenciaCostoServicioMateriales(orderId);
+      if (!result.ok) {
+        throw new Error(
+          result.code === 'mp_not_configured'
+            ? 'Mercado Pago no está configurado. No se puede acreditar sin pago.'
+            : result.message,
+        );
+      }
+      openPagoCheckout({
+        materialOrderId: orderId,
+        checkoutUrl: result.data.checkout_url,
+        sandbox: Boolean(result.data.sandbox),
+      });
+      return;
     } catch (e) {
       const failure = describePaymentStartFailure(
         e,
@@ -199,6 +192,9 @@ export function MaterialOrderDetailScreen({ navigation, route }: Props) {
                 ? normalizeDisplayAddress(r.storeAddress.trim())
                 : 'No informada — contactá al comercio'}
             </Text>
+            {r.storePhone?.trim() ? (
+              <Text style={styles.line}>Tel: {r.storePhone.trim()}</Text>
+            ) : null}
             <Text style={styles.line}>
               A abonar: <Text style={styles.strong}>{formatMoneyAr(r.acceptedTotal ?? 0)}</Text>
             </Text>

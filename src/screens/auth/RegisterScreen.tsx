@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { ensureGalleryPermission, ensureCameraPermission } from '../../utils/mediaPermissions';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Modal,
   Image,
   Platform,
@@ -17,6 +18,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { AppScreen } from '../../components/layout/AppScreen';
 import { BrandLogoHorizontal } from '../../components/brand/BrandMark';
@@ -24,6 +26,7 @@ import { AppButton } from '../../components/common/AppButton';
 import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
 import { AppTextInput } from '../../components/common/AppTextInput';
 import { ModeratedTextField } from '../../components/common/ModeratedTextField';
+import { AddressDeliveryField } from '../../components/location/AddressDeliveryField';
 import { LocationMap } from '../../components/location/LocationMap';
 import { SingleSelectModal } from '../../components/common/SingleSelectModal';
 import { TradeSearchModal } from '../../components/search/TradeSearchModal';
@@ -135,6 +138,21 @@ export function RegisterScreen({ navigation, route }: Props) {
   const asCommerce = Boolean(route.params?.asCommerce);
   const asProfessional = Boolean(route.params?.asProfessional) && !asCommerce;
 
+  const leaveRegister = useCallback(() => {
+    if (navigation.canGoBack()) navigation.goBack();
+    else navigation.navigate('Login', { asCommerce });
+  }, [asCommerce, navigation]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+        leaveRegister();
+        return true;
+      });
+      return () => subscription.remove();
+    }, [leaveRegister]),
+  );
+
   useEffect(() => {
     if (!flashMessage) return;
     toast.info(flashMessage, 'YaChanga');
@@ -171,7 +189,6 @@ export function RegisterScreen({ navigation, route }: Props) {
   const [storeAddress, setStoreAddress] = useState('');
   const [storeLat, setStoreLat] = useState<number | null>(null);
   const [storeLng, setStoreLng] = useState<number | null>(null);
-  const [storeLocating, setStoreLocating] = useState(false);
   const [storeRubros, setStoreRubros] = useState<StoreRubro[]>([]);
   const [selectedStoreRubros, setSelectedStoreRubros] = useState<string[]>([]);
   const [storeOpeningHours, setStoreOpeningHours] = useState<StoreDaySchedule[]>(
@@ -639,52 +656,6 @@ export function RegisterScreen({ navigation, route }: Props) {
     }
   }
 
-  async function locateStore() {
-    setStoreLocating(true);
-    try {
-      const res = await getHighAccuracyPosition();
-      if (!res.ok) {
-        toast.warning(
-          res.reason === 'denied'
-            ? 'Necesitamos permiso de ubicación para marcar el local.'
-            : 'No se pudo obtener el GPS.',
-          'Ubicación del local',
-        );
-        return;
-      }
-      const { lat, lng } = res.position;
-      setStoreLat(lat);
-      setStoreLng(lng);
-      setErrors((p) => ({ ...p, storeLocation: undefined }));
-      try {
-        const addr = await reverseNominatimStreet(lat, lng);
-        if (addr) setStoreAddress(addr);
-        else setStoreAddress((prev) => prev.trim() || 'Ubicación actual');
-      } catch {
-        setStoreAddress((prev) => prev.trim() || 'Ubicación actual');
-      }
-    } finally {
-      setStoreLocating(false);
-    }
-  }
-
-  function useClientAddressForStore() {
-    if (!geo) {
-      toast.warning('Primero cargá la ubicación del titular, más abajo.', 'Dirección');
-      return;
-    }
-    const saved = addressToPersist({
-      typedQuery: activeStreetQuery(addressQuery, typedQueryRef.current),
-      confirmedLabel: confirmedLabelRef.current,
-      currentLabel: geo.address,
-      pinMoved: pinMovedRef.current,
-    });
-    setStoreAddress(saved || geo.address);
-    setStoreLat(geo.lat);
-    setStoreLng(geo.lng);
-    setErrors((p) => ({ ...p, storeAddress: undefined, storeLocation: undefined }));
-  }
-
   useEffect(() => {
     // Al montar: intentamos ubicación precisa (no por IP)
     void locateMe();
@@ -740,7 +711,7 @@ export function RegisterScreen({ navigation, route }: Props) {
       if (!storeAvatarUri) next.storeAvatar = 'La foto o el logo del comercio es obligatorio.';
       if (!storeAddress.trim()) next.storeAddress = 'La dirección del comercio es obligatoria.';
       if (storeLat == null || storeLng == null) {
-        next.storeLocation = 'Marcá la ubicación del local en el mapa o con GPS.';
+        next.storeLocation = 'Elegí una dirección de las sugerencias para ubicar el local.';
       }
       if (selectedStoreRubros.length === 0) {
         next.storeRubros = 'Seleccioná al menos un rubro.';
@@ -934,6 +905,16 @@ export function RegisterScreen({ navigation, route }: Props) {
           showsVerticalScrollIndicator={false}
         >
           <View style={[styles.card, { width: contentWidth }]}>
+            <Pressable
+              onPress={leaveRegister}
+              style={styles.backBtn}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Volver"
+            >
+              <Ionicons name="chevron-back" size={22} color={colors.text} />
+              <Text style={styles.backBtnText}>Volver</Text>
+            </Pressable>
             <View style={styles.brandWrap}>
               <BrandLogoHorizontal
                 variant="register"
@@ -993,32 +974,37 @@ export function RegisterScreen({ navigation, route }: Props) {
                 </Pressable>
                 {errors.storeAvatar ? <Text style={styles.error}>{errors.storeAvatar}</Text> : null}
 
-                <AppTextInput
-                  label="Dirección del local *"
+                <AddressDeliveryField
+                  label="Dirección del comercio *"
+                  showUseCurrentLocation={false}
                   value={storeAddress}
                   onChangeText={(t) => {
                     setStoreAddress(t);
-                    setErrors((p) => ({ ...p, storeAddress: undefined }));
+                    setErrors((p) => ({ ...p, storeAddress: undefined, storeLocation: undefined }));
+                  }}
+                  geo={
+                    storeLat != null && storeLng != null
+                      ? { address: storeAddress, lat: storeLat, lng: storeLng }
+                      : null
+                  }
+                  onGeoChange={(point) => {
+                    if (!point) {
+                      setStoreLat(null);
+                      setStoreLng(null);
+                      return;
+                    }
+                    setStoreAddress(point.address);
+                    setStoreLat(point.lat);
+                    setStoreLng(point.lng);
+                    setErrors((p) => ({
+                      ...p,
+                      storeAddress: undefined,
+                      storeLocation: undefined,
+                    }));
                   }}
                   placeholder="Calle, número, localidad"
-                  maxLength={200}
-                  error={errors.storeAddress}
                 />
-                <View style={styles.storeActions}>
-                  <AppButton
-                    title={storeLocating ? 'Obteniendo GPS…' : 'Usar GPS del local'}
-                    onPress={() => void locateStore()}
-                    loading={storeLocating}
-                    variant="secondary"
-                    style={styles.storeActionBtn}
-                  />
-                  <AppButton
-                    title="Usar la dirección del titular"
-                    onPress={useClientAddressForStore}
-                    variant="secondary"
-                    style={styles.storeActionBtn}
-                  />
-                </View>
+                {errors.storeAddress ? <Text style={styles.error}>{errors.storeAddress}</Text> : null}
                 {errors.storeLocation ? <Text style={styles.error}>{errors.storeLocation}</Text> : null}
                 {storeLat != null && storeLng != null ? (
                   <View style={styles.storeMap}>
@@ -1026,8 +1012,6 @@ export function RegisterScreen({ navigation, route }: Props) {
                       geo={{ lat: storeLat, lng: storeLng }}
                       coverageMeters={0}
                       showCoverage={false}
-                      locating={storeLocating}
-                      onLocateMe={() => void locateStore()}
                       onPinMoved={(lat, lng) => {
                         setStoreLat(lat);
                         setStoreLng(lng);
@@ -1814,6 +1798,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
   },
+  backBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 2,
+    paddingVertical: 8,
+    marginBottom: spacing.xs,
+  },
+  backBtnText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: colors.text,
+  },
   card: {
     alignSelf: 'center',
     paddingTop: 0,
@@ -1899,11 +1896,6 @@ const styles = StyleSheet.create({
   avatarTitle: { fontSize: 15, fontWeight: '800', color: colors.text },
   avatarHint: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
   storeAvatarGap: { marginTop: spacing.sm, marginBottom: spacing.md },
-  storeActions: {
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  storeActionBtn: { marginTop: 0 },
   storeMap: {
     height: 220,
     borderRadius: radii.input,

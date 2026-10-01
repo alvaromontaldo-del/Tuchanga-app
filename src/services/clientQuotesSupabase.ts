@@ -10,6 +10,7 @@ import type {
   FreightType,
   MaterialRequestStatus,
 } from '../types/materials';
+import { formatPickupOpeningHours } from '../utils/clientMaterialPickups';
 import { normalizeOrderCodeInput, normalizePinInput } from '../utils/orderCode';
 import {
   buildMaterialCheckoutPayload,
@@ -188,6 +189,19 @@ export async function fetchClientMaterialRequests(): Promise<ClientMaterialReque
   );
 }
 
+type StoreEmbed = {
+  id: string;
+  name: string;
+  latitude: number | null;
+  longitude: number | null;
+  opening_hours?: unknown;
+  store_rubros:
+    | {
+        rubros: { id: string; name: string } | { id: string; name: string }[] | null;
+      }[]
+    | null;
+};
+
 type QuoteRow = {
   id: string;
   request_id: string;
@@ -198,34 +212,7 @@ type QuoteRow = {
   notes: string | null;
   status: string;
   created_at: string;
-  stores:
-    | {
-        id: string;
-        name: string;
-        address: string | null;
-        phone?: string | null;
-        latitude: number | null;
-        longitude: number | null;
-        store_rubros:
-          | {
-              rubros: { id: string; name: string } | { id: string; name: string }[] | null;
-            }[]
-          | null;
-      }
-    | {
-        id: string;
-        name: string;
-        address: string | null;
-        phone?: string | null;
-        latitude: number | null;
-        longitude: number | null;
-        store_rubros:
-          | {
-              rubros: { id: string; name: string } | { id: string; name: string }[] | null;
-            }[]
-          | null;
-      }[]
-    | null;
+  stores: StoreEmbed | StoreEmbed[] | null;
   quote_items:
     | {
         id?: string;
@@ -266,7 +253,7 @@ type RequestMeta = {
   rubros: { id: string; name: string } | { id: string; name: string }[] | null;
 };
 
-function storeRubros(store: NonNullable<ReturnType<typeof one<NonNullable<QuoteRow['stores']>>>>): {
+function storeRubros(store: StoreEmbed): {
   id: string;
   name: string;
 }[] {
@@ -337,10 +324,9 @@ export async function fetchClientQuotesForRequest(
         stores (
           id,
           name,
-          address,
-          phone,
           latitude,
           longitude,
+          opening_hours,
           store_rubros (
             rubros ( id, name )
           )
@@ -374,9 +360,9 @@ export async function fetchClientQuotesForRequest(
   let quotesData = quotesRes.data;
   let quotesError = quotesRes.error;
   if (quotesError) {
-    // Compat: columna E2 / phone aún no migrada → reintentar sin esos campos.
-    if (/in_stock|alternative_description|item_note|client_decision|phone|schema cache|column/i.test(quotesError.message ?? '')) {
-      const omitPhone = /phone/i.test(quotesError.message ?? '');
+    // Compat: columnas E2 aún no migradas → reintentar sin esos campos.
+    // phone y address del comercio no se piden: salen de get_material_order_reveal.
+    if (/in_stock|alternative_description|item_note|client_decision|schema cache|column/i.test(quotesError.message ?? '')) {
       const legacy = await sb
         .from('quotes')
         .select(
@@ -393,10 +379,9 @@ export async function fetchClientQuotesForRequest(
           stores (
             id,
             name,
-            address,
-            ${omitPhone ? '' : 'phone,'}
             latitude,
             longitude,
+            opening_hours,
             store_rubros (
               rubros ( id, name )
             )
@@ -417,7 +402,7 @@ export async function fetchClientQuotesForRequest(
         .eq('request_id', requestId)
         .in('status', ['sent', 'accepted'])
         .order('created_at', { ascending: true });
-      quotesData = legacy.data;
+      quotesData = legacy.data as typeof quotesData;
       quotesError = legacy.error;
     }
   }
@@ -445,6 +430,10 @@ export async function fetchClientQuotesForRequest(
     /** null si la columna no vino (entorno sin la migración de flete opcional). */
     includeFreight: boolean | null;
     acceptedTotal: number | null;
+    paymentGroupId: string | null;
+    /** Fee completo del grupo, repetido en cada orden. No sumar hermanas. */
+    depositAmount: number | null;
+    createdAt: string | null;
   };
   /** quote_id → orden pagada / revelada (nombre+dirección vía SECURITY DEFINER). */
   const paidOrderByQuote = new Map<string, RevealInfo>();
@@ -521,11 +510,14 @@ export async function fetchClientQuotesForRequest(
       contact_revealed_at?: string | null;
       include_freight?: boolean | null;
       accepted_total?: number | string | null;
+      payment_group_id?: string | null;
+      deposit_amount?: number | string | null;
+      created_at?: string | null;
     };
     const ordersWithFreight = await sb
       .from('orders')
       .select(
-        'id, quote_id, deposit_status, status, contact_revealed_at, include_freight, accepted_total',
+        'id, quote_id, deposit_status, status, contact_revealed_at, include_freight, accepted_total, payment_group_id, deposit_amount, created_at',
       )
       .in('quote_id', quoteIds);
     let paidOrders = (ordersWithFreight.data ?? null) as OrderSelectRow[] | null;
@@ -535,7 +527,9 @@ export async function fetchClientQuotesForRequest(
     ) {
       const legacyOrders = await sb
         .from('orders')
-        .select('id, quote_id, deposit_status, status, contact_revealed_at, accepted_total')
+        .select(
+          'id, quote_id, deposit_status, status, contact_revealed_at, accepted_total, payment_group_id, deposit_amount, created_at',
+        )
         .in('quote_id', quoteIds);
       paidOrders = (legacyOrders.data ?? null) as OrderSelectRow[] | null;
     }
@@ -546,16 +540,25 @@ export async function fetchClientQuotesForRequest(
       const dStatus = String((o as { deposit_status?: string }).deposit_status ?? '');
       const rawInclude = (o as { include_freight?: unknown }).include_freight;
       const rawAccepted = (o as { accepted_total?: number | string | null }).accepted_total;
+      const rawDeposit = (o as { deposit_amount?: number | string | null }).deposit_amount;
+      const rawCreated = (o as { created_at?: string | null }).created_at;
+      const rawGroup = (o as { payment_group_id?: string | null }).payment_group_id;
       if (!qid || !oid) continue;
       if (oStatus === 'cancelled') continue;
       const prevBrief = orderByQuote.get(qid);
-      const nextBrief = {
+      const nextBrief: OrderBrief = {
         orderId: oid,
         status: oStatus,
         depositStatus: dStatus,
         includeFreight: parseIncludeFreightFlag(rawInclude),
         acceptedTotal:
           rawAccepted != null && Number.isFinite(Number(rawAccepted)) ? Number(rawAccepted) : null,
+        paymentGroupId: typeof rawGroup === 'string' && rawGroup.trim() ? rawGroup : null,
+        depositAmount:
+          rawDeposit != null && rawDeposit !== '' && Number.isFinite(Number(rawDeposit))
+            ? money(Number(rawDeposit))
+            : null,
+        createdAt: typeof rawCreated === 'string' && rawCreated.trim() ? rawCreated : null,
       };
       if (!prevBrief) {
         orderByQuote.set(qid, nextBrief);
@@ -614,6 +617,9 @@ export async function fetchClientQuotesForRequest(
             depositStatus: '',
             includeFreight: flag,
             acceptedTotal: accepted,
+            paymentGroupId: null,
+            depositAmount: null,
+            createdAt: null,
           });
           continue;
         }
@@ -626,6 +632,36 @@ export async function fetchClientQuotesForRequest(
     }
   } catch {
     // Migración aún no aplicada.
+  }
+
+  const checkoutFeeByGroup = new Map<string, number>();
+  const paymentGroupIds = [
+    ...new Set(
+      [...orderByQuote.values()]
+        .map((order) => order.paymentGroupId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  if (paymentGroupIds.length > 0) {
+    try {
+      const { data: checkoutRows, error: checkoutErr } = await sb
+        .from('material_checkouts')
+        .select('id, service_fee')
+        .in('id', paymentGroupIds);
+      if (!checkoutErr && Array.isArray(checkoutRows)) {
+        for (const row of checkoutRows as Array<{
+          id?: string;
+          service_fee?: number | string | null;
+        }>) {
+          const id = String(row.id ?? '');
+          const fee = Number(row.service_fee);
+          if (!id || !Number.isFinite(fee)) continue;
+          checkoutFeeByGroup.set(id, money(fee));
+        }
+      }
+    } catch {
+      // Sin material_checkouts el fee sale de max(deposit_amount) por grupo.
+    }
   }
 
   const revealedQuoteIds = new Set(paidOrderByQuote.keys());
@@ -741,14 +777,9 @@ export async function fetchClientQuotesForRequest(
     const revealedName =
       revealInfo?.storeName?.trim() ||
       (contactRevealed ? store.name?.trim() || 'Comercio' : '');
-    const revealedAddress =
-      revealInfo?.storeAddress?.trim() ||
-      (contactRevealed ? store.address?.trim() || '' : '');
-    const revealedPhone =
-      revealInfo?.storePhone?.trim() ||
-      (contactRevealed && typeof store.phone === 'string' && store.phone.trim()
-        ? store.phone.trim()
-        : null);
+    // Teléfono y dirección solo vienen del RPC, y solo con fee aprobado.
+    const revealedAddress = revealInfo?.storeAddress?.trim() || '';
+    const revealedPhone = revealInfo?.storePhone?.trim() || null;
 
     const card: ClientQuoteCard = {
       quoteId: row.id,
@@ -778,6 +809,13 @@ export async function fetchClientQuotesForRequest(
       notes: (row.notes ?? '').trim(),
       items,
       createdAt: row.created_at,
+      openingHoursLabel: formatPickupOpeningHours(store.opening_hours),
+      paymentGroupId: orderBrief?.paymentGroupId ?? null,
+      depositAmount: orderBrief?.depositAmount ?? null,
+      orderCreatedAt: orderBrief?.createdAt ?? null,
+      checkoutServiceFee: orderBrief?.paymentGroupId
+        ? (checkoutFeeByGroup.get(orderBrief.paymentGroupId) ?? null)
+        : null,
     };
 
     // Distancia para badge "El más cerca" (coords; no revela identidad).
@@ -815,7 +853,6 @@ export async function fetchClientQuotesForRequest(
     if (!card.contactRevealed) continue;
     const paid = paidOrderByQuote.get(card.quoteId);
     if (!paid) continue;
-    const needsEnrich = true;
     enrichJobs.push(
       (async () => {
         try {
@@ -835,7 +872,7 @@ export async function fetchClientQuotesForRequest(
             card.verificationPin = reveal.verificationPin.padStart(4, '0');
           }
         } catch {
-          // RPC puede faltar en entornos sin migración; el join alcanza cuando hay address.
+          // Sin el RPC no hay teléfono, dirección ni PIN.
         }
       })(),
     );
@@ -1084,48 +1121,11 @@ export async function fetchMaterialOrderReveal(orderId: string): Promise<Materia
     depositStatus === 'paid' ||
     status === 'deposit_paid' ||
     status === 'completed';
-  let storeName = String(row.store_name ?? 'Comercio');
-  let storePhone = row.store_phone != null ? String(row.store_phone) : null;
-  let storeAddress = row.store_address != null ? String(row.store_address) : null;
-  let orderCode = row.order_code != null ? String(row.order_code) : null;
-  let verificationPin = row.verification_pin != null ? String(row.verification_pin) : null;
-
-  if (
-    contactRevealed &&
-    (!storeAddress?.trim() || storeName.includes('oculto') || !orderCode || !verificationPin)
-  ) {
-    try {
-      const { data: orderRow } = await sb
-        .from('orders')
-        .select(
-          'order_code, verification_pin, quote_id, quotes ( stores ( name, phone, address ) )',
-        )
-        .eq('id', orderId)
-        .maybeSingle();
-      const or = orderRow as {
-        order_code?: string | null;
-        verification_pin?: string | null;
-        quotes?: unknown;
-      } | null;
-      if (or?.order_code && !orderCode) orderCode = String(or.order_code);
-      if (or?.verification_pin && !verificationPin) verificationPin = String(or.verification_pin);
-      const quotes = or?.quotes;
-      const quote = Array.isArray(quotes) ? quotes[0] : quotes;
-      const stores = (quote as { stores?: unknown } | null)?.stores;
-      const store = (Array.isArray(stores) ? stores[0] : stores) as {
-        name?: string | null;
-        phone?: string | null;
-        address?: string | null;
-      } | null;
-      if (store) {
-        if (store.name?.trim()) storeName = store.name.trim();
-        if (store.phone?.trim()) storePhone = store.phone.trim();
-        if (store.address?.trim()) storeAddress = store.address.trim();
-      }
-    } catch {
-      // ignore fallback errors
-    }
-  }
+  const storeName = String(row.store_name ?? 'Comercio');
+  const storePhone = row.store_phone != null ? String(row.store_phone) : null;
+  const storeAddress = row.store_address != null ? String(row.store_address) : null;
+  const orderCode = row.order_code != null ? String(row.order_code) : null;
+  const verificationPin = row.verification_pin != null ? String(row.verification_pin) : null;
 
   return {
     orderId: String(row.order_id),

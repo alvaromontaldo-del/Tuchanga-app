@@ -47,7 +47,7 @@ export const CONFORMIDAD_POSITIVA: ConformidadResultado = {
 
 export const CONFORMIDAD_NEGATIVA: ConformidadResultado = {
   estado: 'En disputa',
-  paso: 'El chat sigue visible para coordinar con el profesional. No se abre un comprobante de Mercado Pago. El reclamo de garantía se inicia aparte, desde Trabajos contratados, cuando el trabajo está finalizado y la garantía sigue vigente.',
+  paso: 'El trabajo queda en disputa y el chat sigue visible para coordinar con el profesional. El saldo, si corresponde, se arregla directo con el profesional, fuera de la app. No se abre un comprobante de Mercado Pago.',
 };
 
 /** El cliente tiene que aceptar el saldo fuera de la app antes de pagar el costo. */

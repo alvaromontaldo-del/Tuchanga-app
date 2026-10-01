@@ -111,11 +111,12 @@ GRANT EXECUTE ON FUNCTION public.get_job_client_location(uuid) TO authenticated;
 COMMIT;
 
 -- =============================================================================
--- FASE 2 — NO EJECUTAR hasta que el OTA con la fase 1 esté en producción.
---
--- El bloque de abajo está comentado a propósito. Descomentarlo y correrlo
--- solo después de verificar que la app ya no selecciona verification_pin
+-- FASE 2 — APLICADA en producción el 2026-10-01 (migración
+-- p0_62_64_phase2_revoke_pin_and_profile_pii), después del OTA dacd0e53 (PR #42).
+-- Se verificó antes que ni la app ni el panel admin seleccionan verification_pin
 -- ni dni / telefono / direccion_texto / detalles_ubicacion / birth_date.
+-- Se agregaron al GRANT las columnas de reagendar que faltaban
+-- (reschedule_status, proposed_*), para no cortar su lectura.
 --
 -- location de profiles NO se revoca: la búsqueda usa RPC SECURITY DEFINER.
 --
@@ -130,7 +131,6 @@ COMMIT;
 --   WHERE table_schema = 'public' AND table_name = 'profiles'
 --   ORDER BY ordinal_position;
 -- =============================================================================
-/*
 BEGIN;
 
 REVOKE SELECT ON public.contrataciones FROM authenticated;
@@ -173,11 +173,15 @@ GRANT SELECT (
   warranty_days,
   warranty_anchor_at,
   created_at,
-  updated_at
+  updated_at,
+  reschedule_status,
+  proposed_fecha_trabajo,
+  proposed_hora_inicio,
+  proposed_hora_fin,
+  proposed_datetime
 ) ON public.contrataciones TO authenticated;
 
 REVOKE SELECT (dni, telefono, direccion_texto, detalles_ubicacion, birth_date)
   ON public.profiles FROM authenticated;
 
 COMMIT;
-*/

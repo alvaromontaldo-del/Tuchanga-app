@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '../lib/supabase';
 import type { SearchWorkerHit, SearchableWorker } from '../data/mockSearchWorkers';
+import { coarseCoord, lastNameInitial } from '../utils/publicWorkerSearch';
 import { completedJobsFromPayload } from '../utils/workerReputation';
 import { fetchCompletedJobsByProfileIds } from './workerCompletedJobs';
 
@@ -58,6 +59,7 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
     const worker: SearchableWorker = {
       id: r.profile_id,
       firstName,
+      lastInitial: lastNameInitial(r.apellido),
       summary,
       ratingAverage:
         typeof r.rating_average === 'number' && !Number.isNaN(r.rating_average)
@@ -70,8 +72,9 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
       totalJobsDone: completedJobsFromPayload(r, 'total_jobs_done'),
       avatarUrl: r.avatar_url?.trim() || `${DEFAULT_AVATAR}&id=${encodeURIComponent(r.profile_id)}`,
       categories,
-      lat: r.lat,
-      lng: r.lng,
+      // Pin grueso. La RPC ya redondea; esto cubre una base todavía sin el SQL.
+      lat: coarseCoord(Number(r.lat)),
+      lng: coarseCoord(Number(r.lng)),
       coverageKm: Math.max(1, Math.floor(Number(r.coverage_km) || 1)),
     };
 
@@ -80,6 +83,8 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
       distanceKm: Math.max(0, Number(r.distance_km) || 0),
     };
   });
+
+  hits.sort((a, b) => a.distanceKm - b.distanceKm);
 
   const missing = hits.filter((h) => h.worker.totalJobsDone == null).map((h) => h.worker.id);
   if (missing.length === 0) return hits;
