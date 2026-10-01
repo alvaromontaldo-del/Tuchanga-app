@@ -1,18 +1,16 @@
 import { providedFunctionSecret, secretsMatch } from "./functionSecret.ts";
+import { resolveEdgeFunctionSecret } from "./secretResolver.ts";
 import { json } from "./supabaseAdmin.ts";
 
 /**
  * Secreto compartido de push_on_* y cleanup_chat_images.
- * EDGE_FUNCTION_SECRET es el nombre canónico. CLEANUP_CRON_SECRET se acepta
- * si el canónico no está, para no cortar un cron que ya lo tenía.
- * 503 si no hay secreto configurado; 401 si el header falta o no coincide.
+ * Primero EDGE_FUNCTION_SECRET (alias de entorno CLEANUP_CRON_SECRET).
+ * Si el entorno está vacío, Vault `edge_function_secret` vía
+ * public.get_edge_function_secret, cacheado por isolate.
+ * 503 si no hay secreto; 401 si el header falta o no coincide.
  */
-export function requireFunctionSecret(req: Request): Response | null {
-  const expected = (
-    Deno.env.get("EDGE_FUNCTION_SECRET") ??
-    Deno.env.get("CLEANUP_CRON_SECRET") ??
-    ""
-  ).trim();
+export async function requireFunctionSecret(req: Request): Promise<Response | null> {
+  const expected = await resolveEdgeFunctionSecret();
   if (!expected) {
     return json(503, { error: "function_secret_not_configured" });
   }

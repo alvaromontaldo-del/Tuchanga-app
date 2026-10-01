@@ -55,7 +55,7 @@ Deno.serve(async (req) => {
 
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
 
-  const denied = requireFunctionSecret(req);
+  const denied = await requireFunctionSecret(req);
   if (denied) return denied;
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";

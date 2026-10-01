@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
     return json(405, { error: "method_not_allowed" });
   }
 
-  const denied = requireFunctionSecret(req);
+  const denied = await requireFunctionSecret(req);
   if (denied) return denied;
 
   let retentionDays: number | null = null;

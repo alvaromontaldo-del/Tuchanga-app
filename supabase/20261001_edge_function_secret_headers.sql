@@ -34,13 +34,11 @@
 --     Redirect HTTPS del checkout (sin JWT). verify_jwt = false.
 --     Acredita solo si el pago reconsultado coincide en monto y referencia.
 --
--- Dónde configurar el secreto (el mismo valor en los tres lugares, sin pegarlo acá):
+-- Dónde configurar el secreto (el mismo valor, sin pegarlo acá):
 --
---   1. Edge Functions → Secrets
---        EDGE_FUNCTION_SECRET
---        (si ya existe CLEANUP_CRON_SECRET y no vas a setear el canónico,
---         el código lo acepta como alias; mejor unificar en EDGE_FUNCTION_SECRET)
---   2. Vault (lo leen este script y invoke_cleanup_chat_images):
+--   1. Vault. Las functions lo leen si EDGE_FUNCTION_SECRET no está en el
+--      entorno, vía public.get_edge_function_secret (solo service_role).
+--      Este script y invoke_cleanup_chat_images también lo leen de acá:
 --        select vault.create_secret(
 --          '<mismo valor>',
 --          'edge_function_secret',
@@ -49,7 +47,9 @@
 --      Si el secreto ya existe, actualizalo en Vault y volvé a correr este script
 --      para reescribir los headers de los triggers http_request (quedan copiados
 --      en la definición del trigger).
---   3. Headers
+--      No hace falta setear EDGE_FUNCTION_SECRET con el CLI. Si igual está en
+--      el entorno (o el alias CLEANUP_CRON_SECRET), gana sobre Vault.
+--   2. Headers
 --        x-function-secret: <mismo valor>
 --        Este script lo agrega a los triggers http_request de
 --        push_on_message, push_on_review, push_on_store_board y
@@ -57,9 +57,59 @@
 --        Cron de cleanup_chat_images: en el schedule, header x-function-secret
 --        (x-cleanup-secret sigue valiendo como alias). Authorization Bearer
 --        service_role ya no alcanza.
+--   3. MP_WEBHOOK_SECRET lo setea el dueño en el dashboard
+--      (Edge Functions → Secrets). Si el entorno está vacío, mp_webhook
+--      cae a Vault con el nombre mp_webhook_secret. Si los dos están vacíos, 503.
 --
--- Orden: Vault + este SQL + header del cron, y recién después el deploy de
--- las functions. Si se deploya antes, los triggers viejos reciben 401.
+-- Orden: generar el secreto, vault.create_secret, este SQL, header del cron,
+-- y recién después el deploy por la API (pasando verify_jwt en cada función).
+-- Si se deploya antes, los triggers viejos reciben 401.
+--
+-- La API deploy_edge_function NO lee config.toml. verify_jwt default = true.
+-- Hay que pasarlo en cada deploy:
+--   mp_crear_preferencia   true
+--   mp_confirmar_sena      true
+--   mp_webhook             false
+--   mp_retorno             false
+--   push_on_message        false
+--   push_on_review         false
+--   push_on_store_board    false
+--   cleanup_chat_images    false
+
+-- Lectura de Vault para las Edge Functions (cliente service_role).
+-- EXECUTE solo para service_role.
+CREATE OR REPLACE FUNCTION public.get_edge_function_secret(p_name text)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_secret text;
+BEGIN
+  IF coalesce(auth.jwt() ->> 'role', '') IS DISTINCT FROM 'service_role'
+     AND current_setting('request.jwt.claim.role', true) IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION 'forbidden';
+  END IF;
+
+  IF p_name IS NULL OR btrim(p_name) = '' THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT ds.decrypted_secret
+    INTO v_secret
+  FROM vault.decrypted_secrets AS ds
+  WHERE ds.name = btrim(p_name)
+  LIMIT 1;
+
+  RETURN nullif(btrim(coalesce(v_secret, '')), '');
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.get_edge_function_secret(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_edge_function_secret(text) FROM anon;
+REVOKE ALL ON FUNCTION public.get_edge_function_secret(text) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.get_edge_function_secret(text) TO service_role;
 
 CREATE OR REPLACE FUNCTION public._edge_http_request_args(p_def text)
 RETURNS text[]

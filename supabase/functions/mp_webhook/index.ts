@@ -13,6 +13,7 @@ import {
   normalizeMpDataId,
   verifyMpWebhookSignature,
 } from "../_shared/mpWebhookValidation.ts";
+import { resolveMpWebhookSecret } from "../_shared/secretResolver.ts";
 import { createAdminClient, json } from "../_shared/supabaseAdmin.ts";
 
 type WebhookBody = {
@@ -273,7 +274,7 @@ Deno.serve(async (req) => {
     return json(405, { error: "method_not_allowed" });
   }
 
-  const webhookSecret = Deno.env.get("MP_WEBHOOK_SECRET") ?? "";
+  const webhookSecret = await resolveMpWebhookSecret();
   if (mpWebhookSecretStatus(webhookSecret) === 503) {
     logError("webhook_secret_missing");
     return json(503, { error: "webhook_secret_not_configured" });

@@ -25,7 +25,7 @@ contratacion_id:{uuid}|tipo_pago:{seña_inicial|diferencia_seña}
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role (también acepta `SERVICE_ROLE_KEY`) |
 | `SUPABASE_ANON_KEY` | Anon key (validar JWT en `mp_crear_preferencia`) |
 | `MP_NOTIFICATION_URL` | *(opcional)* URL pública del webhook si difiere de la default |
-| `MP_WEBHOOK_SECRET` | **Obligatorio.** Clave de firma de webhooks (Mercado Pago → Webhooks). Si falta, `mp_webhook` responde 503. Firma `x-signature` inválida → 401. |
+| `MP_WEBHOOK_SECRET` | **Obligatorio en el dashboard** (Edge Functions → Secrets). Si el entorno está vacío, `mp_webhook` lee Vault `mp_webhook_secret`. Si los dos faltan, responde 503. Firma `x-signature` inválida → 401. |
 | `MP_APP_RETURN_SCHEME` | *(opcional)* Default: `tuchanga-app` |
 
 ## Deploy
