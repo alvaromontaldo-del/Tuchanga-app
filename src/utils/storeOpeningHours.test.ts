@@ -128,9 +128,10 @@ describe('editor de horarios del comercio', () => {
   it('pasa un día de corrido a cortado (mañana + 15:00–19:00) y vuelve a una franja', () => {
     const split = setStoreDaySplit(defaultStoreWeekSchedule(), 1, true);
     expect(split.find((day) => day.day === 1)?.slots).toEqual([
-      { open: '09:00', close: '18:00' },
+      { open: '09:00', close: '13:00' },
       { open: '15:00', close: '19:00' },
     ]);
+    expect(validateStoreWeekSchedule(split)).toBeNull();
     expect(split.find((day) => day.day === 2)?.slots).toEqual([{ open: '09:00', close: '18:00' }]);
 
     let days = patchStoreDaySlot(split, 1, 0, { open: '08:00', close: '12:00' });
@@ -184,6 +185,37 @@ describe('editor de horarios del comercio', () => {
 
     copied.find((item) => item.day === 5)!.slots[1].close = '20:00';
     expect(days.find((item) => item.day === 2)?.slots[1].close).toBe('19:00');
+  });
+
+  it('una semana por defecto en cortado pasa la validación del guardado', () => {
+    let days = defaultStoreWeekSchedule();
+    for (const day of [1, 2, 3, 4, 5, 6, 7]) {
+      days = setStoreDaySplit(days, day, true);
+    }
+    expect(days.map((day) => day.slots)).toEqual(
+      [1, 2, 3, 4, 5, 6, 7].map(() => [
+        { open: '09:00', close: '13:00' },
+        { open: '15:00', close: '19:00' },
+      ]),
+    );
+    expect(validateStoreWeekSchedule(days)).toBeNull();
+
+    const corrido = setStoreDaySplit(days, 2, false);
+    expect(corrido.find((day) => day.day === 2)?.slots).toEqual([{ open: '09:00', close: '13:00' }]);
+    expect(validateStoreWeekSchedule(corrido)).toBeNull();
+  });
+
+  it('copiar el martes cortado a viernes deja la semana válida', () => {
+    const splitTuesday = setStoreDaySplit(defaultStoreWeekSchedule(), 2, true);
+    const copied = copyTuesdayHoursToFriday(splitTuesday);
+    for (const day of [2, 3, 4, 5]) {
+      expect(copied.find((item) => item.day === day)?.slots).toEqual([
+        { open: '09:00', close: '13:00' },
+        { open: '15:00', close: '19:00' },
+      ]);
+    }
+    expect(copied.find((item) => item.day === 1)?.slots).toEqual([{ open: '09:00', close: '18:00' }]);
+    expect(validateStoreWeekSchedule(copied)).toBeNull();
   });
 
   it('rechaza dos franjas que se pisan', () => {
