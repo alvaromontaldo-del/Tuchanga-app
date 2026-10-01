@@ -755,7 +755,7 @@ const QuoteCard = memo(function QuoteCard({
             </Text>
           ) : (
             <Text style={styles.rubroLine}>
-              Los datos del comercio se revelan al cliente al pagar el costo de servicio.
+              Los datos del comercio, el código y el PIN se revelan al pagar el costo de servicio.
             </Text>
           )}
         </>
@@ -774,7 +774,10 @@ const QuoteCard = memo(function QuoteCard({
               ? normalizeDisplayAddress(card.storeAddress.trim())
               : 'No informada — contactá al comercio'}
           </Text>
-          {!readOnly && (card.orderCode || card.verificationPin) ? (
+          {card.storePhone?.trim() ? (
+            <Text style={styles.addressLine}>Tel: {card.storePhone.trim()}</Text>
+          ) : null}
+          {card.orderCode || card.verificationPin ? (
             <View style={styles.pinBox}>
               {card.orderCode ? (
                 <Text style={styles.pinLine}>
@@ -790,7 +793,7 @@ const QuoteCard = memo(function QuoteCard({
               ) : null}
             </View>
           ) : null}
-          {!readOnly && card.orderId ? (
+          {card.orderId && (!readOnly || card.orderCode || card.verificationPin) ? (
             <Pressable onPress={onOpenOrder} style={styles.orderLink}>
               <Text style={styles.orderLinkText}>Ver código y PIN</Text>
             </Pressable>

@@ -325,4 +325,48 @@ describe('mapClientPickupOrders', () => {
     expect(content.fields.map((field) => field.label)).toContain('Retirado');
     expect(content.fields.map((field) => field.label)).not.toContain('Disponible desde');
   });
+
+  it('muestra teléfono y PIN si el RPC los devuelve, y oculta el PIN si viene null', () => {
+    const [withSecrets] = mapClientPickupOrders([
+      {
+        order_id: 'order-secrets',
+        numero_pedido: '4242',
+        list_bucket: 'activa',
+        title: 'Pedido de materiales',
+        store_name: 'Corralón Norte',
+        store_address: 'Calle 123',
+        store_phone: '11 4444-0000',
+        verification_pin: '4242',
+        accepted_total: 1000,
+        items: [],
+      },
+    ]);
+    const shown = buildClientPickupCardContent(withSecrets);
+    expect(shown.pinDisplay).toBe('4 2 4 2');
+    expect(shown.fields.find((field) => field.label === 'Teléfono del comercio')?.value).toBe(
+      '11 4444-0000',
+    );
+
+    const [hidden] = mapClientPickupOrders([
+      {
+        order_id: 'order-owner',
+        numero_pedido: '5757',
+        list_bucket: 'activa',
+        title: 'Pedido de materiales',
+        store_name: 'Mi comercio',
+        store_address: null,
+        store_phone: null,
+        verification_pin: null,
+        accepted_total: 1000,
+        items: [],
+      },
+    ]);
+    const masked = buildClientPickupCardContent(hidden);
+    expect(masked.pin).toBeNull();
+    expect(masked.pinDisplay).toBeNull();
+    expect(masked.fields.map((field) => field.label)).not.toContain('Teléfono del comercio');
+    expect(masked.fields.find((field) => field.label === 'Dirección del comercio')?.value).toBe(
+      'Dirección no informada',
+    );
+  });
 });

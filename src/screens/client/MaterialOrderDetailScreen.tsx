@@ -192,6 +192,9 @@ export function MaterialOrderDetailScreen({ navigation, route }: Props) {
                 ? normalizeDisplayAddress(r.storeAddress.trim())
                 : 'No informada — contactá al comercio'}
             </Text>
+            {r.storePhone?.trim() ? (
+              <Text style={styles.line}>Tel: {r.storePhone.trim()}</Text>
+            ) : null}
             <Text style={styles.line}>
               A abonar: <Text style={styles.strong}>{formatMoneyAr(r.acceptedTotal ?? 0)}</Text>
             </Text>

@@ -218,7 +218,7 @@ export type ClientQuoteCard = {
   orderAcceptedTotal: number | null;
   /** Código de retiro; solo post-pago. */
   orderCode: string | null;
-  /** PIN de retiro; solo post-pago y solo para el cliente. */
+  /** PIN de retiro; solo post-pago. Cliente que pagó o profesional que creó el pedido. Nunca el dueño del comercio. */
   verificationPin: string | null;
   /** Rubro usado para agrupar en la comparación. */
   groupRubroId: string;
