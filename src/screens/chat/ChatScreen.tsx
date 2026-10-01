@@ -5,7 +5,6 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -34,6 +33,7 @@ import {
   IMAGE_BODY_PREVIEW,
   sendChatImageMessageSupabase,
 } from '../../services/chatMediaSupabase';
+import { ChatStoredImage } from '../../components/chat/ChatStoredImage';
 import { ChatReportUserModal } from '../../components/chat/ChatReportUserModal';
 import { ChatSafetyOptionsModal } from '../../components/chat/ChatSafetyOptionsModal';
 import {
@@ -254,7 +254,7 @@ export function ChatScreen({
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [attachingImage, setAttachingImage] = useState(false);
-  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [previewImageMeta, setPreviewImageMeta] = useState<Record<string, unknown> | null>(null);
   const [peerReadAt, setPeerReadAt] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -1477,25 +1477,15 @@ export function ChatScreen({
       }
 
       if (item.type === 'image') {
-        const imageUrl = String(item.metadata?.image_url ?? '').trim();
         return (
           <View style={[styles.row, mine ? styles.rowMine : styles.rowOther]}>
             <View style={[styles.imageBubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
-              {imageUrl ? (
-                <Pressable
-                  onPress={() => setPreviewImageUrl(imageUrl)}
-                  accessibilityRole="imagebutton"
-                  accessibilityLabel="Ver imagen ampliada"
-                >
-                  <Image source={{ uri: imageUrl }} style={styles.chatImage} resizeMode="cover" />
-                </Pressable>
-              ) : (
-                <Text
-                  style={[styles.bubbleText, mine ? styles.bubbleTextMine : styles.bubbleTextOther]}
-                >
-                  Imagen no disponible
-                </Text>
-              )}
+              <ChatStoredImage
+                metadata={item.metadata}
+                style={styles.chatImage}
+                resizeMode="cover"
+                onPress={() => setPreviewImageMeta(item.metadata ?? {})}
+              />
               <View style={styles.metaRow}>
                 <Text style={[styles.time, mine ? styles.timeMine : styles.timeOther]}>
                   {formatTime(item.created_at)}
@@ -2383,24 +2373,24 @@ export function ChatScreen({
         onConfirm={handleSubmitReport}
       />
       <Modal
-        visible={Boolean(previewImageUrl)}
+        visible={Boolean(previewImageMeta)}
         transparent
         animationType="fade"
-        onRequestClose={() => setPreviewImageUrl(null)}
+        onRequestClose={() => setPreviewImageMeta(null)}
       >
-        <Pressable style={styles.imagePreviewBackdrop} onPress={() => setPreviewImageUrl(null)}>
+        <Pressable style={styles.imagePreviewBackdrop} onPress={() => setPreviewImageMeta(null)}>
           <SafeAreaView style={styles.imagePreviewSafe} edges={['top', 'bottom']}>
             <Pressable
               style={styles.imagePreviewClose}
-              onPress={() => setPreviewImageUrl(null)}
+              onPress={() => setPreviewImageMeta(null)}
               accessibilityRole="button"
               accessibilityLabel="Cerrar imagen"
             >
               <Ionicons name="close" size={28} color="#fff" />
             </Pressable>
-            {previewImageUrl ? (
-              <Image
-                source={{ uri: previewImageUrl }}
+            {previewImageMeta ? (
+              <ChatStoredImage
+                metadata={previewImageMeta}
                 style={styles.imagePreviewFull}
                 resizeMode="contain"
               />
@@ -2564,7 +2554,7 @@ export function ChatScreen({
                               await refreshMessages();
                               scrollToLatest();
                             } catch (e) {
-                              toast.error(e instanceof Error ? e.message : 'No se pudo cotizar', 'Presupuesto');
+                              toast.error(mapChatSendError(e), 'Presupuesto');
                             } finally {
                               setQuoteSubmitting(false);
                             }

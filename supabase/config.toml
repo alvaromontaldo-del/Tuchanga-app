@@ -1,17 +1,24 @@
 # Supabase local / deploy — configuración Edge Functions
+#
+# verify_jwt = true solo donde el caller es la app con el access token del usuario.
+# El gateway acepta la anon key (es un JWT role=anon): las funciones igual llaman
+# auth.getUser y rechazan ese Bearer. Webhook, retorno, pushes y cleanup no
+# llevan JWT de usuario: webhook firma MP; el resto exige x-function-secret.
 
 [functions.mp_webhook]
 verify_jwt = false
 
 [functions.mp_crear_preferencia]
-verify_jwt = false
+verify_jwt = true
 
 [functions.mp_confirmar_sena]
-verify_jwt = false
+verify_jwt = true
 
+# Redirect HTTPS de Checkout Pro (WebView). MP no manda JWT de Supabase.
 [functions.mp_retorno]
 verify_jwt = false
 
+# Database Webhook / trigger supabase_functions.http_request. Secreto en header.
 [functions.push_on_message]
 verify_jwt = false
 
@@ -21,5 +28,6 @@ verify_jwt = false
 [functions.push_on_store_board]
 verify_jwt = false
 
+# Cron del dashboard y triggers pg_net. Mismo secreto.
 [functions.cleanup_chat_images]
 verify_jwt = false

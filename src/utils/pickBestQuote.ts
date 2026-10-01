@@ -91,3 +91,202 @@ export function groupQuoteItemsByRequest(
   }
   return [...map.values()];
 }
+
+/**
+ * Preselección inicial: solo la mejor cotización de cada rubro
+ * (`pickBestQuoteId`), y dentro de ella la variante más barata por material.
+ * El resto arranca vacío; el cliente puede sumar comercios a mano.
+ */
+export function initialSelectedItemIdsByQuote(
+  quotes: ClientQuoteCard[],
+): Record<string, Set<string>> {
+  const byRubro = new Map<string, ClientQuoteCard[]>();
+  for (const card of quotes) {
+    const list = byRubro.get(card.groupRubroId) ?? [];
+    list.push(card);
+    byRubro.set(card.groupRubroId, list);
+  }
+  const out: Record<string, Set<string>> = {};
+  for (const group of byRubro.values()) {
+    const bestId = pickBestQuoteId(group);
+    if (!bestId) continue;
+    const card = group.find((quote) => quote.quoteId === bestId);
+    if (!card) continue;
+    out[bestId] = defaultSelectedItemIds(card);
+  }
+  return out;
+}
+
+/** Encabezado del material. La marca va en la fila de la variante, no acá. */
+export function materialGroupHeader(group: {
+  description: string;
+  variants: Array<Pick<ClientQuoteLineItem, 'quantity' | 'unit'>>;
+}): string {
+  const description = group.description.trim() || 'Material';
+  const sample = group.variants[0];
+  if (!sample) return description;
+  const qty = Number(sample.quantity);
+  const unit = (sample.unit ?? '').trim();
+  if (!Number.isFinite(qty) || !unit) return description;
+  const qtyLabel = Number.isInteger(qty)
+    ? String(qty)
+    : qty.toLocaleString('es-AR', { maximumFractionDigits: 2 });
+  return `${description} · ${qtyLabel} ${unit}`;
+}
+
+/** Etiqueta de una variante: marca, o «Precio» / alternativa si no hay marca. */
+export function variantOptionLabel(it: {
+  variantLabel?: string | null;
+  inStock: boolean;
+  alternativeDescription?: string | null;
+}): string {
+  const brand = it.variantLabel?.trim();
+  if (brand) return brand;
+  if (it.inStock) return 'Precio';
+  return it.alternativeDescription?.trim() || 'Precio';
+}
+
+/** Varias opciones: radio. Una sola (aunque tenga marca): checkbox. */
+export function variantSelectionControl(variantCount: number): 'radio' | 'checkbox' {
+  return variantCount > 1 ? 'radio' : 'checkbox';
+}
+
+/**
+ * Materiales que quedaron elegidos en dos o más comercios.
+ * No se descarta ninguno: solo se avisa.
+ */
+export function duplicateSelectedMaterials(
+  cards: Array<Pick<ClientQuoteCard, 'quoteId' | 'items'>>,
+  selectedByQuote: Record<string, ReadonlySet<string> | undefined>,
+): { labels: string[]; requestItemIds: Set<string> } {
+  const byRequest = new Map<string, { description: string; quotes: Set<string> }>();
+  for (const card of cards) {
+    const ids = selectedByQuote[card.quoteId];
+    if (!ids || ids.size === 0) continue;
+    const seen = new Set<string>();
+    for (const it of card.items) {
+      if (!ids.has(it.quoteItemId) || seen.has(it.requestItemId)) continue;
+      seen.add(it.requestItemId);
+      const cur = byRequest.get(it.requestItemId) ?? {
+        description: it.description,
+        quotes: new Set<string>(),
+      };
+      cur.quotes.add(card.quoteId);
+      if (!cur.description.trim() && it.description.trim()) cur.description = it.description;
+      byRequest.set(it.requestItemId, cur);
+    }
+  }
+  const labels: string[] = [];
+  const requestItemIds = new Set<string>();
+  for (const [requestItemId, entry] of byRequest) {
+    if (entry.quotes.size < 2) continue;
+    requestItemIds.add(requestItemId);
+    const label = entry.description.trim();
+    if (label) labels.push(label);
+  }
+  return { labels, requestItemIds };
+}
+
+export type PendingFeeCard = {
+  orderId: string | null;
+  orderStatus: string | null;
+  contactRevealed: boolean;
+  paymentGroupId: string | null;
+  depositAmount: number | null;
+  orderCreatedAt: string | null;
+  checkoutServiceFee: number | null;
+};
+
+export type PendingServiceFeeGroup = {
+  groupKey: string;
+  primaryOrderId: string;
+  serviceFee: number;
+  storeCount: number;
+};
+
+function finitePositive(values: Array<number | null | undefined>): number[] {
+  return values.filter((n): n is number => n != null && Number.isFinite(n) && n > 0);
+}
+
+/**
+ * Un botón por payment_group. mp_crear_preferencia cobra una sola order_id
+ * (deposit_amount de esa orden) y al acreditar marca solo ese grupo.
+ * No se pueden juntar dos checkouts en una preferencia.
+ * El fee es material_checkouts.service_fee o, si no está, max(deposit_amount):
+ * cada orden guarda el total del grupo, así que no se suma.
+ */
+export function pendingServiceFeeGroups(cards: PendingFeeCard[]): PendingServiceFeeGroup[] {
+  const pending = cards.filter(
+    (card) =>
+      Boolean(card.orderId) &&
+      (card.orderStatus === 'pending_deposit' || card.orderStatus === 'pending') &&
+      !card.contactRevealed,
+  );
+  const grouped = new Map<string, PendingFeeCard[]>();
+  for (const card of pending) {
+    const key = card.paymentGroupId || card.orderId || '';
+    if (!key) continue;
+    const list = grouped.get(key) ?? [];
+    list.push(card);
+    grouped.set(key, list);
+  }
+
+  const result: Array<PendingServiceFeeGroup & { sortAt: string }> = [];
+  for (const [groupKey, list] of grouped) {
+    const unique = new Map<string, PendingFeeCard>();
+    for (const card of list) {
+      if (!card.orderId || unique.has(card.orderId)) continue;
+      unique.set(card.orderId, card);
+    }
+    const orders = [...unique.values()].sort((a, b) => {
+      const ta = a.orderCreatedAt ?? '';
+      const tb = b.orderCreatedAt ?? '';
+      if (ta && tb && ta !== tb) return ta < tb ? -1 : 1;
+      if (ta && !tb) return -1;
+      if (!ta && tb) return 1;
+      return (a.orderId ?? '').localeCompare(b.orderId ?? '');
+    });
+    const primary = orders[0];
+    if (!primary?.orderId) continue;
+    const checkoutFees = finitePositive(orders.map((card) => card.checkoutServiceFee));
+    const deposits = finitePositive(orders.map((card) => card.depositAmount));
+    const serviceFee =
+      checkoutFees.length > 0
+        ? Math.max(...checkoutFees)
+        : deposits.length > 0
+          ? Math.max(...deposits)
+          : 0;
+    result.push({
+      groupKey,
+      primaryOrderId: primary.orderId,
+      serviceFee,
+      storeCount: orders.length,
+      sortAt: primary.orderCreatedAt ?? '',
+    });
+  }
+
+  result.sort((a, b) => {
+    if (a.sortAt && b.sortAt && a.sortAt !== b.sortAt) return a.sortAt < b.sortAt ? -1 : 1;
+    if (a.sortAt && !b.sortAt) return -1;
+    if (!a.sortAt && b.sortAt) return 1;
+    return a.groupKey.localeCompare(b.groupKey);
+  });
+  return result.map((group) => ({
+    groupKey: group.groupKey,
+    primaryOrderId: group.primaryOrderId,
+    serviceFee: group.serviceFee,
+    storeCount: group.storeCount,
+  }));
+}
+
+/** Un grupo: «Pagar costo de servicio $X». Varios: suma la cantidad de comercios. */
+export function pendingFeePayLabel(
+  feeLabel: string,
+  storeCount: number,
+  groupCount: number,
+): string {
+  const base = `Pagar costo de servicio ${feeLabel}`;
+  if (groupCount <= 1) return base;
+  const n = Math.max(0, Math.trunc(storeCount));
+  return `${base} · ${n} comercio${n === 1 ? '' : 's'}`;
+}

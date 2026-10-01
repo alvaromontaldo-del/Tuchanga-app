@@ -11,7 +11,8 @@ import {
   type PaymentConfirmContext,
   type TipoPagoMp,
 } from "../_shared/mercadopago.ts";
-import { createAdminClient, createUserClient, json } from "../_shared/supabaseAdmin.ts";
+import { requireAuthenticatedUser } from "../_shared/requireUser.ts";
+import { createAdminClient, json } from "../_shared/supabaseAdmin.ts";
 
 type Body = {
   contratacion_id?: string;
@@ -102,18 +103,9 @@ Deno.serve(async (req) => {
 
   const mpPaymentIdHint = (body.mp_payment_id ?? "").trim();
 
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader) return json(401, { error: "unauthorized" });
-
-  let userId: string;
-  try {
-    const userClient = createUserClient(authHeader);
-    const { data, error } = await userClient.auth.getUser();
-    if (error || !data.user?.id) return json(401, { error: "unauthorized" });
-    userId = data.user.id;
-  } catch {
-    return json(500, { error: "auth_setup_failed" });
-  }
+  const auth = await requireAuthenticatedUser(req);
+  if (auth instanceof Response) return auth;
+  const userId = auth.userId;
 
   const sb = createAdminClient();
 
@@ -188,12 +180,20 @@ Deno.serve(async (req) => {
       });
     }
 
+    let credit;
     try {
-      await processApprovedMpPayment(resolved.payment, resolved.ctx);
+      credit = await processApprovedMpPayment(resolved.payment, resolved.ctx);
     } catch (e) {
       return json(500, {
         error: "registrar_sena_material_failed",
         detail: String(e instanceof Error ? e.message : e),
+      });
+    }
+    if (credit.outcome !== "processed" && credit.reason !== "already_credited") {
+      return json(409, {
+        ok: false,
+        error: credit.reason ?? "not_credited",
+        message: "El pago no coincide con el costo de servicio pendiente.",
       });
     }
 
@@ -315,12 +315,20 @@ Deno.serve(async (req) => {
     });
   }
 
+  let credit;
   try {
-    await processApprovedMpPayment(resolved.payment, resolved.ctx);
+    credit = await processApprovedMpPayment(resolved.payment, resolved.ctx);
   } catch (e) {
     return json(500, {
       error: "registrar_seña_failed",
       detail: String(e instanceof Error ? e.message : e),
+    });
+  }
+  if (credit.outcome !== "processed" && credit.reason !== "already_credited") {
+    return json(409, {
+      ok: false,
+      error: credit.reason ?? "not_credited",
+      message: "El pago no coincide con el costo de servicio pendiente.",
     });
   }
 

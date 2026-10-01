@@ -8,7 +8,6 @@ import {
 } from 'react-native';
 import { AppButton } from '../../components/common/AppButton';
 import { useAppToast } from '../../components/toast/toast';
-import { isMercadoPagoEnabled } from '../../config/mercadoPago';
 import { colors, radii, spacing } from '../../constants/theme';
 import { openPagoCheckout } from '../../navigation/openPagoCheckout';
 import {
@@ -87,31 +86,27 @@ export function MaterialOrderSummaryScreen({ navigation, route }: Props) {
       const orderId = checkout.primaryOrderId;
       const fee = checkout.serviceFee || serviceFee;
 
-      if (isMercadoPagoEnabled()) {
-        const synced = await confirmarCostoServicioMaterialesMp(orderId);
-        if (synced.ok || synced.already_paid) {
-          toast.success('Costo de servicio acreditado.', 'Pago');
-          navigation.replace('MaterialOrderDetail', { orderId });
-          return;
-        }
-        const result = await crearPreferenciaCostoServicioMateriales(orderId);
-        if (!result.ok) {
-          throw new Error(
-            result.code === 'mp_not_configured'
-              ? 'Mercado Pago no está configurado. No se puede acreditar sin pago.'
-              : result.message,
-          );
-        }
-        openPagoCheckout({
-          materialOrderId: orderId,
-          checkoutUrl: result.data.checkout_url,
-          sandbox: Boolean(result.data.sandbox),
-        });
-        toast.success(`Costo de servicio: ${formatMoneyAr(fee)}`, 'Ir a pagar');
+      const synced = await confirmarCostoServicioMaterialesMp(orderId);
+      if (synced.ok || synced.already_paid) {
+        toast.success('Costo de servicio acreditado.', 'Pago');
+        navigation.replace('MaterialOrderDetail', { orderId });
         return;
       }
-
-      toast.error('Mercado Pago no está habilitado. No se puede acreditar sin pago.', 'Pago');
+      const result = await crearPreferenciaCostoServicioMateriales(orderId);
+      if (!result.ok) {
+        throw new Error(
+          result.code === 'mp_not_configured'
+            ? 'Mercado Pago no está configurado. No se puede acreditar sin pago.'
+            : result.message,
+        );
+      }
+      openPagoCheckout({
+        materialOrderId: orderId,
+        checkoutUrl: result.data.checkout_url,
+        sandbox: Boolean(result.data.sandbox),
+      });
+      toast.success(`Costo de servicio: ${formatMoneyAr(fee)}`, 'Ir a pagar');
+      return;
     } catch (e) {
       const failure = describePaymentStartFailure(e);
       console.error('[MaterialOrderSummary] iniciar pago', failure.cause, e);

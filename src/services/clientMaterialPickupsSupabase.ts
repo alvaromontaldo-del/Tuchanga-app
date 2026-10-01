@@ -13,7 +13,6 @@ const ORDER_COLUMNS = `
   status,
   deposit_status,
   accepted_total,
-  verification_pin,
   created_at,
   updated_at,
   completed_at,
@@ -23,7 +22,7 @@ const ORDER_COLUMNS = `
 
 const QUOTE_EMBED = `
   freight_type,
-  stores ( name, address, opening_hours ),
+  stores ( name, opening_hours ),
   material_requests (
     id,
     title,
@@ -63,6 +62,59 @@ const SELECT_STORE_QUOTES = `
 function rowsFromRpc(data: unknown): ClientPickupOrderRow[] | null {
   if (!Array.isArray(data)) return null;
   return data as ClientPickupOrderRow[];
+}
+
+type OrderRevealRow = {
+  contact_revealed?: boolean;
+  verification_pin?: string | null;
+  store_address?: string | null;
+  store_phone?: string | null;
+  store_name?: string | null;
+};
+
+/** Pega teléfono/dirección/PIN que devolvió get_material_order_reveal (solo post-fee). */
+function applyOrderReveal(row: ClientPickupOrderRow, reveal: OrderRevealRow): ClientPickupOrderRow {
+  if (!reveal.contact_revealed) return row;
+  const address = reveal.store_address ?? null;
+  const quotes = row.quotes;
+  let nextQuotes = quotes;
+  if (quotes && !Array.isArray(quotes)) {
+    const stores = quotes.stores;
+    if (stores && !Array.isArray(stores)) {
+      nextQuotes = { ...quotes, stores: { ...stores, address } };
+    }
+  }
+  const storeName = reveal.store_name?.trim();
+  return {
+    ...row,
+    quotes: nextQuotes,
+    store_address: address ?? row.store_address ?? null,
+    store_name:
+      storeName && !storeName.includes('oculto') ? storeName : row.store_name,
+    store_phone: reveal.store_phone ?? null,
+    verification_pin: reveal.verification_pin ?? null,
+  };
+}
+
+/**
+ * El select directo no pide verification_pin ni stores.address.
+ * Esos datos salen de get_material_order_reveal, y solo con el fee aprobado.
+ */
+async function revealFallbackRows(
+  sb: ReturnType<typeof getSupabaseClient>,
+  rows: ClientPickupOrderRow[],
+): Promise<ClientPickupOrderRow[]> {
+  return Promise.all(
+    rows.map(async (row) => {
+      const orderId = String(row.id ?? row.order_id ?? '').trim();
+      if (!orderId) return row;
+      const { data, error } = await sb.rpc('get_material_order_reveal', { p_order_id: orderId });
+      if (error) return row;
+      const reveal = (Array.isArray(data) ? data[0] : data) as OrderRevealRow | null;
+      if (!reveal) return row;
+      return applyOrderReveal(row, reveal);
+    }),
+  );
 }
 
 async function scopeRpcRowsToStore(
@@ -127,5 +179,5 @@ export async function fetchClientMaterialPickups(): Promise<ClientPickupCardMode
     byId.set(id, row as ClientPickupOrderRow);
   }
 
-  return mapClientPickupOrders([...byId.values()]);
+  return mapClientPickupOrders(await revealFallbackRows(sb, [...byId.values()]));
 }

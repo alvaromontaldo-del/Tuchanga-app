@@ -1,3 +1,4 @@
+import { edgeFunctionSecretHeaders } from './edgeFunctionSecret';
 import { getSupabaseClient } from '../lib/supabase';
 import type { MaterialItemDraft, NearbyStore, StoreRubro } from '../types/materials';
 
@@ -25,7 +26,6 @@ const ELIGIBLE_STORE_STATUSES = ['trial', 'active'] as const;
 type StoreRow = {
   id: string;
   name: string;
-  address: string | null;
   latitude: number | null;
   longitude: number | null;
   coverage_radius_km: number | string | null;
@@ -56,7 +56,8 @@ function mapStoreRow(row: StoreRow, distanceKm?: number): NearbyStore {
   return {
     id: row.id,
     name: row.name,
-    address: row.address?.trim() || '',
+    // La dirección no se lee de stores: se revela con get_material_order_reveal tras el fee.
+    address: '',
     latitude: row.latitude ?? 0,
     longitude: row.longitude ?? 0,
     coverageRadiusKm: coverage,
@@ -76,7 +77,6 @@ async function fetchEligibleStoresRaw(): Promise<StoreRow[]> {
       `
       id,
       name,
-      address,
       latitude,
       longitude,
       coverage_radius_km,
@@ -307,6 +307,7 @@ export async function createMaterialRequestWithTargets(
   for (const storeId of input.storeIds) {
     void sb.functions
       .invoke('push_on_store_board', {
+        headers: edgeFunctionSecretHeaders(),
         body: {
           store_id: storeId,
           title: 'YaChanga',

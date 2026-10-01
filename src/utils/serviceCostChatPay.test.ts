@@ -57,10 +57,36 @@ describe('inicio de pago de la seña', () => {
     expect(body).not.toContain('isMercadoPagoEnabled');
   });
 
-  it('el costo de servicio de materiales sigue usando order_id y el flag', () => {
-    const body = exportBody(src, 'crearPreferenciaCostoServicioMateriales');
-    expect(body).toContain('isMercadoPagoEnabled');
-    expect(body).toContain('order_id: orderId');
-    expect(body).not.toContain('contratacion_id');
+  it('el costo de servicio de materiales no depende del flag de la app', () => {
+    const crear = exportBody(src, 'crearPreferenciaCostoServicioMateriales');
+    const confirmar = exportBody(src, 'confirmarCostoServicioMaterialesMp');
+    expect(crear).toContain('order_id: orderId');
+    expect(crear).not.toContain('contratacion_id');
+    expect(crear).not.toContain('isMercadoPagoEnabled');
+    expect(confirmar).toContain('order_id: orderId');
+    expect(confirmar).not.toContain('contratacion_id');
+    expect(confirmar).not.toContain('isMercadoPagoEnabled');
+  });
+
+  it('resumen, detalle y comparación abren Mercado Pago aunque el flag esté apagado', () => {
+    const summary = readFileSync('src/screens/client/MaterialOrderSummaryScreen.tsx', 'utf8');
+    const detail = readFileSync('src/screens/client/MaterialOrderDetailScreen.tsx', 'utf8');
+    const compare = readFileSync('src/screens/client/ClientCompareQuotesScreen.tsx', 'utf8');
+    for (const file of [summary, detail]) {
+      expect(file).not.toContain('isMercadoPagoEnabled');
+      expect(file).toContain('confirmarCostoServicioMaterialesMp');
+      expect(file).toContain('crearPreferenciaCostoServicioMateriales');
+      expect(file).toContain('openPagoCheckout');
+      expect(file).toContain('mp_not_configured');
+    }
+    expect(compare).toContain('confirmarCostoServicioMaterialesMp');
+    expect(compare).toContain('crearPreferenciaCostoServicioMateriales');
+    expect(compare).toContain('openPagoCheckout');
+    expect(compare).not.toContain('isMercadoPagoEnabled');
+    const card = compare.slice(compare.indexOf('const QuoteCard'));
+    expect(card).not.toContain('Pagar costo de servicio');
+    expect(card).not.toContain('onPayPending');
+    expect(compare).toContain('pendingFeePayLabel');
+    expect(compare).toContain('Rechazar toda');
   });
 });
