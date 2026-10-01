@@ -17,13 +17,13 @@ export const FAQ_ITEMS: readonly FaqItem[] = [
     id: 'pago-app-vs-profesional',
     question: '¿Qué pago en la app y qué le pago al profesional?',
     answer:
-      'En la app el cliente paga el costo de servicio de YaChanga con Mercado Pago. El precio final del presupuesto incluye ese costo y el importe del profesional. Lo del profesional se paga por fuera de la app: el cliente lo marca en el chat cuando se lo dio y el profesional confirma que lo recibió. En Mis trabajos, el profesional ve su neto, sin el costo de servicio.',
+      'En la app el cliente paga el costo de servicio YaChanga con Mercado Pago. El precio final del presupuesto incluye ese costo y el importe del profesional. El saldo restante se paga directo al profesional, fuera de la app, y no genera comprobante de Mercado Pago: el cliente lo marca en el chat cuando se lo dio y el profesional confirma que lo recibió. En Mis trabajos, el profesional ve su neto, sin el costo de servicio.',
   },
   {
     id: 'costo-cubierto',
     question: '¿Qué pasa con el costo de servicio si hay un problema con el profesional?',
     answer:
-      'Si ocurre un problema con el profesional, el costo de servicio de YaChanga queda cubierto por la app. Esa cobertura es del costo de servicio. No reemplaza el importe que se le paga al profesional por fuera de la app.',
+      'Si ocurre un problema con el profesional, el costo de servicio YaChanga queda cubierto por la app. Esa cobertura es del costo de servicio. No reemplaza el importe que se le paga al profesional por fuera de la app.',
   },
   {
     id: 'garantia',
@@ -41,13 +41,13 @@ export const FAQ_ITEMS: readonly FaqItem[] = [
     id: 'trabajo-mal-hecho',
     question: '¿Qué pasa si el trabajo queda mal hecho?',
     answer:
-      'Si el trabajo ya está finalizado y la garantía sigue vigente, el cliente entra a Cuenta, Trabajos contratados, y toca Iniciar reclamo. Se abre el chat para coordinar la garantía. Los días no se reinician. Si el presupuesto no incluyó garantía, o ya se venció, la app no abre ese reclamo.',
+      'Cuando el profesional marca el trabajo como finalizado, la app le pregunta al cliente si quedó bien. Si toca «Tuve un problema», el trabajo queda en disputa y el chat sigue visible para coordinar con el profesional. Si el trabajo ya está finalizado y la garantía sigue vigente, el cliente entra a Cuenta, Trabajos contratados, y toca Iniciar reclamo. Se abre el chat para coordinar la garantía. Los días no se reinician. Si el presupuesto no incluyó garantía, o ya se venció, la app no abre ese reclamo.',
   },
   {
     id: 'pague-y-cancela',
     question: '¿Qué pasa si pagué el costo de servicio y el profesional cancela?',
     answer:
-      'Antes de pagar, el cliente puede rechazar el presupuesto desde el chat y el trabajo queda cancelado. La app no tiene un botón para que el profesional cancele por su cuenta después de acreditado el costo de servicio. Si igual el trabajo no se hace, el costo de servicio de YaChanga queda cubierto por la app. Lo del profesional se paga por fuera: si todavía no se lo dieron, no queda registrado como pagado dentro de YaChanga.',
+      'Antes de pagar, el cliente puede rechazar el presupuesto desde el chat y el trabajo queda cancelado. La app no tiene un botón para que el profesional cancele por su cuenta después de acreditado el costo de servicio. Si igual el trabajo no se hace, el costo de servicio YaChanga queda cubierto por la app. Lo del profesional se paga por fuera: si todavía no se lo dieron, no queda registrado como pagado dentro de YaChanga.',
   },
   {
     id: 'pin',
@@ -71,13 +71,13 @@ export const FAQ_ITEMS: readonly FaqItem[] = [
     id: 'calificaciones',
     question: '¿Cómo son las calificaciones?',
     answer:
-      'Cuando el profesional marca el trabajo como finalizado, el cliente puede dejar de 1 a 5 estrellas y un comentario en el chat. El profesional recibe un aviso. Las estrellas y las reseñas públicas se muestran a partir del segundo trabajo finalizado. Antes, el perfil figura como nuevo. En las reseñas se ve el nombre del cliente, sin el apellido.',
+      'Cuando el profesional marca el trabajo como finalizado y el cliente confirma con «Estoy conforme», el cliente puede dejar de 1 a 5 estrellas y un comentario en el chat. El profesional recibe un aviso. Las estrellas y las reseñas públicas se muestran a partir del segundo trabajo finalizado. Antes, el perfil figura como nuevo. En las reseñas se ve el nombre del cliente, sin el apellido.',
   },
   {
     id: 'materiales',
     question: '¿Cómo funcionan los materiales, el flete y el PIN del comercio?',
     answer:
-      'El profesional arma el pedido y lo envía a comercios del rubro. Cada comercio cotiza. El cliente elige los ítems. El flete se suma solo si lo marca; si no, el retiro es en el local. El costo de servicio de YaChanga de esos materiales se paga con Mercado Pago. Los materiales se le pagan al comercio al retirar, fuera de la app. Hasta ese pago, el comercio queda oculto. Después, el cliente que pagó y el profesional que creó el pedido ven el teléfono, la dirección del comercio y el PIN de retiro, aunque el profesional no haya pagado. El comercio nunca ve el PIN: lo escribe cuando se lo dictan, junto con el código, para cerrar la entrega. El comercio no ve el teléfono ni el mail del cliente. Sí puede ver el nombre de pila y, si el pedido tiene dirección de entrega, esa dirección para cotizar el flete.',
+      'El profesional arma el pedido y lo envía a comercios del rubro. Cada comercio cotiza. El cliente elige los ítems. El flete se suma solo si lo marca; si no, el retiro es en el local. El costo de servicio YaChanga de esos materiales se paga con Mercado Pago. Los materiales se le pagan al comercio al retirar, fuera de la app. Hasta ese pago, el comercio queda oculto. Después, el cliente que pagó y el profesional que creó el pedido ven el teléfono, la dirección del comercio y el PIN de retiro, aunque el profesional no haya pagado. El comercio nunca ve el PIN: lo escribe cuando se lo dictan, junto con el código, para cerrar la entrega. El comercio no ve el teléfono ni el mail del cliente. Sí puede ver el nombre de pila y, si el pedido tiene dirección de entrega, esa dirección para cotizar el flete.',
   },
   {
     id: 'sin-material',
@@ -95,6 +95,6 @@ export const FAQ_ITEMS: readonly FaqItem[] = [
     id: 'notificaciones',
     question: '¿Qué notificaciones voy a recibir?',
     answer:
-      'Si tenés los avisos del teléfono activados, YaChanga avisa de mensajes nuevos, de que se acreditó el costo de servicio, de que el trabajo se marcó finalizado (para dejar la reseña), del saldo y de una reseña nueva. Al comercio le avisa cuando hay pedidos en el tablero. Si tocás un aviso de chat, se abre esa conversación. Si tocás uno del comercio, se abre el tablero de pedidos.',
+      'Si tenés los avisos del teléfono activados, YaChanga avisa de mensajes nuevos, de que se acreditó el costo de servicio, de que el profesional marcó el trabajo como finalizado (para confirmar si quedó bien y dejar la reseña), del saldo y de una reseña nueva. Al comercio le avisa cuando hay pedidos en el tablero. Si tocás un aviso de chat, se abre esa conversación. Si tocás uno del comercio, se abre el tablero de pedidos.',
   },
 ];

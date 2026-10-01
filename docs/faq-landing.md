@@ -18,7 +18,7 @@ Para tres roles, con la misma cuenta:
 
 ## ¿Cómo se paga?
 
-El cliente paga en la app el costo de servicio de YaChanga, con Mercado Pago. El importe del profesional se le paga al profesional por fuera de la app. El precio final del presupuesto incluye las dos partes. En un pedido de materiales, el costo de servicio también se paga en la app; los materiales se le pagan al comercio al retirar.
+El cliente paga en la app el costo de servicio YaChanga, con Mercado Pago. El saldo restante se le paga directo al profesional, fuera de la app, y no genera comprobante de Mercado Pago. El precio final del presupuesto incluye las dos partes. En un pedido de materiales, el costo de servicio también se paga en la app; los materiales se le pagan al comercio al retirar.
 
 ## ¿El profesional da garantía?
 
@@ -26,7 +26,7 @@ Al armar el presupuesto, el profesional indica si incluye garantía. Si la inclu
 
 ## ¿Qué cubre YaChanga si algo sale mal con el profesional?
 
-Si ocurre un problema con el profesional, el costo de servicio de YaChanga queda cubierto por la app. Esa cobertura es del costo de servicio. No reemplaza lo que se le paga al profesional por fuera de la app.
+Si ocurre un problema con el profesional, el costo de servicio YaChanga queda cubierto por la app. Esa cobertura es del costo de servicio. No reemplaza lo que se le paga al profesional por fuera de la app.
 
 ## ¿Puedo pasar mi teléfono por el chat?
 

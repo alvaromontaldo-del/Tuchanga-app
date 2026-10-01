@@ -23,7 +23,7 @@ describe('preguntas frecuentes', () => {
   });
 
   it('dice que el costo de servicio queda cubierto por la app, sin porcentajes ni montos', () => {
-    expect(text).toMatch(/costo de servicio de YaChanga queda cubierto por la app/);
+    expect(text).toMatch(/costo de servicio YaChanga queda cubierto por la app/);
     expect(text).not.toMatch(/\d+\s*%/);
     expect(text).not.toMatch(/\$\s*\d/);
     expect(text).not.toMatch(/\b22\b/);
