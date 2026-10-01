@@ -17,6 +17,7 @@ import { UserProfileScreen } from '../screens/account/UserProfileScreen';
 import { WorkerABMScreen } from '../screens/account/WorkerABMScreen';
 import { FavoritesScreen } from '../screens/account/FavoritesScreen';
 import { ChangePasswordScreen } from '../screens/account/ChangePasswordScreen';
+import { FaqScreen } from '../screens/account/FaqScreen';
 import { useAuth } from '../context/AuthContext';
 import { ChatConversationScreen } from '../screens/chat/ChatConversationScreen';
 import { WorkerProfileScreen } from '../screens/home/WorkerProfileScreen';
@@ -123,6 +124,14 @@ export function AccountStack() {
         options={{
           ...profileChildHeader,
           title: 'Cambiar contraseña',
+        }}
+      />
+      <Stack.Screen
+        name="Faq"
+        component={FaqScreen}
+        options={{
+          ...profileChildHeader,
+          title: 'Preguntas frecuentes',
         }}
       />
       <Stack.Screen
