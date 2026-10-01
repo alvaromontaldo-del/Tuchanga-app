@@ -5,6 +5,7 @@ import {
   copyTuesdayHoursToFriday,
   patchStoreDaySlot,
   setStoreDayClosed,
+  setStoreDaySplit,
   STORE_HOURS_TIME_ROW,
   storeOpeningHoursEditorRows,
   type StoreDaySchedule,
@@ -25,8 +26,8 @@ export function StoreOpeningHoursEditor({ days, onChange }: Props) {
     <View style={styles.wrap}>
       <Text style={styles.title}>Horarios de atención</Text>
       <Text style={styles.hint}>
-        Cada día tiene su horario. Si el local está cerrado, marcalo y no hace falta cargar Desde y
-        Hasta.
+        Cada día tiene su horario, corrido o cortado. Si el local está cerrado, marcalo y no hace
+        falta cargar Desde y Hasta.
       </Text>
 
       <Pressable
@@ -62,39 +63,76 @@ export function StoreOpeningHoursEditor({ days, onChange }: Props) {
             </Pressable>
           </View>
 
-          {row.closed
-            ? null
-            : row.slots.map((slot, index) => (
-                <View
-                  key={`${row.day}-${index}`}
-                  style={[styles.timeRow, STORE_HOURS_TIME_ROW]}
+          {row.closed ? null : (
+            <>
+              <View style={styles.modeRow}>
+                <Pressable
+                  onPress={() => onChange(setStoreDaySplit(days, row.day, false))}
+                  style={[styles.modeBtn, row.slots.length < 2 && styles.modeBtnOn]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${row.label}: corrido`}
+                  accessibilityState={{ selected: row.slots.length < 2 }}
                 >
-                  <AppTextInput
-                    label="Desde"
-                    value={slot.open}
-                    onChangeText={(text) =>
-                      onChange(patchStoreDaySlot(days, row.day, index, { open: text }))
-                    }
-                    placeholder="09:00"
-                    maxLength={5}
-                    keyboardType="numbers-and-punctuation"
-                    containerStyle={styles.timeInput}
-                    accessibilityLabel={`${row.label} desde`}
-                  />
-                  <AppTextInput
-                    label="Hasta"
-                    value={slot.close}
-                    onChangeText={(text) =>
-                      onChange(patchStoreDaySlot(days, row.day, index, { close: text }))
-                    }
-                    placeholder="18:00"
-                    maxLength={5}
-                    keyboardType="numbers-and-punctuation"
-                    containerStyle={styles.timeInput}
-                    accessibilityLabel={`${row.label} hasta`}
-                  />
-                </View>
-              ))}
+                  <Text style={[styles.modeText, row.slots.length < 2 && styles.modeTextOn]}>
+                    Corrido
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => onChange(setStoreDaySplit(days, row.day, true))}
+                  style={[styles.modeBtn, row.slots.length > 1 && styles.modeBtnOn]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${row.label}: cortado`}
+                  accessibilityState={{ selected: row.slots.length > 1 }}
+                >
+                  <Text style={[styles.modeText, row.slots.length > 1 && styles.modeTextOn]}>
+                    Cortado
+                  </Text>
+                </Pressable>
+              </View>
+              {row.slots.map((slot, index) => {
+                const slotLabel = row.slots.length > 1 ? (index === 0 ? 'Mañana' : 'Tarde') : null;
+                return (
+                  <View key={`${row.day}-${index}`}>
+                    {slotLabel ? <Text style={styles.slotLabel}>{slotLabel}</Text> : null}
+                    <View style={[styles.timeRow, STORE_HOURS_TIME_ROW]}>
+                      <AppTextInput
+                        label="Desde"
+                        value={slot.open}
+                        onChangeText={(text) =>
+                          onChange(patchStoreDaySlot(days, row.day, index, { open: text }))
+                        }
+                        placeholder={index === 0 ? '09:00' : '15:00'}
+                        maxLength={5}
+                        keyboardType="numbers-and-punctuation"
+                        containerStyle={styles.timeInput}
+                        accessibilityLabel={
+                          slotLabel
+                            ? `${row.label} ${slotLabel.toLowerCase()} desde`
+                            : `${row.label} desde`
+                        }
+                      />
+                      <AppTextInput
+                        label="Hasta"
+                        value={slot.close}
+                        onChangeText={(text) =>
+                          onChange(patchStoreDaySlot(days, row.day, index, { close: text }))
+                        }
+                        placeholder={index === 0 ? '18:00' : '19:00'}
+                        maxLength={5}
+                        keyboardType="numbers-and-punctuation"
+                        containerStyle={styles.timeInput}
+                        accessibilityLabel={
+                          slotLabel
+                            ? `${row.label} ${slotLabel.toLowerCase()} hasta`
+                            : `${row.label} hasta`
+                        }
+                      />
+                    </View>
+                  </View>
+                );
+              })}
+            </>
+          )}
         </View>
       ))}
     </View>
@@ -167,6 +205,11 @@ const styles = StyleSheet.create({
   },
   modeTextOn: {
     color: colors.primary,
+  },
+  slotLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.text,
   },
   timeRow: {
     flexDirection: 'row',

@@ -34,6 +34,8 @@ type Props = {
   onGeoChange: (geo: DeliveryGeoPoint | null) => void;
   placeholder?: string;
   near?: { lat: number; lng: number } | null;
+  /** Muestra «Usar ubicación actual». El alta de comercio lo apaga. */
+  showUseCurrentLocation?: boolean;
 };
 
 /**
@@ -50,6 +52,7 @@ export function AddressDeliveryField({
   onGeoChange,
   placeholder = 'Calle, altura, localidad',
   near,
+  showUseCurrentLocation = true,
 }: Props) {
   const [searching, setSearching] = useState(false);
   const [locating, setLocating] = useState(false);
@@ -197,16 +200,18 @@ export function AddressDeliveryField({
         </Pressable>
       </View>
 
-      <Pressable
-        onPress={() => void locateMe()}
-        disabled={locating}
-        style={({ pressed }) => [styles.gpsLink, pressed && styles.pressed]}
-      >
-        <Ionicons name="locate-outline" size={16} color={colors.primary} />
-        <Text style={styles.gpsLinkText}>
-          {locating ? 'Obteniendo GPS…' : 'Usar ubicación actual'}
-        </Text>
-      </Pressable>
+      {showUseCurrentLocation ? (
+        <Pressable
+          onPress={() => void locateMe()}
+          disabled={locating}
+          style={({ pressed }) => [styles.gpsLink, pressed && styles.pressed]}
+        >
+          <Ionicons name="locate-outline" size={16} color={colors.primary} />
+          <Text style={styles.gpsLinkText}>
+            {locating ? 'Obteniendo GPS…' : 'Usar ubicación actual'}
+          </Text>
+        </Pressable>
+      ) : null}
 
       {!searching &&
       settledQuery === value.trim() &&
