@@ -30,6 +30,8 @@ La función autoritativa es `public.calc_yachanga_service_fee`, llamada desde `c
 
 El costo de servicio de materiales es otra función (`calculate_material_service_fee`) y no usa estos tramos.
 
+**Recotización con costo de servicio ya pagado (`recotizar_en_curso`).** Si la contratación tiene la seña acreditada (`seña_pagada` / `totalmente_pagado`, o transacciones MP aprobadas de `seña_inicial`/`diferencia_seña`), el nuevo costo de servicio nunca baja de lo ya pagado: `comision = max(calc_yachanga_service_fee(neto), pagado)` y `precio_final = neto + comision`. Solo se cobra la diferencia positiva (`comision − max(comision_app, pagado)`); no hay devoluciones. Si la seña todavía no se pagó, se usa la fórmula nueva tal cual. Esto evita diferencias negativas en trabajos cotizados con el 22% anterior.
+
 - `precio_trabajador`: neto en mano del prestador (privado en UI del trabajador).
 - `comision_app`: seña inicial (MercadoPago) o base de la diferencia en recotización mayor.
 - `precio_final`: visible para ambos. Incluye el costo de servicio.

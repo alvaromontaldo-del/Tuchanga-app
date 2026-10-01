@@ -1,20 +1,37 @@
 -- Card #39. Costo de servicio al contratar un profesional: tramos marginales.
 --
--- NO aplicar en producción desde el agente: lo aplica un revisor.
+-- Aplicado en producción (kyxehrxcdealbujvvnxp) el 2026-10-01, después de un
+-- dry-run con rollback sobre datos reales.
 --
--- Fuente de calc_precios_contratacion: pg_get_functiondef en producción
--- (proyecto kyxehrxcdealbujvvnxp, 2026-10-01). Coincidía con
--- supabase/migrations/20260818180000_mp_payment_required_and_quote_detail.sql.
--- Las migraciones del repo pueden estar atrasadas: diffear este archivo contra prod.
+-- Fuente: pg_get_functiondef de producción del 2026-10-01 para
+-- calc_precios_contratacion y recotizar_en_curso. Diffeado contra prod: solo
+-- cambian las líneas marcadas con #39.
 --
--- Único cambio en calc_precios_contratacion: la comisión sale de
--- public.calc_yachanga_service_fee en lugar de CEIL(neto * 0.22).
--- Se conservan el guard (precio NULL o <= 0), IMMUTABLE, el CEIL del neto
--- y precio_final = neto + comisión.
+-- calc_precios_contratacion: la comisión sale de public.calc_yachanga_service_fee
+-- en lugar de CEIL(neto * 0.22). Se conservan el guard (precio NULL o <= 0),
+-- IMMUTABLE, el CEIL del neto y precio_final = neto + comisión.
+--
+-- recotizar_en_curso: si la seña ya está acreditada (pago aprobado en Mercado
+-- Pago, o estado_pago seña_pagada / totalmente_pagado, que cubre también la
+-- seña pagada con crédito), el costo nuevo nunca queda por debajo de lo ya
+-- pagado. No hay flujo de devolución: antes, una recotización que bajaba el
+-- costo pisaba comision_app con un valor menor al cobrado, y precio_final y la
+-- facturación quedaban por debajo de lo que el cliente pagó. Ahora:
+--   * costo = máximo entre la fórmula nueva y lo ya pagado;
+--   * la diferencia se mide contra lo ya cubierto, así que solo se cobra la
+--     diferencia positiva (Mercado Pago ya cobra comision_app - lo aprobado);
+--   * si la seña todavía no está paga, se usa la fórmula nueva tal cual;
+--   * si queda una diferencia pendiente (pendiente_seña) y el costo nuevo ya
+--     está cubierto, estado_pago vuelve a seña_pagada (no queda un cobro de $0).
 --
 -- No hay UPDATE de contrataciones. comision_app y precio_final quedan
 -- guardados al cotizar (crear_cotizacion) o al recotizar (recotizar_en_curso).
--- Las filas ya creadas no se recalculan.
+-- Las filas ya creadas no se recalculan. Las apps viejas muestran el valor
+-- guardado por el servidor, así que aplicar esto antes del OTA es seguro.
+--
+-- Permisos de calc_yachanga_service_fee: authenticated y service_role (las edge
+-- functions no llaman calc_precios_contratacion, pero un llamado directo con
+-- service_role no tiene que fallar). Sin PUBLIC ni anon.
 --
 -- calculate_material_service_fee no se toca. Materiales sigue en su función.
 
@@ -101,8 +118,7 @@ COMMENT ON FUNCTION public.calc_yachanga_service_fee(numeric) IS
 
 REVOKE ALL ON FUNCTION public.calc_yachanga_service_fee(numeric) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.calc_yachanga_service_fee(numeric) FROM anon;
-REVOKE ALL ON FUNCTION public.calc_yachanga_service_fee(numeric) FROM service_role;
-GRANT EXECUTE ON FUNCTION public.calc_yachanga_service_fee(numeric) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.calc_yachanga_service_fee(numeric) TO authenticated, service_role;
 
 -- Cuerpo de producción (2026-10-01). Único cambio: v_comision.
 CREATE OR REPLACE FUNCTION public.calc_precios_contratacion(p_precio_trabajador numeric)
@@ -125,6 +141,85 @@ $$;
 
 COMMENT ON FUNCTION public.calc_precios_contratacion(numeric) IS
   'precio_final = neto + calc_yachanga_service_fee(CEIL(neto)). La comisión queda guardada en la fila al cotizar.';
+
+-- Cuerpo de producción (2026-10-01). Cambios #39: piso en lo ya pagado.
+CREATE OR REPLACE FUNCTION public.recotizar_en_curso(p_contratacion_id uuid, p_nuevo_precio_trabajador numeric)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_row public.contrataciones%rowtype;
+  v_precios record;
+  v_diff numeric;
+  v_pagado numeric;
+  v_comision numeric;
+  v_precio_final numeric;
+BEGIN
+  v_row := public._assert_contratacion_participante(p_contratacion_id);
+
+  IF v_row.worker_id <> auth.uid() THEN
+    RAISE EXCEPTION 'Solo el trabajador puede recotizar';
+  END IF;
+
+  IF v_row.estado_trabajo <> 'en_curso' THEN
+    RAISE EXCEPTION 'Solo se puede recotizar con trabajo en curso';
+  END IF;
+
+  SELECT * INTO v_precios FROM public.calc_precios_contratacion(p_nuevo_precio_trabajador);
+  v_comision := v_precios.comision_app;
+  v_precio_final := v_precios.precio_final;
+
+  -- #39: lo ya pagado de costo de servicio (MP aprobado; con la seña acreditada
+  -- también cuenta comision_app, que cubre la seña pagada con crédito).
+  SELECT coalesce(sum(monto), 0) INTO v_pagado
+  FROM public.transacciones_pago
+  WHERE contratacion_id = p_contratacion_id
+    AND estado_mp = 'approved'
+    AND tipo_pago IN ('seña_inicial', 'diferencia_seña');
+  IF v_row.estado_pago IN ('seña_pagada', 'totalmente_pagado') THEN
+    v_pagado := greatest(v_pagado, v_row.comision_app);
+  END IF;
+
+  -- #39: no hay devolución. El costo nuevo no baja de lo ya pagado.
+  IF v_comision < v_pagado THEN
+    v_precio_final := v_precio_final - v_comision + v_pagado;
+    v_comision := v_pagado;
+  END IF;
+
+  -- #39: la diferencia se mide contra lo ya cubierto (solo se cobra si es positiva).
+  v_diff := round(v_comision - greatest(v_row.comision_app, v_pagado), 2);
+
+  IF v_diff > 0 THEN
+    UPDATE public.contrataciones
+    SET
+      recotizacion_precio_trabajador = p_nuevo_precio_trabajador,
+      recotizacion_precio_final = v_precio_final,
+      recotizacion_comision_app = v_comision,
+      estado_trabajo = 'pendiente_pago_diferencia'
+    WHERE id = p_contratacion_id;
+  ELSE
+    UPDATE public.contrataciones
+    SET
+      precio_trabajador = p_nuevo_precio_trabajador,
+      precio_final = v_precio_final,
+      comision_app = v_comision,
+      recotizacion_precio_trabajador = NULL,
+      recotizacion_precio_final = NULL,
+      recotizacion_comision_app = NULL,
+      estado_trabajo = 'en_curso',
+      -- #39: si quedaba una diferencia por pagar y ya está cubierta, no queda un cobro de $0.
+      estado_pago = CASE
+        WHEN estado_pago = 'pendiente_seña' AND v_pagado > 0 AND v_comision <= v_pagado
+          THEN 'seña_pagada'::public.contratacion_estado_pago
+        ELSE estado_pago
+      END
+    WHERE id = p_contratacion_id;
+  END IF;
+END;
+$function$;
+
 
 -- Verificación. Si un caso no cierra, la transacción entera falla.
 DO $$
