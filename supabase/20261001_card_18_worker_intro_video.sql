@@ -1,17 +1,13 @@
 -- Tarjeta #18 — video de presentación del profesional.
 -- Idempotente. NO ejecutar desde la app: aplicarlo a mano en prod.
 --
--- Snapshot de prod (proyecto kyxehrxcdealbujvvnxp, 2026-10-01), solo lectura.
--- Los archivos del repo pueden estar viejos. Este script NO reemplaza funciones
--- que ya existen, para no pisar la #45 (apellido y lat/lng en la búsqueda anónima).
---
--- En prod HOY (antes de aplicar este archivo):
---   search_workers_for_client(double precision, double precision, text, text[], uuid, integer)
---     sigue devolviendo apellido, lat y lng. NO se toca.
---   fetch_worker_trades(uuid) y fetch_worker_posts(uuid, integer) no llevan datos de perfil.
---   No existe un RPC de "detalle del profesional". La ficha pública lee `profiles`
---     con un SELECT aparte de intro_video_path (si la columna no está, la app ignora el error).
---   set_my_avatar_url(text) queda igual. El video usa una función nueva.
+-- Aplicado en prod (kyxehrxcdealbujvvnxp) el 2026-10-01, antes del merge del PR #55.
+-- No reemplaza funciones existentes: search_workers_for_client queda como la
+-- dejó #45 (apellido solo inicial, lat/lng redondeados) y no devuelve el video.
+-- fetch_worker_trades(uuid) y fetch_worker_posts(uuid, integer) no llevan datos de perfil.
+-- No existe un RPC de "detalle del profesional". La ficha pública lee `profiles`
+--   con un SELECT aparte de intro_video_path (si la columna no está, la app ignora el error).
+-- set_my_avatar_url(text) queda igual. El video usa una función nueva.
 --
 -- Patrón de avatars: bucket público, carpeta = auth.uid(), URL pública.
 -- La columna guarda el path (uid/intro-<epoch>.mp4|mov), no una URL externa.
