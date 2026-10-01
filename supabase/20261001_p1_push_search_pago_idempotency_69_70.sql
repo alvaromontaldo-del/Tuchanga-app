@@ -1,14 +1,14 @@
 -- YaChanga P1 #69, #70 y idempotencia de transacciones_pago (Mercado Pago).
 --
--- NO aplicar en producción desde el agente. Lo ejecuta un revisor en el SQL editor.
+-- Aplicado en producción el 2026-10-01 (antes del merge del PR #45).
 -- Un solo archivo. No está en supabase/migrations/.
 --
 -- #69  enqueue_store_push: quitar EXECUTE a anon, authenticated y PUBLIC.
 --      No se recrea la función: el cuerpo vigente (incluido cualquier guard
 --      que ya esté en la base) se conserva. Los callers internos son
 --      SECURITY DEFINER y corren como owner, así que siguen pudiendo encolar.
--- #70  search_workers_for_client: anon/público recibe nombre + inicial y
---      ubicación gruesa. La app logueada no necesita el domicilio exacto ni
+-- #70  search_workers_for_client: devuelve nombre + inicial y ubicación
+--      gruesa (anon y logueado). La app no necesita el domicilio exacto ni
 --      el apellido completo (abre el perfil por id y ordena por distance_km).
 -- Pago Una sola fila approved de seña de materiales por orden, y una sola
 --      fila approved de servicio por (contratación, tipo, mp_payment_id).
@@ -34,21 +34,23 @@ GRANT EXECUTE ON FUNCTION public.enqueue_store_push(uuid, text, text, text, json
 
 -- ---------------------------------------------------------------------------
 -- #70  search_workers_for_client
--- Cuerpo de partida: migrations/20260428170000_search_workers_rpc_rating_review.sql
--- Misma firma y mismas columnas de salida (CREATE OR REPLACE, sin DROP).
--- El filtro geográfico y el ORDER BY usan la ubicación exacta, que no sale
--- de la función. apellido en el resultado es solo la inicial.
--- No hace falta una RPC autenticada aparte: la búsqueda, el pin y la tarjeta
--- usan id, nombre, inicial, distance_km y coordenadas redondeadas.
+-- Cuerpo de partida: el que está en producción al 2026-10-01 (incluye
+-- total_jobs_done y el filtro professional_status = 'accepted'), no el de
+-- migrations/20260428170000. Misma firma y mismas columnas de salida
+-- (CREATE OR REPLACE, sin DROP). Solo cambian las columnas con datos personales:
+--   apellido     → solo la inicial
+--   lat / lng    → redondeadas a 2 decimales (~1 km)
+--   distance_km  → redondeada a 0,1 km (el filtro y el orden usan la exacta)
+-- La búsqueda por apellido completo queda solo para usuarios logueados.
 -- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.search_workers_for_client(
   p_client_lat double precision,
   p_client_lng double precision,
-  p_query text default '',
-  p_category_names text[] default null,
-  p_exclude_user_id uuid default null,
-  p_limit int default 80
+  p_query text DEFAULT '',
+  p_category_names text[] DEFAULT NULL,
+  p_exclude_user_id uuid DEFAULT NULL,
+  p_limit integer DEFAULT 80
 )
 RETURNS TABLE (
   profile_id uuid,
@@ -57,13 +59,14 @@ RETURNS TABLE (
   avatar_url text,
   lat double precision,
   lng double precision,
-  coverage_km int,
+  coverage_km integer,
   distance_km double precision,
   primary_trade text,
   all_trades text[],
   summary_jobs text,
   rating_average numeric,
-  review_count int
+  review_count integer,
+  total_jobs_done integer
 )
 LANGUAGE sql
 STABLE
@@ -80,91 +83,83 @@ AS $$
     SELECT
       p.id AS profile_id,
       p.nombre,
-      p.avatar_url,
       p.apellido AS apellido_full,
-      left(btrim(coalesce(p.apellido, '')), 1) AS apellido,
-      -- ~1 km. El pin no revela la puerta.
-      round(st_y(p.location::geometry)::numeric, 2)::double precision AS lat,
-      round(st_x(p.location::geometry)::numeric, 2)::double precision AS lng,
+      p.avatar_url,
+      st_y(p.location::geometry) AS lat_exact,
+      st_x(p.location::geometry) AS lng_exact,
       p.coverage_km,
-      st_distance(p.location, (SELECT g FROM client_pt), false) / 1000.0 AS distance_sort,
-      round(
-        (st_distance(p.location, (SELECT g FROM client_pt), false) / 1000.0)::numeric,
-        1
-      )::double precision AS distance_km,
+      st_distance(p.location, (SELECT g FROM client_pt), false) / 1000.0 AS distance_exact,
       (
         SELECT j2.nombre_oficio
-        FROM jobs j2
+        FROM public.jobs j2
         WHERE j2.user_id = p.id
-        ORDER BY j2.es_principal DESC, j2.created_at
+        ORDER BY j2.es_principal DESC, j2.nombre_oficio
         LIMIT 1
       ) AS primary_trade,
-      coalesce(
-        (
-          SELECT array_agg(j3.nombre_oficio ORDER BY j3.nombre_oficio)
-          FROM jobs j3
-          WHERE j3.user_id = p.id
-        ),
-        '{}'::text[]
+      (
+        SELECT array_agg(j3.nombre_oficio ORDER BY j3.es_principal DESC, j3.nombre_oficio)
+        FROM public.jobs j3
+        WHERE j3.user_id = p.id
       ) AS all_trades,
       (
-        SELECT string_agg(x.nombre_oficio || ': ' || left(coalesce(x.descripcion, ''), 100), ' · ' ORDER BY x.ord)
-        FROM (
-          SELECT j.nombre_oficio, j.descripcion, row_number() OVER (ORDER BY j.es_principal DESC, j.created_at) AS ord
-          FROM jobs j
-          WHERE j.user_id = p.id
-        ) x
-        WHERE x.ord <= 3
+        SELECT string_agg(j4.nombre_oficio || ': ' || coalesce(j4.descripcion, ''), ' · ')
+        FROM public.jobs j4
+        WHERE j4.user_id = p.id
       ) AS summary_jobs,
       coalesce(p.rating_average, 0) AS rating_average,
-      coalesce(p.review_count, 0) AS review_count
-    FROM profiles p
-    WHERE p.coverage_km IS NOT NULL
+      coalesce(p.review_count, 0) AS review_count,
+      coalesce(p.total_jobs_done, 0) AS total_jobs_done
+    FROM public.profiles p
+    WHERE p.professional_status = 'accepted'
+      AND p.location IS NOT NULL
+      AND p.coverage_km IS NOT NULL
       AND p.coverage_km > 0
-      AND EXISTS (SELECT 1 FROM jobs j WHERE j.user_id = p.id)
       AND (p_exclude_user_id IS NULL OR p.id <> p_exclude_user_id)
-      AND st_dwithin(p.location, (SELECT g FROM client_pt), p.coverage_km * 1000.0)
+      AND EXISTS (SELECT 1 FROM public.jobs j WHERE j.user_id = p.id)
   )
   SELECT
     b.profile_id,
     b.nombre,
-    b.apellido,
+    nullif(upper(left(btrim(coalesce(b.apellido_full, '')), 1)), '') AS apellido,
     b.avatar_url,
-    b.lat,
-    b.lng,
+    round(b.lat_exact::numeric, 2)::double precision AS lat,
+    round(b.lng_exact::numeric, 2)::double precision AS lng,
     b.coverage_km,
-    b.distance_km,
+    round(b.distance_exact::numeric, 1)::double precision AS distance_km,
     b.primary_trade,
     b.all_trades,
     b.summary_jobs,
     b.rating_average,
-    b.review_count
+    b.review_count,
+    b.total_jobs_done
   FROM base b
-  WHERE (
+  WHERE b.distance_exact <= b.coverage_km
+    AND (
       coalesce(trim(p_query), '') = ''
       OR b.nombre ILIKE '%' || trim(p_query) || '%'
-      OR b.apellido_full ILIKE '%' || trim(p_query) || '%'
-      OR EXISTS (
-        SELECT 1
-        FROM jobs j
-        WHERE j.user_id = b.profile_id
-          AND (
-            j.nombre_oficio ILIKE '%' || trim(p_query) || '%'
-            OR j.descripcion ILIKE '%' || trim(p_query) || '%'
-          )
+      OR (auth.uid() IS NOT NULL AND b.apellido_full ILIKE '%' || trim(p_query) || '%')
+      OR b.primary_trade ILIKE '%' || trim(p_query) || '%'
+      OR exists (
+        SELECT 1 FROM unnest(coalesce(b.all_trades, array[]::text[])) t
+        WHERE t ILIKE '%' || trim(p_query) || '%'
       )
+      OR coalesce(b.summary_jobs, '') ILIKE '%' || trim(p_query) || '%'
     )
     AND (
       p_category_names IS NULL
-      OR coalesce(array_length(p_category_names, 1), 0) = 0
-      OR b.all_trades && p_category_names
+      OR cardinality(p_category_names) = 0
+      OR exists (
+        SELECT 1
+        FROM unnest(coalesce(b.all_trades, array[]::text[])) t
+        WHERE t = ANY (p_category_names)
+      )
     )
-  ORDER BY b.distance_sort ASC
+  ORDER BY b.distance_exact ASC, b.rating_average DESC NULLS LAST
   LIMIT (SELECT n FROM lim);
 $$;
 
 COMMENT ON FUNCTION public.search_workers_for_client(double precision, double precision, text, text[], uuid, int) IS
-  'Búsqueda pública. Devuelve nombre + inicial del apellido, distancia en km y coordenadas redondeadas a ~1 km. No devuelve el apellido completo ni el lat/lng exacto.';
+  'Búsqueda de profesionales. Devuelve nombre + inicial del apellido, distancia redondeada a 0,1 km y coordenadas redondeadas a ~1 km. No devuelve el apellido completo ni el lat/lng exacto.';
 
 REVOKE ALL ON FUNCTION public.search_workers_for_client(double precision, double precision, text, text[], uuid, int) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.search_workers_for_client(double precision, double precision, text, text[], uuid, int) TO anon;
@@ -173,10 +168,9 @@ GRANT EXECUTE ON FUNCTION public.search_workers_for_client(double precision, dou
 
 -- ---------------------------------------------------------------------------
 -- Idempotencia MP — detección (solo lectura).
--- El agente no se conectó a producción. El número de duplicados es lo que
--- imprimen estos NOTICE (grupos_duplicados / filas_sobrantes).
--- Si filas_sobrantes > 0, el CREATE INDEX de más abajo falla. Descomentá la
--- limpieza, revisá los ids y volvé a correr el archivo.
+-- El número de duplicados es lo que imprimen estos NOTICE
+-- (grupos_duplicados / filas_sobrantes). La limpieza de abajo los resuelve
+-- antes de crear los índices; correr el archivo de nuevo no borra nada más.
 --
 -- La misma consulta, para pegarla sola en el editor:
 --
@@ -247,51 +241,113 @@ BEGIN
 END
 $detect_dup_pagos$;
 
--- Limpieza comentada. Descomentar SOLO si la detección devolvió filas_sobrantes > 0,
--- revisar los ids, y recién entonces crear los índices.
--- Conserva la fila approved más vieja de cada grupo.
---
--- WITH sobrantes AS (
---   SELECT id
---   FROM (
---     SELECT
---       id,
---       row_number() OVER (
---         PARTITION BY material_order_id
---         ORDER BY created_at ASC, id ASC
---       ) AS rn
---     FROM public.transacciones_pago
---     WHERE estado_mp = 'approved'
---       AND tipo_pago = 'seña_materiales'
---       AND material_order_id IS NOT NULL
---   ) s
---   WHERE s.rn > 1
--- )
--- DELETE FROM public.transacciones_pago t
--- USING sobrantes
--- WHERE t.id = sobrantes.id;
---
--- WITH sobrantes AS (
---   SELECT id
---   FROM (
---     SELECT
---       id,
---       row_number() OVER (
---         PARTITION BY contratacion_id, tipo_pago, mp_payment_id
---         ORDER BY created_at ASC, id ASC
---       ) AS rn
---     FROM public.transacciones_pago
---     WHERE estado_mp = 'approved'
---       AND contratacion_id IS NOT NULL
---       AND mp_payment_id IS NOT NULL
---       AND btrim(mp_payment_id) <> ''
---       AND tipo_pago IN ('seña_inicial', 'diferencia_seña')
---   ) s
---   WHERE s.rn > 1
--- )
--- DELETE FROM public.transacciones_pago t
--- USING sobrantes
--- WHERE t.id = sobrantes.id;
+-- Limpieza (aplicada el 2026-10-01). La detección en producción dio:
+--   seña_materiales: 9 órdenes con 2 filas approved (9 sobrantes)
+--   servicio:        6 contrataciones con 2-3 filas approved (7 sobrantes)
+-- En todos los grupos las filas son el MISMO pago de MP: mismo mp_payment_id,
+-- mismo monto y mismo cliente. La fila vieja es la de la preferencia
+-- (mp_crear_preferencia, promovida a approved por la Edge) y la nueva es la
+-- que insertó la RPC con idempotency_key 'mp_payment:<id>'.
+-- Se conserva la fila más vieja de cada grupo, que es la misma que ya
+-- cuentan las RPCs de admin (DISTINCT ON ... ORDER BY created_at ASC, id ASC),
+-- así que los totales de facturación no cambian.
+-- Las filas borradas quedan copiadas en public.transacciones_pago_dedupe_77
+-- (con RLS y sin grants a anon/authenticated). La fila que queda guarda en
+-- metadata.dedupe_77 los ids y las idempotency_key borradas.
+-- Si algún grupo tuviera montos, clientes o pagos distintos, la limpieza
+-- aborta y no borra nada.
+
+CREATE TABLE IF NOT EXISTS public.transacciones_pago_dedupe_77 (
+  LIKE public.transacciones_pago,
+  kept_id uuid NOT NULL,
+  removed_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.transacciones_pago_dedupe_77 ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.transacciones_pago_dedupe_77 FROM PUBLIC, anon, authenticated;
+GRANT ALL ON TABLE public.transacciones_pago_dedupe_77 TO service_role;
+
+DO $dedupe_pagos_77$
+DECLARE
+  v_bad integer;
+  v_removed integer;
+BEGIN
+  CREATE TEMP TABLE _tp_dupes ON COMMIT DROP AS
+  WITH g AS (
+    SELECT
+      t.id,
+      t.idempotency_key,
+      CASE
+        WHEN t.tipo_pago = 'seña_materiales' THEN 'mat:' || t.material_order_id::text
+        ELSE 'srv:' || t.contratacion_id::text || ':' || t.tipo_pago::text || ':' || t.mp_payment_id
+      END AS grp,
+      t.monto,
+      t.cliente_id,
+      t.mp_payment_id,
+      t.created_at
+    FROM public.transacciones_pago t
+    WHERE t.estado_mp = 'approved'
+      AND (
+        (t.tipo_pago = 'seña_materiales' AND t.material_order_id IS NOT NULL)
+        OR (
+          t.tipo_pago IN ('seña_inicial', 'diferencia_seña')
+          AND t.contratacion_id IS NOT NULL
+          AND t.mp_payment_id IS NOT NULL
+          AND btrim(t.mp_payment_id) <> ''
+        )
+      )
+  ),
+  r AS (
+    SELECT
+      g.*,
+      count(*) OVER (PARTITION BY g.grp) AS n,
+      row_number() OVER (PARTITION BY g.grp ORDER BY g.created_at ASC, g.id ASC) AS rn,
+      first_value(g.id) OVER (PARTITION BY g.grp ORDER BY g.created_at ASC, g.id ASC) AS kept_id
+    FROM g
+  )
+  SELECT * FROM r WHERE r.n > 1;
+
+  SELECT count(*) INTO v_bad
+  FROM (
+    SELECT grp
+    FROM _tp_dupes
+    GROUP BY grp
+    HAVING count(DISTINCT monto) > 1
+        OR count(DISTINCT cliente_id) > 1
+        OR count(DISTINCT coalesce(mp_payment_id, '')) > 1
+  ) x;
+  IF v_bad > 0 THEN
+    RAISE EXCEPTION 'dedupe_77: % grupos con montos/clientes/pagos distintos; no se borra nada', v_bad;
+  END IF;
+
+  INSERT INTO public.transacciones_pago_dedupe_77
+  SELECT t.*, d.kept_id, now()
+  FROM public.transacciones_pago t
+  JOIN _tp_dupes d ON d.id = t.id
+  WHERE d.rn > 1;
+
+  UPDATE public.transacciones_pago k
+  SET metadata = coalesce(k.metadata, '{}'::jsonb) || jsonb_build_object(
+        'dedupe_77', jsonb_build_object(
+          'removed_ids', x.ids,
+          'removed_idempotency_keys', x.keys,
+          'at', now()
+        )
+      )
+  FROM (
+    SELECT kept_id, jsonb_agg(id ORDER BY rn) AS ids, jsonb_agg(idempotency_key ORDER BY rn) AS keys
+    FROM _tp_dupes
+    WHERE rn > 1
+    GROUP BY kept_id
+  ) x
+  WHERE k.id = x.kept_id;
+
+  DELETE FROM public.transacciones_pago t
+  USING _tp_dupes d
+  WHERE t.id = d.id AND d.rn > 1;
+  GET DIAGNOSTICS v_removed = ROW_COUNT;
+  RAISE NOTICE 'dedupe_77: filas borradas=%', v_removed;
+END
+$dedupe_pagos_77$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_transacciones_pago_sena_materiales_approved
   ON public.transacciones_pago (material_order_id)
