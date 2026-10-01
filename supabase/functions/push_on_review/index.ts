@@ -2,6 +2,11 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendExpoPush } from "../_shared/expoPush.ts";
+import { requireFunctionSecret } from "../_shared/functionSecretGuard.ts";
+import {
+  claimPushDelivery,
+  uniqueExpoTokens,
+} from "../_shared/pushIdempotency.ts";
 
 type WebhookPayload<T> = {
   type: "INSERT" | "UPDATE" | "DELETE";
@@ -31,10 +36,19 @@ function json(status: number, body: unknown) {
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
 
+  const denied = await requireFunctionSecret(req);
+  if (denied) return denied;
+
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-  const SERVICE_ROLE = Deno.env.get("SERVICE_ROLE_KEY") ?? "";
+  const SERVICE_ROLE =
+    Deno.env.get("SERVICE_ROLE_KEY") ??
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
+    "";
   if (!SUPABASE_URL || !SERVICE_ROLE) {
-    return json(500, { error: "missing_env", need: ["SUPABASE_URL", "SERVICE_ROLE_KEY"] });
+    return json(500, {
+      error: "missing_env",
+      need: ["SUPABASE_URL", "SERVICE_ROLE_KEY"],
+    });
   }
 
   let payload: WebhookPayload<ReviewRow>;
@@ -57,13 +71,19 @@ Deno.serve(async (req) => {
     auth: { persistSession: false },
   });
 
+  const eventKey = `review:${review.id}`;
+  if (!(await claimPushDelivery(sb, eventKey))) {
+    return json(200, { ok: true, skipped: "already_sent", eventKey });
+  }
+
   const { data: prof, error: pe } = await sb
     .from("profiles")
     .select("expo_push_token,nombre,apellido")
     .eq("id", review.worker_id)
     .maybeSingle();
 
-  if (pe || !prof?.expo_push_token) {
+  const tokens = uniqueExpoTokens([prof?.expo_push_token]);
+  if (pe || tokens.length === 0) {
     return json(200, { ok: true, skipped: "no_push_token" });
   }
 
@@ -78,18 +98,23 @@ Deno.serve(async (req) => {
   }
 
   const { data: clientProf } = clientId
-    ? await sb.from("profiles").select("nombre,apellido").eq("id", clientId).maybeSingle()
+    ? await sb
+      .from("profiles")
+      .select("nombre,apellido")
+      .eq("id", clientId)
+      .maybeSingle()
     : { data: null };
 
   const clientNameRaw = clientProf
     ? `${clientProf.nombre ?? ""} ${clientProf.apellido ?? ""}`.trim()
     : "Un cliente";
-  const clientName = clientNameRaw.split(/\s+/).filter(Boolean)[0] ?? "Un cliente";
+  const clientName =
+    clientNameRaw.split(/\s+/).filter(Boolean)[0] ?? "Un cliente";
   const stars = Math.max(1, Math.min(5, Math.round(Number(review.rating) || 5)));
 
   try {
     await sendExpoPush({
-      to: prof.expo_push_token,
+      to: tokens,
       title: "YaChanga",
       body: `${clientName} te dejó una reseña de ${stars} estrellas.`,
       data: {

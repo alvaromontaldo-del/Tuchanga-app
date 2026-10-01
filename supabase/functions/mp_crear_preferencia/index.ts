@@ -9,7 +9,8 @@ import {
   resolveCheckoutUrl,
   type TipoPagoMp,
 } from "../_shared/mercadopago.ts";
-import { createAdminClient, createUserClient, json } from "../_shared/supabaseAdmin.ts";
+import { requireAuthenticatedUser } from "../_shared/requireUser.ts";
+import { createAdminClient, json } from "../_shared/supabaseAdmin.ts";
 
 type ContratacionRow = {
   id: string;
@@ -107,18 +108,9 @@ Deno.serve(async (req) => {
     return json(400, { error: "contratacion_or_order_required" });
   }
 
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader) return json(401, { error: "unauthorized" });
-
-  let userId: string;
-  try {
-    const userClient = createUserClient(authHeader);
-    const { data, error } = await userClient.auth.getUser();
-    if (error || !data.user?.id) return json(401, { error: "unauthorized" });
-    userId = data.user.id;
-  } catch {
-    return json(500, { error: "auth_setup_failed" });
-  }
+  const auth = await requireAuthenticatedUser(req);
+  if (auth instanceof Response) return auth;
+  const userId = auth.userId;
 
   const sb = createAdminClient();
   const { data: userRow } = await sb.auth.admin.getUserById(userId);

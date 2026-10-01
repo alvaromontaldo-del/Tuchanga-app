@@ -1,74 +1,29 @@
--- YaChanga P0 #63 — Comercio oculto hasta pagar. Fase 1 (aditiva) + fase 2 (aplicada el 2026-10-01).
+-- YaChanga — seguimiento de #63. El PIN de retiro también lo ve quien creó la solicitud.
 --
--- NO aplicar la fase 2 en el mismo paso que este archivo.
--- NO aplicar este archivo a producción desde el agente: lo corre un revisor.
--- Orden:
---   1. Ejecutar solo el bloque FASE 1 (este archivo, hasta el COMMIT).
---   2. Publicar el OTA con la app que ya no selecciona stores.phone,
---      stores.address ni orders.verification_pin.
---   3. Recién entonces descomentar y ejecutar FASE 2.
+-- APLICADO en producción el 2026-10-01 (migración card_63_pin_requester), después de la fase 2 de #63.
+-- Reemplaza solo los tres RPC de revelado de
+-- supabase/20261001_p0_store_hidden_until_paid_card_63.sql.
+-- No toca get_my_store_contact ni completar_orden_material_con_pin:
+-- el dueño del comercio sigue tipeando el PIN, nunca lo lee.
 --
--- FASE 1 no revoca privilegios de columnas. Reafirma RPCs SECURITY DEFINER:
---   get_material_order_reveal(uuid)           teléfono, dirección y PIN del
---                                             comercio, solo para el cliente
---                                             de la orden y solo con fee aprobado
---   list_material_request_quote_reveals(uuid) lo mismo, en lote, al comparar
---   list_my_material_solicitudes()            retiros del cliente; el PIN solo
---                                             si auth.uid() es el cliente
---   get_my_store_contact(uuid)                teléfono y dirección del propio
---                                             comercio (dueño). Nunca un PIN.
+-- Creador del pedido: material_requests.professional_id.
+-- La app lo carga con el perfil que envía la solicitud (CreateMaterialRequest).
+-- El cliente que paga sigue siendo orders.client_id / quotes.client_id /
+-- material_checkouts.client_id / material_requests.client_id
+-- (_material_order_payer_can_reveal).
 --
--- El comercio no lee el PIN: lo tipea el cliente en completar_orden_material_con_pin.
--- EXECUTE queda solo para authenticated. Sin anon y sin service_role.
--- El webhook de Mercado Pago sigue con service_role y no usa estos RPC.
+-- PIN, teléfono y dirección del comercio salen solo con el fee aprobado, y solo si
+-- auth.uid() es (a) ese cliente o (b) professional_id. Si el caller es el dueño
+-- de ESE comercio (is_store_owner), los tres vuelven null aunque también sea
+-- el creador: autocompra, el PIN queda oculto.
+--
+-- Guards que se mantienen: not_authenticated, order_not_found,
+-- not_order_client, request_not_found, not_request_party.
 
 BEGIN;
 
 -- ---------------------------------------------------------------------------
--- 1) Dueño del comercio: su propio teléfono y dirección. Sin PIN de órdenes.
--- ---------------------------------------------------------------------------
-
-CREATE OR REPLACE FUNCTION public.get_my_store_contact(p_store_id uuid)
-RETURNS TABLE (
-  phone text,
-  address text
-)
-LANGUAGE plpgsql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  IF auth.uid() IS NULL THEN
-    RAISE EXCEPTION 'not_authenticated';
-  END IF;
-
-  IF p_store_id IS NULL THEN
-    RETURN;
-  END IF;
-
-  RETURN QUERY
-  SELECT s.phone, s.address
-  FROM public.stores s
-  WHERE s.id = p_store_id
-    AND s.user_id = auth.uid();
-END;
-$$;
-
-COMMENT ON FUNCTION public.get_my_store_contact(uuid) IS
-  'Teléfono y dirección del comercio solo si auth.uid() es stores.user_id. No devuelve PIN de órdenes.';
-
-REVOKE ALL ON FUNCTION public.get_my_store_contact(uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.get_my_store_contact(uuid) FROM anon;
-REVOKE ALL ON FUNCTION public.get_my_store_contact(uuid) FROM service_role;
-GRANT EXECUTE ON FUNCTION public.get_my_store_contact(uuid) TO authenticated;
-
--- ---------------------------------------------------------------------------
--- 2) Reveal de una orden. Misma regla que la migración 20260820180000:
---    el caller tiene que ser el cliente (no el comercio) y los campos
---    sensibles salen solo con fee aprobado.
---    Fee aprobado = deposit_status paid/waived, status deposit_paid/completed
---    o contact_revealed_at.
+-- 1) Reveal de una orden.
 -- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.get_material_order_reveal(p_order_id uuid)
@@ -95,6 +50,9 @@ DECLARE
   v_quote public.quotes%ROWTYPE;
   v_store public.stores%ROWTYPE;
   v_revealed boolean;
+  v_is_payer boolean;
+  v_is_requester boolean;
+  v_show_pickup boolean;
   v_pin text;
 BEGIN
   IF v_uid IS NULL THEN
@@ -106,8 +64,17 @@ BEGIN
     RAISE EXCEPTION 'order_not_found';
   END IF;
 
-  -- Dueño del comercio: not_order_client. El PIN no se le devuelve.
-  IF NOT public._material_order_payer_can_reveal(p_order_id, v_uid) THEN
+  v_is_payer := public._material_order_payer_can_reveal(p_order_id, v_uid);
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.quotes q
+    JOIN public.material_requests mr ON mr.id = q.request_id
+    WHERE q.id = v_order.quote_id
+      AND mr.professional_id = v_uid
+  ) INTO v_is_requester;
+
+  -- Dueño que no pagó ni creó el pedido: not_order_client. No ve el PIN.
+  IF NOT v_is_payer AND NOT v_is_requester THEN
     RAISE EXCEPTION 'not_order_client';
   END IF;
 
@@ -164,6 +131,12 @@ BEGIN
     RETURNING * INTO v_order;
   END IF;
 
+  -- Autocompra: el dueño de este comercio no recibe PIN, teléfono ni dirección.
+  v_show_pickup :=
+    v_revealed
+    AND NOT public.is_store_owner(v_store.id)
+    AND (v_is_payer OR v_is_requester);
+
   order_id := v_order.id;
   order_code := CASE WHEN v_revealed THEN v_order.order_code ELSE NULL END;
   status := v_order.status;
@@ -171,23 +144,22 @@ BEGIN
   deposit_amount := v_order.deposit_amount;
   accepted_total := v_order.accepted_total;
   verification_pin := CASE
-    WHEN v_revealed AND NOT public.is_store_owner(v_store.id)
-    THEN lpad(btrim(coalesce(v_order.verification_pin, '')), 4, '0')
+    WHEN v_show_pickup THEN lpad(btrim(coalesce(v_order.verification_pin, '')), 4, '0')
     ELSE NULL
   END;
   store_name := CASE
     WHEN v_revealed THEN coalesce(nullif(trim(v_store.name), ''), 'Comercio')
     ELSE 'Comercio (oculto hasta pagar el costo de servicio)'
   END;
-  store_phone := CASE WHEN v_revealed THEN v_store.phone ELSE NULL END;
-  store_address := CASE WHEN v_revealed THEN v_store.address ELSE NULL END;
+  store_phone := CASE WHEN v_show_pickup THEN v_store.phone ELSE NULL END;
+  store_address := CASE WHEN v_show_pickup THEN v_store.address ELSE NULL END;
   contact_revealed := v_revealed;
   RETURN NEXT;
 END;
 $$;
 
 COMMENT ON FUNCTION public.get_material_order_reveal(uuid) IS
-  'Teléfono, dirección y PIN solo si auth.uid() es el cliente de la orden y el fee está aprobado. El comercio no puede llamarla.';
+  'Teléfono, dirección y PIN con fee aprobado, para el cliente que pagó o material_requests.professional_id. Null si auth.uid() es el dueño de ese comercio.';
 
 REVOKE ALL ON FUNCTION public.get_material_order_reveal(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.get_material_order_reveal(uuid) FROM anon;
@@ -195,11 +167,8 @@ REVOKE ALL ON FUNCTION public.get_material_order_reveal(uuid) FROM service_role;
 GRANT EXECUTE ON FUNCTION public.get_material_order_reveal(uuid) TO authenticated;
 
 -- ---------------------------------------------------------------------------
--- 3) Reveal en lote (comparar cotizaciones). Teléfono, dirección y PIN
---    solo con fee aprobado y solo para el cliente de esa orden.
+-- 2) Reveal en lote (comparar cotizaciones).
 -- ---------------------------------------------------------------------------
-
-DROP FUNCTION IF EXISTS public.list_material_request_quote_reveals(uuid);
 
 CREATE OR REPLACE FUNCTION public.list_material_request_quote_reveals(p_request_id uuid)
 RETURNS TABLE (
@@ -265,7 +234,12 @@ BEGIN
         o.deposit_status IN ('paid', 'waived')
         OR o.status IN ('deposit_paid', 'completed')
         OR o.contact_revealed_at IS NOT NULL
-      ) AND public._material_order_payer_can_reveal(o.id, v_uid)
+      )
+      AND (
+        public._material_order_payer_can_reveal(o.id, v_uid)
+        OR v_req.professional_id = v_uid
+      )
+      AND NOT public.is_store_owner(q.store_id)
       THEN s.phone
       ELSE NULL
     END AS store_phone,
@@ -274,7 +248,12 @@ BEGIN
         o.deposit_status IN ('paid', 'waived')
         OR o.status IN ('deposit_paid', 'completed')
         OR o.contact_revealed_at IS NOT NULL
-      ) AND public._material_order_payer_can_reveal(o.id, v_uid)
+      )
+      AND (
+        public._material_order_payer_can_reveal(o.id, v_uid)
+        OR v_req.professional_id = v_uid
+      )
+      AND NOT public.is_store_owner(q.store_id)
       THEN s.address
       ELSE NULL
     END AS store_address,
@@ -283,7 +262,11 @@ BEGIN
         o.deposit_status IN ('paid', 'waived')
         OR o.status IN ('deposit_paid', 'completed')
         OR o.contact_revealed_at IS NOT NULL
-      ) AND public._material_order_payer_can_reveal(o.id, v_uid)
+      )
+      AND (
+        public._material_order_payer_can_reveal(o.id, v_uid)
+        OR v_req.professional_id = v_uid
+      )
       THEN o.order_code
       ELSE NULL
     END AS order_code,
@@ -293,7 +276,10 @@ BEGIN
         OR o.status IN ('deposit_paid', 'completed')
         OR o.contact_revealed_at IS NOT NULL
       )
-      AND public._material_order_payer_can_reveal(o.id, v_uid)
+      AND (
+        public._material_order_payer_can_reveal(o.id, v_uid)
+        OR v_req.professional_id = v_uid
+      )
       AND NOT public.is_store_owner(q.store_id)
       AND nullif(btrim(coalesce(o.verification_pin, '')), '') IS NOT NULL
       THEN lpad(btrim(o.verification_pin), 4, '0')
@@ -313,7 +299,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.list_material_request_quote_reveals(uuid) IS
-  'Teléfono, dirección, código y PIN de cada comercio del pedido. Sensibles solo con fee aprobado y solo si auth.uid() es el cliente de esa orden.';
+  'Teléfono, dirección y PIN de cada comercio con fee aprobado, para el cliente que pagó o el professional_id de la solicitud. Null si el caller es dueño de ese comercio.';
 
 REVOKE ALL ON FUNCTION public.list_material_request_quote_reveals(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.list_material_request_quote_reveals(uuid) FROM anon;
@@ -321,8 +307,8 @@ REVOKE ALL ON FUNCTION public.list_material_request_quote_reveals(uuid) FROM ser
 GRANT EXECUTE ON FUNCTION public.list_material_request_quote_reveals(uuid) TO authenticated;
 
 -- ---------------------------------------------------------------------------
--- 4) Retiros del cliente. La dirección sale solo en órdenes ya pagas.
---    El PIN sale solo si el caller es el cliente, nunca el comercio.
+-- 3) Mis pedidos de materiales. La lista ya está filtrada a fee aprobado.
+--    PIN, teléfono y dirección: cliente que pagó o professional_id, nunca el dueño.
 -- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.list_my_material_solicitudes()
@@ -350,13 +336,33 @@ BEGIN
       o.order_code,
       coalesce(nullif(trim(mr.title), ''), 'Pedido de materiales') AS title,
       coalesce(nullif(trim(s.name), ''), 'Comercio') AS store_name,
-      coalesce(nullif(trim(s.address), ''), '') AS store_address,
+      CASE
+        WHEN NOT public.is_store_owner(q.store_id)
+          AND (
+            public._material_order_payer_can_reveal(o.id, uid)
+            OR mr.professional_id = uid
+          )
+        THEN coalesce(nullif(trim(s.address), ''), '')
+        ELSE NULL
+      END AS store_address,
+      CASE
+        WHEN NOT public.is_store_owner(q.store_id)
+          AND (
+            public._material_order_payer_can_reveal(o.id, uid)
+            OR mr.professional_id = uid
+          )
+        THEN nullif(btrim(coalesce(s.phone, '')), '')
+        ELSE NULL
+      END AS store_phone,
       coalesce(s.opening_hours, '[]'::jsonb) AS store_opening_hours,
       coalesce(o.contact_revealed_at, o.updated_at, o.created_at) AS available_at,
       o.completed_at,
       CASE
-        WHEN public._material_order_payer_can_reveal(o.id, uid)
-          AND NOT public.is_store_owner(q.store_id)
+        WHEN NOT public.is_store_owner(q.store_id)
+          AND (
+            public._material_order_payer_can_reveal(o.id, uid)
+            OR mr.professional_id = uid
+          )
           AND nullif(btrim(coalesce(o.verification_pin, '')), '') IS NOT NULL
         THEN lpad(btrim(o.verification_pin), 4, '0')
         ELSE NULL
@@ -430,80 +436,11 @@ END;
 $function$;
 
 COMMENT ON FUNCTION public.list_my_material_solicitudes() IS
-  'Pedidos de materiales ya pagos, para retirar o retirados. Dirección solo post-fee. PIN solo si auth.uid() es el cliente y no el dueño del comercio.';
+  'Pedidos de materiales ya pagos. PIN, teléfono y dirección si auth.uid() es el cliente que pagó o professional_id, y no el dueño de ese comercio.';
 
 REVOKE ALL ON FUNCTION public.list_my_material_solicitudes() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.list_my_material_solicitudes() FROM anon;
 REVOKE ALL ON FUNCTION public.list_my_material_solicitudes() FROM service_role;
 GRANT EXECUTE ON FUNCTION public.list_my_material_solicitudes() TO authenticated;
-
-COMMIT;
-
--- =============================================================================
--- FASE 2 — APLICADA en producción el 2026-10-01 (migración card_63_phase2_stores_orders_column_grants).
--- Se aplicó después del OTA de la fase 1 y del admin con RPCs de comercios
--- (yachanga-admin #8). Antes era: NO EJECUTAR hasta que el OTA con la fase 1
--- esté en producción.
---
--- El bloque de abajo está comentado a propósito. Descomentarlo y correrlo
--- solo después de verificar que la app ya no selecciona:
---   stores.phone, stores.address, orders.verification_pin
---
--- Un GRANT SELECT de tabla pisa un REVOKE de columna. Por eso se revoca el
--- SELECT de la tabla y se reotorga el resto de columnas, sin esas tres.
--- service_role no se toca: el webhook mp_retorno y los RPC SECURITY DEFINER
--- del owner siguen leyendo las columnas.
---
--- Antes de correr, confirmar que no apareció ninguna columna nueva:
---   SELECT column_name
---   FROM information_schema.columns
---   WHERE table_schema = 'public' AND table_name IN ('stores', 'orders')
---   ORDER BY table_name, ordinal_position;
--- Si hay columnas de más, sumarlas al GRANT (nunca phone, address ni
--- verification_pin).
---
--- Realtime: la app no se suscribe a postgres_changes de orders/stores.
--- Si más adelante se publica la tabla, el payload de authenticated no debe
--- incluir las columnas revocadas. Probar que el tablero del comercio sigue
--- leyendo order_code, status y deposit_status.
--- =============================================================================
-BEGIN;
-
-REVOKE SELECT ON TABLE public.stores FROM authenticated, anon;
-GRANT SELECT (
-  id,
-  user_id,
-  name,
-  latitude,
-  longitude,
-  coverage_radius_km,
-  status,
-  trial_ends_at,
-  created_at,
-  updated_at,
-  approved_at,
-  approved_by,
-  rejection_reason,
-  avatar_url,
-  opening_hours
-) ON public.stores TO authenticated;
-
-REVOKE SELECT ON TABLE public.orders FROM authenticated, anon;
-GRANT SELECT (
-  id,
-  quote_id,
-  order_code,
-  status,
-  created_at,
-  updated_at,
-  client_id,
-  accepted_total,
-  deposit_amount,
-  deposit_status,
-  contact_revealed_at,
-  completed_at,
-  payment_group_id,
-  include_freight
-) ON public.orders TO authenticated;
 
 COMMIT;
