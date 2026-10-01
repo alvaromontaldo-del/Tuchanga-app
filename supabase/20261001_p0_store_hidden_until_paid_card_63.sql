@@ -1,4 +1,4 @@
--- YaChanga P0 #63 — Comercio oculto hasta pagar. Fase 1 (aditiva) + fase 2 comentada.
+-- YaChanga P0 #63 — Comercio oculto hasta pagar. Fase 1 (aditiva) + fase 2 (aplicada el 2026-10-01).
 --
 -- NO aplicar la fase 2 en el mismo paso que este archivo.
 -- NO aplicar este archivo a producción desde el agente: lo corre un revisor.
@@ -440,7 +440,10 @@ GRANT EXECUTE ON FUNCTION public.list_my_material_solicitudes() TO authenticated
 COMMIT;
 
 -- =============================================================================
--- FASE 2 — NO EJECUTAR hasta que el OTA con la fase 1 esté en producción.
+-- FASE 2 — APLICADA en producción el 2026-10-01 (migración card_63_phase2_stores_orders_column_grants).
+-- Se aplicó después del OTA de la fase 1 y del admin con RPCs de comercios
+-- (yachanga-admin #8). Antes era: NO EJECUTAR hasta que el OTA con la fase 1
+-- esté en producción.
 --
 -- El bloque de abajo está comentado a propósito. Descomentarlo y correrlo
 -- solo después de verificar que la app ya no selecciona:
@@ -464,7 +467,6 @@ COMMIT;
 -- incluir las columnas revocadas. Probar que el tablero del comercio sigue
 -- leyendo order_code, status y deposit_status.
 -- =============================================================================
-/*
 BEGIN;
 
 REVOKE SELECT ON TABLE public.stores FROM authenticated, anon;
@@ -505,4 +507,3 @@ GRANT SELECT (
 ) ON public.orders TO authenticated;
 
 COMMIT;
-*/
