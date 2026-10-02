@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   buildMotivoDisputa,
+  CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE,
+  CONFORMIDAD_AUTOMATICA_AVISO_TRABAJADOR,
+  CONFORMIDAD_AUTOMATICA_HORAS,
   COSTO_SERVICIO_LABEL,
   puedeIniciarPagoCostoServicio,
   SALDO_FUERA_DE_APP,
@@ -44,6 +47,21 @@ describe('copy de costo de servicio', () => {
     expect(rechazo).not.toContain('hide_pair_chats_if_done');
     expect(sql).not.toContain('iniciar_reclamo_garantia');
     expect(negativa.slice(0, negativa.indexOf('ELSE'))).toContain('hide_pair_chats_if_done');
+  });
+
+  it('avisa que la conformidad se confirma sola a las 72 h (#115)', () => {
+    expect(CONFORMIDAD_AUTOMATICA_HORAS).toBe(72);
+    expect(CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE).toContain('72 h');
+    expect(CONFORMIDAD_AUTOMATICA_AVISO_TRABAJADOR).toContain('72 h');
+    const sql = readFileSync('supabase/20261002_card_conformidad_automatica_72h.sql', 'utf8');
+    expect(sql).toContain("interval '72 hours'");
+    expect(sql).toContain('conformidad_automatica = true');
+    expect(sql).toContain('hide_pair_chats_if_done');
+    expect(sql).toContain('FROM anon, authenticated');
+    expect(sql).toContain("NOT IN ('open', 'pending_approval')");
+    const chat = readFileSync('src/screens/chat/ChatScreen.tsx', 'utf8');
+    expect(chat).toContain('CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE');
+    expect(chat).toContain("event === 'conformidad_automatica'");
   });
 
   it('reescribe seña visible y deja intactas reseña y contraseña', () => {
