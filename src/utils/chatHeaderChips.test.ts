@@ -21,8 +21,9 @@ describe('chips del encabezado del chat', () => {
     expect(header).toContain("numberOfLines={1}");
     expect(header).toContain('ellipsizeMode="tail"');
     expect(header).toContain("participants?.myRole === 'trabajador' && !chatBlocked");
-    expect(header).toContain('disabled={hasActiveJob}');
-    expect(header).toContain('>Cotizar<');
+    expect(header).toContain('disabled={quoteChip.disabled}');
+    expect(header).toContain('{quoteChip.label}');
+    expect(header).toContain('accessibilityLabel={quoteChip.label}');
     expect(header).toContain('>Materiales<');
     expect(header.indexOf('styles.headerNameColumn')).toBeLessThan(header.indexOf('styles.headerChipsInline'));
     expect(header.indexOf('styles.headerTrade')).toBeLessThan(header.indexOf('styles.headerChipsInline'));

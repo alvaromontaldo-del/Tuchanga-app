@@ -17,6 +17,7 @@ import {
 import { useNavigation, useRoute, useFocusEffect, type RouteProp } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExpandableText } from '../../components/common/ExpandableText';
+import { RecotizacionCard } from '../../components/jobs/RecotizacionCard';
 import { ReportarProblemaModal } from '../../components/jobs/ReportarProblemaModal';
 import { SaldoFueraDeAppNotice } from '../../components/jobs/SaldoFueraDeAppNotice';
 import {
@@ -747,22 +748,25 @@ export function DetalleServicioScreen() {
           </View>
         ) : null}
 
-        {row.estado_trabajo === 'pendiente_pago_diferencia' && myRole === 'cliente' ? (
-          <View style={styles.actions}>
-            <Pressable
-              style={[styles.btnGhost, busy && styles.btnDisabled]}
-              disabled={busy}
-              onPress={() => void runAction(() => rechazarRecotizacion(row.id))}
-            >
-              <Text style={styles.btnGhostText}>Rechazar recotización</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.btnPrimary, busy && styles.btnDisabled]}
-              disabled={busy}
-              onPress={() => void runAction(() => aceptarRecotizacion(row.id))}
-            >
-              <Text style={styles.btnPrimaryText}>Aceptar recotización</Text>
-            </Pressable>
+        {row.estado_trabajo === 'pendiente_pago_diferencia' &&
+        row.recotizacion_precio_trabajador != null ? (
+          <View style={styles.section}>
+          <RecotizacionCard
+            fill
+            role={myRole}
+            status="pendiente"
+            precioTrabajador={row.recotizacion_precio_trabajador}
+            precioFinal={row.recotizacion_precio_final}
+            comision={row.recotizacion_comision_app}
+            fundamentos={row.recotizacion_fundamentos ?? ''}
+            busy={busy}
+            onAccept={() =>
+              void runAction(() => aceptarRecotizacion(row.id), 'Recotización aceptada')
+            }
+            onReject={() =>
+              void runAction(() => rechazarRecotizacion(row.id), 'Recotización rechazada')
+            }
+          />
           </View>
         ) : null}
 

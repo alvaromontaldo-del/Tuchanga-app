@@ -74,6 +74,7 @@ import {
   type ServiceJob,
 } from '../../services/serviceJobsSupabase';
 import { AgendaOpcionesCliente } from '../../components/servicios/AgendaOpcionesCliente';
+import { RecotizacionCard } from '../../components/jobs/RecotizacionCard';
 import { ReportarProblemaModal } from '../../components/jobs/ReportarProblemaModal';
 import { SaldoFueraDeAppNotice } from '../../components/jobs/SaldoFueraDeAppNotice';
 import {
@@ -84,7 +85,6 @@ import {
   CONFORMIDAD_SI,
   COSTO_SERVICIO_LABEL,
   COSTO_SERVICIO_PAGADO,
-  COSTO_SERVICIO_PENDIENTE,
   puedeIniciarPagoCostoServicio,
   SALDO_PAGADO_AL_PROFESIONAL,
   textoVisibleSinSena,
@@ -96,8 +96,11 @@ import {
   clienteResponderConformidad,
   trabajadorConfirmarRecepcionOffline,
   fetchDisponibilidadOpciones,
+  aceptarRecotizacion,
   obtenerPinCliente,
   rechazarDisponibilidad,
+  rechazarRecotizacion,
+  recotizarEnCurso,
 } from '../../services/contratacionesSupabase';
 import type { DisponibilidadOpcion } from '../../types/contrataciones';
 import { openPagoCheckout } from '../../navigation/openPagoCheckout';
@@ -109,6 +112,17 @@ import {
   CHAT_CERRADO_POR_RECLAMO_DETALLE,
 } from '../../utils/claimChatVisibility';
 import { getSystemEvent, shouldRenderSystemMessageInChat } from '../../utils/chatSystemMessages';
+import {
+  isRecotizacionChatEvent,
+  quoteChipForJob,
+  readMetaNumber,
+  readMetaString,
+  recotizarAmountError,
+  recotizarFundamentosError,
+  recotizacionLiveStatus,
+  serviceFeePayBarCopy,
+  WORKER_WAITING_FEE_DIFF,
+} from '../../utils/recotizarUi';
 import { dedupeMaterialServiceFeePaidMessages } from '../../utils/materialFeePaidChat';
 import { newRandomUserId } from '../../utils/stableUserId';
 import { mapChatSendError } from '../../utils/chatErrors';
@@ -415,6 +429,12 @@ export function ChatScreen({
   const [quoteNetAmount, setQuoteNetAmount] = useState(0);
   const [quoteNetText, setQuoteNetText] = useState('');
   const [quoteDetail, setQuoteDetail] = useState('');
+  const [recotizarModalOpen, setRecotizarModalOpen] = useState(false);
+  const [recotizarText, setRecotizarText] = useState('');
+  const [recotizarAmount, setRecotizarAmount] = useState(0);
+  const [recotizarFundamentos, setRecotizarFundamentos] = useState('');
+  const [recotizarSubmitting, setRecotizarSubmitting] = useState(false);
+  const [recotizarBusy, setRecotizarBusy] = useState(false);
   const [incluyeGarantia, setIncluyeGarantia] = useState(false);
   const [warrantyDaysText, setWarrantyDaysText] = useState('');
   const warrantyDaysNum = useMemo(() => {
@@ -499,6 +519,12 @@ export function ChatScreen({
       participants?.myRole === 'cliente' &&
       job.estado_trabajo === 'precio_aceptado' &&
       agendaOpciones.length > 0,
+  );
+  const showWorkerWaitingFeeDiff = Boolean(
+    job &&
+      participants?.myRole === 'trabajador' &&
+      job.estado_trabajo === 'en_curso' &&
+      job.payment_status === 'PENDING',
   );
   const showWorkerJobBar = Boolean(
     job &&
@@ -607,6 +633,15 @@ export function ChatScreen({
 
   const hasActiveQuote = useMemo(() => quotes.some((q) => q.status === 'pending'), [quotes]);
   const hasActiveJob = useMemo(() => Boolean(job && job.work_status === 'PENDING'), [job]);
+  const quoteChip = useMemo(
+    () =>
+      quoteChipForJob({
+        role: participants?.myRole ?? null,
+        estadoTrabajo: job?.estado_trabajo ?? null,
+        hasActiveJob,
+      }),
+    [hasActiveJob, job?.estado_trabajo, participants?.myRole],
+  );
   const latestRejected = useMemo(() => {
     const rejected = quotes.filter((q) => q.status === 'rejected');
     return rejected.length ? rejected[rejected.length - 1] : null;
@@ -621,6 +656,38 @@ export function ChatScreen({
     setQuoteNetText(digits);
     const next = digits ? Math.min(Number(digits), 999_999_999) : 0;
     setQuoteNetAmount(Number.isFinite(next) ? Math.max(0, Math.floor(next)) : 0);
+  }
+
+  function onChangeRecotizarText(text: string) {
+    const digits = (text ?? '').replace(/\D/g, '').slice(0, 9);
+    setRecotizarText(digits);
+    const next = digits ? Math.min(Number(digits), 999_999_999) : 0;
+    setRecotizarAmount(Number.isFinite(next) ? Math.max(0, Math.floor(next)) : 0);
+  }
+
+  function respondRecotizacion(action: 'accept' | 'reject') {
+    if (!job || recotizarBusy) return;
+    setRecotizarBusy(true);
+    void (async () => {
+      try {
+        if (action === 'accept') await aceptarRecotizacion(job.id);
+        else await rechazarRecotizacion(job.id);
+        const next = await fetchLatestJobByConversation(conversationId);
+        if (next) setJob(next);
+        await refreshMessages();
+        toast.success(
+          action === 'accept' ? 'Recotización aceptada.' : 'Recotización rechazada.',
+          'Recotización',
+        );
+      } catch (e) {
+        toast.error(
+          textoVisibleSinSena(e instanceof Error ? e.message : 'No se pudo responder'),
+          'Recotización',
+        );
+      } finally {
+        setRecotizarBusy(false);
+      }
+    })();
   }
 
   // Para evitar duplicidad visual: si estamos dentro del chat en foreground,
@@ -1216,7 +1283,11 @@ export function ChatScreen({
               event === 'saldo_confirmado_cliente' ||
               event === 'saldo_confirmado_trabajador' ||
               event === 'precio_aceptado_cliente' ||
-              event === 'precio_aceptado_trabajador'
+              event === 'precio_aceptado_trabajador' ||
+              event === 'recotizacion_propuesta' ||
+              event === 'recotizacion_propuesta_trabajador' ||
+              event === 'recotizacion_aceptada' ||
+              event === 'recotizacion_rechazada'
             ) {
               void fetchLatestJobByConversation(conversationId)
                 .then((next) => {
@@ -1522,6 +1593,35 @@ export function ChatScreen({
       if (item.type === 'system') {
         if (!shouldRenderSystemMessageInChat(item.metadata, participants?.myRole ?? null)) {
           return null;
+        }
+
+        const systemMeta = normalizeMessageMetadata(item.metadata);
+        const systemEvent = getSystemEvent(systemMeta);
+        if (systemEvent && isRecotizacionChatEvent(systemEvent) && participants?.myRole) {
+          const status = recotizacionLiveStatus({
+            event: systemEvent,
+            messageRecotizacionId: readMetaString(systemMeta, 'recotizacion_id'),
+            jobEstado: job?.estado_trabajo,
+            jobRecotizacionId: job?.recotizacion_id,
+          });
+          const precioTrabajador = readMetaNumber(systemMeta, 'precio_trabajador');
+          if (precioTrabajador != null) {
+            return (
+              <View style={styles.systemRow}>
+                <RecotizacionCard
+                  role={participants.myRole}
+                  status={status}
+                  precioTrabajador={precioTrabajador}
+                  precioFinal={readMetaNumber(systemMeta, 'precio_final')}
+                  comision={readMetaNumber(systemMeta, 'comision_app')}
+                  fundamentos={readMetaString(systemMeta, 'fundamentos') ?? ''}
+                  busy={recotizarBusy}
+                  onAccept={() => respondRecotizacion('accept')}
+                  onReject={() => respondRecotizacion('reject')}
+                />
+              </View>
+            );
+          }
         }
 
         return (
@@ -1871,6 +1971,9 @@ export function ChatScreen({
       conversationId,
       formatMoney,
       hasActiveQuote,
+      job?.estado_trabajo,
+      job?.id,
+      job?.recotizacion_id,
       latestQuoteAny,
       latestRejected?.id,
       myId,
@@ -1879,6 +1982,7 @@ export function ChatScreen({
       peerReadAt,
       quoteBusy,
       quoteById,
+      recotizarBusy,
       refreshMessages,
       refreshQuotes,
       scrollToLatest,
@@ -2016,15 +2120,14 @@ export function ChatScreen({
         {isSupabaseConfigured() && showPay && job ? (
           <View style={styles.payBar}>
             <View style={styles.payBarText}>
-              <Text style={styles.payTitle}>{COSTO_SERVICIO_PENDIENTE}</Text>
-              <Text style={styles.paySubtitle}>
-                Para compartir tu ubicación al profesional, se requiere el pago del costo de servicio
-                YaChanga.
-              </Text>
-              <Text style={[styles.paySubtitle, { marginTop: spacing.xs }]}>
-                {COSTO_SERVICIO_LABEL} {formatMoney(job.seña)} · Saldo pendiente{' '}
-                {formatMoney(computeSaldoPendiente(job.amount, job.seña))}
-              </Text>
+              <Text style={styles.payTitle}>{serviceFeePayBarCopy(job.estado_trabajo).title}</Text>
+              <Text style={styles.paySubtitle}>{serviceFeePayBarCopy(job.estado_trabajo).body}</Text>
+              {serviceFeePayBarCopy(job.estado_trabajo).showQuotedFee ? (
+                <Text style={[styles.paySubtitle, { marginTop: spacing.xs }]}>
+                  {COSTO_SERVICIO_LABEL} {formatMoney(job.seña)} · Saldo pendiente{' '}
+                  {formatMoney(computeSaldoPendiente(job.amount, job.seña))}
+                </Text>
+              ) : null}
               <SaldoFueraDeAppNotice
                 accepted={aceptaSaldoFuera}
                 onToggle={() => setAceptaSaldoFuera((value) => !value)}
@@ -2235,6 +2338,14 @@ export function ChatScreen({
           </View>
         ) : null}
 
+        {isSupabaseConfigured() && showWorkerWaitingFeeDiff && job ? (
+          <View style={styles.completeBar}>
+            <View style={styles.payBarText}>
+              <Text style={styles.paySubtitle}>{WORKER_WAITING_FEE_DIFF}</Text>
+            </View>
+          </View>
+        ) : null}
+
         {isSupabaseConfigured() && showReviewForm && job && participants?.myRole === 'cliente' ? (
           <View style={styles.reviewCard}>
             <Text style={styles.reviewTitle}>Dejá tu reseña</Text>
@@ -2380,6 +2491,7 @@ export function ChatScreen({
       showWorkerSaldoRecibidoBar,
       showWorkerSeñaPagadaBar,
       showWorkerJobBar,
+      showWorkerWaitingFeeDiff,
       toast,
       workerJobPaid,
     ],
@@ -2729,6 +2841,134 @@ export function ChatScreen({
           </Modal>
 
           <Modal
+            visible={recotizarModalOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setRecotizarModalOpen(false)}
+          >
+            <AppKeyboardAvoidingView style={styles.flex} keyboardVerticalOffset={0}>
+              <Pressable style={styles.modalBackdrop} onPress={() => setRecotizarModalOpen(false)}>
+                <Pressable
+                  style={[styles.modalCard, { paddingBottom: spacing.lg + Math.max(insets.bottom, 0) }]}
+                  onPress={() => {}}
+                >
+                  <ScrollView
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={styles.modalScrollContent}
+                  >
+                    <Text style={styles.modalTitle}>Recotizar</Text>
+                    <Text style={styles.modalText}>
+                      Ingresá el monto nuevo que querés cobrar y por qué cambia.
+                    </Text>
+                    <Text style={styles.fieldLabel}>Monto a cobrar</Text>
+                    <TextInput
+                      value={recotizarText}
+                      onChangeText={onChangeRecotizarText}
+                      placeholder="0"
+                      keyboardType="number-pad"
+                      inputMode="numeric"
+                      returnKeyType="done"
+                      style={styles.quoteInput}
+                      placeholderTextColor={colors.textSecondary}
+                      accessibilityLabel="Monto a cobrar de la recotización"
+                    />
+                    <Text style={styles.fieldLabel}>Fundamentos *</Text>
+                    <TextInput
+                      value={recotizarFundamentos}
+                      onChangeText={setRecotizarFundamentos}
+                      placeholder="Por qué hace falta un monto distinto"
+                      placeholderTextColor={colors.textSecondary}
+                      style={styles.quoteDetailInput}
+                      multiline
+                      maxLength={1000}
+                      accessibilityLabel="Fundamentos de la recotización"
+                    />
+                    <View style={styles.modalActions}>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.modalBtn,
+                          styles.modalBtnGhost,
+                          pressed && styles.pressed,
+                        ]}
+                        onPress={() => setRecotizarModalOpen(false)}
+                      >
+                        <Text style={styles.modalBtnGhostText}>Cancelar</Text>
+                      </Pressable>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.modalBtn,
+                          styles.modalBtnPrimary,
+                          (recotizarSubmitting ||
+                            Boolean(recotizarAmountError(recotizarAmount, job?.precio_trabajador ?? null)) ||
+                            Boolean(recotizarFundamentosError(recotizarFundamentos))) &&
+                            styles.modalBtnDisabled,
+                          pressed && styles.pressed,
+                        ]}
+                        disabled={
+                          recotizarSubmitting ||
+                          Boolean(recotizarAmountError(recotizarAmount, job?.precio_trabajador ?? null)) ||
+                          Boolean(recotizarFundamentosError(recotizarFundamentos))
+                        }
+                        onPress={() => {
+                          if (!job || participants?.myRole !== 'trabajador') return;
+                          const amountError = recotizarAmountError(
+                            recotizarAmount,
+                            job.precio_trabajador,
+                          );
+                          const textError = recotizarFundamentosError(recotizarFundamentos);
+                          if (amountError) {
+                            toast.error(amountError, 'Recotizar');
+                            return;
+                          }
+                          if (textError) {
+                            toast.error(textError, 'Recotizar');
+                            return;
+                          }
+                          if (recotizarSubmitting) return;
+                          setRecotizarSubmitting(true);
+                          void (async () => {
+                            try {
+                              await recotizarEnCurso(
+                                job.id,
+                                recotizarAmount,
+                                recotizarFundamentos.trim(),
+                              );
+                              setRecotizarModalOpen(false);
+                              setRecotizarAmount(0);
+                              setRecotizarText('');
+                              setRecotizarFundamentos('');
+                              const next = await fetchLatestJobByConversation(conversationId);
+                              if (next) setJob(next);
+                              await refreshMessages();
+                              scrollToLatest();
+                              toast.success('Recotización enviada.', 'Recotizar');
+                            } catch (e) {
+                              toast.error(
+                                textoVisibleSinSena(
+                                  e instanceof Error ? e.message : 'No se pudo recotizar',
+                                ),
+                                'Recotizar',
+                              );
+                            } finally {
+                              setRecotizarSubmitting(false);
+                            }
+                          })();
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Enviar recotización"
+                      >
+                        <Text style={styles.modalBtnPrimaryText}>
+                          {recotizarSubmitting ? 'Enviando…' : 'Enviar'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </ScrollView>
+                </Pressable>
+              </Pressable>
+            </AppKeyboardAvoidingView>
+          </Modal>
+
+          <Modal
             visible={confirmDelete}
             transparent
             animationType="fade"
@@ -2857,8 +3097,19 @@ export function ChatScreen({
                 <View style={styles.headerChipsInline}>
                   <Pressable
                     onPress={() => {
-                      if (hasActiveJob) {
+                      if (quoteChip.mode === 'recotizar_pendiente') {
+                        toast.warning('Ya hay una recotización pendiente de respuesta.', 'Recotizar');
+                        return;
+                      }
+                      if (quoteChip.mode === 'cotizar_bloqueado') {
                         toast.warning('Ya hay un trabajo activo en este chat.', 'Trabajo');
+                        return;
+                      }
+                      if (quoteChip.mode === 'recotizar') {
+                        setRecotizarModalOpen(true);
+                        setRecotizarAmount(0);
+                        setRecotizarText('');
+                        setRecotizarFundamentos('');
                         return;
                       }
                       setQuoteModalOpen(true);
@@ -2870,17 +3121,17 @@ export function ChatScreen({
                       setWarrantyDaysText('');
                     }}
                     accessibilityRole="button"
-                    accessibilityLabel="Cotizar"
+                    accessibilityLabel={quoteChip.label}
                     hitSlop={4}
                     style={({ pressed }) => [
                       styles.headerActionChip,
-                      hasActiveJob && styles.modalBtnDisabled,
+                      quoteChip.disabled && styles.modalBtnDisabled,
                       pressed && styles.pressed,
                     ]}
-                    disabled={hasActiveJob}
+                    disabled={quoteChip.disabled}
                   >
                     <Ionicons name="calculator-outline" size={14} color={colors.text} />
-                    <Text style={styles.headerActionChipText}>Cotizar</Text>
+                    <Text style={styles.headerActionChipText}>{quoteChip.label}</Text>
                   </Pressable>
                   <Pressable
                     onPress={() => {
