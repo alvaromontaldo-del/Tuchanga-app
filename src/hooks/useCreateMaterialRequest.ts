@@ -9,9 +9,6 @@ import type { MaterialItemDraft } from '../types/materials';
 type SubmitParams = {
   professionalId: string;
   clientId?: string | null;
-  clientLat?: number | null;
-  clientLng?: number | null;
-  clientAddress?: string | null;
   conversationId?: string | null;
   title: string;
   items: MaterialItemDraft[];
@@ -52,9 +49,6 @@ export function useCreateMaterialRequest() {
       const result = await createMaterialRequestWithTargets({
         professionalId: params.professionalId,
         clientId: params.clientId,
-        clientLat: params.clientLat,
-        clientLng: params.clientLng,
-        clientAddress: params.clientAddress,
         conversationId: params.conversationId,
         title: params.title,
         items: params.items,
