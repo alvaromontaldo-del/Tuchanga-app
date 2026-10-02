@@ -71,7 +71,7 @@ export const FAQ_ITEMS: readonly FaqItem[] = [
     id: 'calificaciones',
     question: '¿Cómo son las calificaciones?',
     answer:
-      'Cuando el profesional marca el trabajo como finalizado y el cliente confirma con «Estoy conforme», el cliente puede dejar de 1 a 5 estrellas y un comentario en el chat. El profesional recibe un aviso. Las estrellas y las reseñas públicas se muestran a partir del segundo trabajo finalizado. Antes, el perfil figura como nuevo. En las reseñas se ve el nombre del cliente, sin el apellido.',
+      'Cuando el profesional marca el trabajo como finalizado y el cliente confirma con «Estoy conforme», el cliente puede dejar de 1 a 5 estrellas y un comentario en el chat. El profesional recibe un aviso. Si el cliente no responde en 72 h, el trabajo se da por conforme automáticamente y les avisamos a los dos. Las estrellas y las reseñas públicas se muestran a partir del segundo trabajo finalizado. Antes, el perfil figura como nuevo. En las reseñas se ve el nombre del cliente, sin el apellido.',
   },
   {
     id: 'materiales',

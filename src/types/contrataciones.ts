@@ -68,6 +68,8 @@ export type ChatSystemEvent =
   | 'conformidad_solicitada'
   | 'conformidad_aceptada'
   | 'conformidad_rechazada'
+  | 'conformidad_automatica'
+  | 'conformidad_recordatorio'
   | 'trabajo_finalizado'
   | 'saldo_pagado_cliente'
   | 'saldo_pagado_trabajador'
