@@ -835,15 +835,15 @@ export async function fetchStoreRequestDetail(params: {
   if (!mr) throw new Error('Pedido no encontrado.');
   if (!targetRes.data) throw new Error('Este pedido no está dirigido a tu comercio.');
 
+  // #120: la dirección del cliente llega solo con el pago aprobado de la orden de este comercio.
   let clientAddress: string | null = null;
   try {
-    const addrRes = await sb
-      .from('material_requests')
-      .select('client_address')
-      .eq('id', params.requestId)
-      .maybeSingle();
-    if (!addrRes.error && addrRes.data) {
-      const raw = (addrRes.data as { client_address?: string | null }).client_address;
+    const addrRes = await sb.rpc('get_store_request_client_address', {
+      p_request_id: params.requestId,
+      p_store_id: params.storeId,
+    });
+    if (!addrRes.error) {
+      const raw = addrRes.data as unknown;
       clientAddress = typeof raw === 'string' && raw.trim() ? raw.trim() : null;
     }
   } catch {

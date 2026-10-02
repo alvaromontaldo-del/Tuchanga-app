@@ -268,18 +268,17 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
     const otherId = myRole === 'cliente' ? c.trabajador_id : c.cliente_id;
     const { data: prof } = await sb
       .from('profiles')
-      .select(myRole === 'cliente' ? 'nombre,avatar_url' : 'nombre,apellido,avatar_url')
+      .select('nombre,avatar_url')
       .eq('id', otherId)
       .maybeSingle();
     const profile = prof as {
       nombre?: string | null;
-      apellido?: string | null;
       avatar_url?: string | null;
     } | null;
     const name =
       myRole === 'cliente'
         ? professionalDisplayNameForClient(profile?.nombre)
-        : firstNameOnly(profile ? `${profile.nombre ?? ''} ${profile.apellido ?? ''}`.trim() : 'Usuario');
+        : firstNameOnly(profile?.nombre ?? 'Usuario');
 
     const { data: lastMsgs } = await sb
       .from('messages')
