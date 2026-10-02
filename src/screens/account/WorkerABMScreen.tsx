@@ -455,18 +455,22 @@ export function WorkerABMScreen({ navigation }: Props) {
             });
           }
 
-          try {
-            await setMyAtiendeUrgencias(atiendeUrgencias);
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : '';
-            if (atiendeUrgencias || !isMissingUrgenciasSchema(msg)) {
-              toast.warning(
-                `El resto del perfil se guardó, pero no pudimos guardar «Atiendo urgencias».\n\n${
-                  msg || 'Error desconocido.'
-                }`,
-                'Urgencias',
-                { durationMs: 4200 },
-              );
+          // Solo si el profesional tocó el switch: si la lectura inicial falló
+          // (queda en false), guardar el perfil no le apaga «Atiendo urgencias».
+          if (urgenciasTouched.current) {
+            try {
+              await setMyAtiendeUrgencias(atiendeUrgencias);
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : '';
+              if (atiendeUrgencias || !isMissingUrgenciasSchema(msg)) {
+                toast.warning(
+                  `El resto del perfil se guardó, pero no pudimos guardar «Atiendo urgencias».\n\n${
+                    msg || 'Error desconocido.'
+                  }`,
+                  'Urgencias',
+                  { durationMs: 4200 },
+                );
+              }
             }
           }
 
