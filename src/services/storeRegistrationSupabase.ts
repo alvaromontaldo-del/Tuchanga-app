@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../lib/supabase';
+import { acceptCurrentTerms } from './termsAcceptance';
 import type { MyStoreSummary, StoreRubro } from '../types/materials';
 import {
   normalizeStoreWeekSchedule,
@@ -118,6 +119,9 @@ export async function registerMyStore(input: RegisterStoreInput): Promise<Regist
     await sb.from('stores').delete().eq('id', storeId);
     throw new Error(linkError.message || 'No se pudieron asociar los rubros.');
   }
+
+  // Estampa perfil y este comercio. Si el RPC no existe, el alta del local sigue.
+  await acceptCurrentTerms();
 
   return {
     id: storeId,
