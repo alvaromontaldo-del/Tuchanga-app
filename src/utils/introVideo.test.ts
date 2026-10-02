@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   INTRO_VIDEO_MAX_BYTES,
+  INTRO_VIDEO_MAX_LONG_SIDE,
+  INTRO_VIDEO_RECORD_QUALITY,
+  INTRO_VIDEO_TARGET_VIDEO_BPS,
   buildIntroVideoObjectPath,
+  estimateIntroVideoBytes,
   introVideoDurationSeconds,
+  introVideoHttpErrorMessage,
   introVideoMimeFromAsset,
+  introVideoNetworkErrorMessage,
+  introVideoObjectsToDelete,
   introVideoPlaybackUrl,
+  introVideoRecordingOptions,
+  introVideoTooLargeMessage,
   isIntroVideoTooLarge,
   isIntroVideoTooLong,
   isSafeIntroVideoPath,
@@ -45,14 +54,70 @@ describe('video de presentación', () => {
     expect(isIntroVideoTooLong(null)).toBe(false);
   });
 
-  it('solo deja mp4 y quicktime, y rechaza archivos de más de 30 MB', () => {
+  it('solo deja mp4 y quicktime, y rechaza archivos de más de 10 MB', () => {
     expect(introVideoMimeFromAsset({ mimeType: 'video/mp4', uri: 'file://a' })).toBe('video/mp4');
     expect(introVideoMimeFromAsset({ mimeType: 'video/quicktime', uri: 'file://a.mov' })).toBe(
       'video/quicktime',
     );
     expect(introVideoMimeFromAsset({ uri: 'file://clip.MOV' })).toBe('video/quicktime');
     expect(introVideoMimeFromAsset({ mimeType: 'video/webm', uri: 'file://a.webm' })).toBe(null);
+    expect(INTRO_VIDEO_MAX_BYTES).toBe(10 * 1024 * 1024);
     expect(isIntroVideoTooLarge(INTRO_VIDEO_MAX_BYTES)).toBe(false);
     expect(isIntroVideoTooLarge(INTRO_VIDEO_MAX_BYTES + 1)).toBe(true);
+    expect(introVideoTooLargeMessage(12 * 1024 * 1024)).toMatch(/12 MB/);
+    expect(introVideoTooLargeMessage(12 * 1024 * 1024)).toMatch(/10 MB/);
+  });
+
+  it('estima 30 s a 480p / 700 kbps por debajo de 3 MB y del tope', () => {
+    expect(INTRO_VIDEO_RECORD_QUALITY).toBe('480p');
+    expect(INTRO_VIDEO_MAX_LONG_SIDE).toBe(854);
+    expect(INTRO_VIDEO_TARGET_VIDEO_BPS).toBeGreaterThanOrEqual(500_000);
+    expect(INTRO_VIDEO_TARGET_VIDEO_BPS).toBeLessThanOrEqual(800_000);
+    const bytes = estimateIntroVideoBytes(30);
+    expect(bytes).toBeLessThan(3 * 1024 * 1024);
+    expect(bytes).toBeLessThan(INTRO_VIDEO_MAX_BYTES);
+    expect(estimateIntroVideoBytes(0)).toBe(0);
+    expect(introVideoRecordingOptions('ios')).toEqual({
+      maxDuration: 30,
+      maxFileSize: INTRO_VIDEO_MAX_BYTES,
+      codec: 'avc1',
+    });
+    expect(introVideoRecordingOptions('android')).toEqual({
+      maxDuration: 30,
+      maxFileSize: INTRO_VIDEO_MAX_BYTES,
+    });
+  });
+
+  it('al reemplazar borra los intro viejos y deja el archivo nuevo', () => {
+    const keep = `${UID}/intro-20.mp4`;
+    expect(
+      introVideoObjectsToDelete(
+        ['intro-10.mp4', 'intro-20.mp4', 'avatar.jpg', '../intro-1.mp4', 'intro-3.mov'],
+        UID,
+        keep,
+      ),
+    ).toEqual([`${UID}/intro-10.mp4`, `${UID}/intro-3.mov`]);
+  });
+
+  it('el fallo de subir un file:// no se disfraza de problema de red', () => {
+    expect(introVideoNetworkErrorMessage('')).toBe(
+      'No se pudo subir el video. Revisá tu conexión.',
+    );
+    expect(introVideoNetworkErrorMessage('Network request failed')).toBe(
+      'No se pudo subir el video. Revisá tu conexión.',
+    );
+    expect(
+      introVideoNetworkErrorMessage('Could not retrieve file for uri file:///cache/intro.mp4'),
+    ).toBe('No se pudo leer el video en el teléfono. Volvé a grabarlo.');
+    expect(introVideoNetworkErrorMessage('Payload is set but no content-type header specified')).toBe(
+      'No se pudo subir el video. Payload is set but no content-type header specified',
+    );
+    expect(introVideoHttpErrorMessage(413, 'Payload too large')).toMatch(/10 MB/);
+    expect(introVideoHttpErrorMessage(403, 'new row violates row-level security policy')).toBe(
+      'No se pudo subir el video (permisos de Storage).',
+    );
+    expect(introVideoHttpErrorMessage(400, 'Invalid key')).toBe(
+      'No se pudo subir el video (error 400: Invalid key).',
+    );
   });
 });
