@@ -8,6 +8,12 @@
 -- Después de ejecutarlo, el trigger pisa client_address / client_lat / client_lng
 -- en cada alta, aunque el cliente mande otro valor.
 --
+-- Privacidad (igual que get_job_client_location): la calle (direccion_texto) solo
+-- se devuelve / copia si el profesional del chat tiene una contratación con ese
+-- cliente con seña o total pagado. Si no, solo viajan las coordenadas públicas
+-- (profiles.location). El trigger rechaza un pedido cuyo profesional no es el
+-- trabajador de ese chat (evita leer el domicilio de otro cliente).
+--
 -- No toca flete, fee de materiales, PIN, push ni cotizaciones multi-comercio.
 
 BEGIN;
@@ -27,6 +33,7 @@ AS $$
 DECLARE
   v_cliente uuid;
   v_trabajador uuid;
+  v_show_street boolean;
 BEGIN
   IF auth.uid() IS NULL OR p_conversation_id IS NULL THEN
     RETURN;
@@ -47,10 +54,19 @@ BEGIN
     RETURN;
   END IF;
 
+  -- La calle: al propio cliente, o al profesional con un trabajo pagado (seña o total).
+  v_show_street := auth.uid() = v_cliente OR EXISTS (
+    SELECT 1
+    FROM public.contrataciones k
+    WHERE k.worker_id = v_trabajador
+      AND k.client_id = v_cliente
+      AND k.estado_pago IN ('seña_pagada', 'totalmente_pagado')
+  );
+
   RETURN QUERY
   SELECT
     p.id,
-    nullif(btrim(p.direccion_texto), ''),
+    CASE WHEN v_show_street THEN nullif(btrim(p.direccion_texto), '') ELSE NULL END,
     CASE
       WHEN p.location IS NULL THEN NULL
       ELSE ST_Y(p.location::geometry)
@@ -80,6 +96,8 @@ SET search_path = public
 AS $$
 DECLARE
   v_cliente uuid;
+  v_trabajador uuid;
+  v_show_street boolean;
   v_address text;
   v_lat double precision;
   v_lng double precision;
@@ -92,10 +110,11 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  SELECT c.cliente_id
-    INTO v_cliente
+  SELECT c.cliente_id, c.trabajador_id
+    INTO v_cliente, v_trabajador
   FROM public.conversations c
-  WHERE c.id = NEW.conversation_id;
+  WHERE c.id = NEW.conversation_id
+    AND c.deleted_at IS NULL;
 
   IF v_cliente IS NULL THEN
     NEW.client_address := NULL;
@@ -104,7 +123,21 @@ BEGIN
     RETURN NEW;
   END IF;
 
+  -- El pedido tiene que ser del trabajador de ese chat; si no, alguien podría
+  -- leer el domicilio de un cliente ajeno poniendo otro conversation_id.
+  IF NEW.professional_id IS NOT NULL AND NEW.professional_id IS DISTINCT FROM v_trabajador THEN
+    RAISE EXCEPTION 'material_request_not_conversation_worker' USING ERRCODE = '42501';
+  END IF;
+
   NEW.client_id := v_cliente;
+
+  v_show_street := NEW.professional_id IS NULL OR EXISTS (
+    SELECT 1
+    FROM public.contrataciones k
+    WHERE k.worker_id = v_trabajador
+      AND k.client_id = v_cliente
+      AND k.estado_pago IN ('seña_pagada', 'totalmente_pagado')
+  );
 
   SELECT
     nullif(btrim(p.direccion_texto), ''),
@@ -129,7 +162,7 @@ BEGIN
     v_lng := NULL;
   END IF;
 
-  NEW.client_address := v_address;
+  NEW.client_address := CASE WHEN v_show_street THEN v_address ELSE NULL END;
   NEW.client_lat := v_lat;
   NEW.client_lng := v_lng;
   RETURN NEW;
@@ -145,7 +178,7 @@ GRANT EXECUTE ON FUNCTION public.material_requests_apply_client_job_address() TO
 
 DROP TRIGGER IF EXISTS trg_material_requests_client_job_address ON public.material_requests;
 CREATE TRIGGER trg_material_requests_client_job_address
-BEFORE INSERT OR UPDATE OF conversation_id, client_id, client_address, client_lat, client_lng
+BEFORE INSERT OR UPDATE OF conversation_id, professional_id, client_id, client_address, client_lat, client_lng
 ON public.material_requests
 FOR EACH ROW
 EXECUTE FUNCTION public.material_requests_apply_client_job_address();

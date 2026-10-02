@@ -138,4 +138,11 @@ describe('formulario de pedido de materiales', () => {
     expect(sql).not.toContain('calculate_material_service_fee');
     expect(sql).not.toContain('verification_pin');
   });
+
+  it('el SQL no expone la calle sin trabajo pagado ni deja usar un chat ajeno', () => {
+    expect(sql).toContain("k.estado_pago IN ('seña_pagada', 'totalmente_pagado')");
+    expect(sql).toContain('CASE WHEN v_show_street THEN');
+    expect(sql).toContain('material_request_not_conversation_worker');
+    expect(sql).toContain('FROM anon');
+  });
 });
