@@ -78,7 +78,7 @@ async function openStoreBoardFromPush(data: Record<string, unknown>): Promise<vo
   const ready = await waitForNavigation();
   if (!ready) return;
   const column = typeof data.column === 'string' ? data.column : 'nuevas';
-  navigationRef.navigate('Main', {
+  navigationRef.navigate('Commerce', {
     screen: 'StoreMaterialRequests',
     params: {
       initialColumn: column,

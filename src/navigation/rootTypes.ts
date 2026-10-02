@@ -1,10 +1,12 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
 
 import type { AuthStackParamList } from './types';
-import type { MainTabParamList } from './mainTypes';
+import type { CommerceStackParamList, MainTabParamList } from './mainTypes';
 
 export type RootStackParamList = {
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
+  /** Módulo comercio. Ruta distinta de `Main` para no heredar el state de las tabs. */
+  Commerce: NavigatorScreenParams<CommerceStackParamList> | undefined;
   AuthModal: NavigatorScreenParams<AuthStackParamList> | undefined;
   PagoCheckout: {
     checkoutUrl: string;
