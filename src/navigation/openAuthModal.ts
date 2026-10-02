@@ -78,6 +78,14 @@ export function navigateToInicioTab() {
   });
 }
 
+/** Cierra el modal de login/registro y deja que el shell de sesión elija la pantalla. */
+export function closeAuthModal() {
+  if (!navigationRef.isReady()) return;
+  if (navigationRef.canGoBack()) {
+    navigationRef.goBack();
+  }
+}
+
 /** Cierra el modal de login/registro y deja el tab en Inicio (evita quedar en Perfil invitado). */
 export function closeAuthModalAndGoToInicio() {
   if (!navigationRef.isReady()) return;

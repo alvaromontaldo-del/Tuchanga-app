@@ -20,7 +20,11 @@ import { AccountDeactivationModal } from '../../components/auth/AccountDeactivat
 import { useAuth } from '../../context/AuthContext';
 import { useCommerceShell, COMMERCE_SHELL_STATUSES } from '../../context/CommerceShellContext';
 import { showPendingCommerceNoticeOnce } from '../../context/pendingCommerceNotice';
-import { closeAuthModalAndGoToInicio, closeAuthModalAndRedirect } from '../../navigation/openAuthModal';
+import {
+  closeAuthModal,
+  closeAuthModalAndGoToInicio,
+  closeAuthModalAndRedirect,
+} from '../../navigation/openAuthModal';
 import { RoleChoiceList } from '../../components/auth/RoleChoiceList';
 import { registerAuthTarget } from '../../navigation/registerEntry';
 import type { AuthStackScreenProps } from '../../navigation/types';
@@ -132,7 +136,9 @@ export function LoginScreen({ navigation, route }: Props) {
       }
 
       const redirectTo = route.params?.redirectTo;
-      if (redirectTo && !asCommerce && !hasStore) closeAuthModalAndRedirect(redirectTo);
+      const openCommerce = asCommerce && !hasPendingOnly;
+      if (redirectTo && !openCommerce && !hasStore) closeAuthModalAndRedirect(redirectTo);
+      else if (openCommerce) closeAuthModal();
       else closeAuthModalAndGoToInicio();
     } catch (e) {
       setSubmitError(
