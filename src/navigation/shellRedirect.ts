@@ -26,19 +26,25 @@ export function focusedRouteName(
 /**
  * Ruta raíz a la que hay que ir, o null si el foco ya es el shell correcto
  * o si hay que dejar quieto login, checkout o un árbol que todavía carga.
+ * Sin sesión (p. ej. tras cerrar sesión desde Comercio) siempre corresponde `Main`.
  */
 export function shellRedirectTarget(params: {
   isAuthed: boolean;
   shellLoading: boolean;
   isCommerceShell: boolean;
   focusedRouteName: string | undefined;
+  /** Rutas de la raíz; si queda el otro shell debajo, se limpia. */
+  rootRouteNames?: (string | undefined)[];
 }): ShellRouteName | null {
-  if (!params.isAuthed || params.shellLoading) return null;
+  if (params.isAuthed && params.shellLoading) return null;
   if (params.focusedRouteName && PRESERVE_FOCUSED_ROUTES.has(params.focusedRouteName)) {
     return null;
   }
-  const target = shellRouteName(params.isCommerceShell);
-  if (params.focusedRouteName === target) return null;
+  const target = shellRouteName(params.isAuthed && params.isCommerceShell);
+  const other: ShellRouteName = target === 'Main' ? 'Commerce' : 'Main';
+  if (params.focusedRouteName === target && !params.rootRouteNames?.includes(other)) {
+    return null;
+  }
   return target;
 }
 

@@ -97,6 +97,57 @@ describe('cambio de shell', () => {
   });
 });
 
+describe('cambio de shell: sesión y rutas viejas', () => {
+  it('al cerrar sesión desde Comercio vuelve a Main (no queda el spinner)', () => {
+    expect(
+      shellRedirectTarget({
+        isAuthed: false,
+        shellLoading: true,
+        isCommerceShell: false,
+        focusedRouteName: 'Commerce',
+      }),
+    ).toBe('Main');
+  });
+
+  it('un invitado en el modal de login no se mueve', () => {
+    expect(
+      shellRedirectTarget({
+        isAuthed: false,
+        shellLoading: false,
+        isCommerceShell: false,
+        focusedRouteName: 'AuthModal',
+      }),
+    ).toBeNull();
+  });
+
+  it('limpia el shell anterior si quedó debajo en la raíz', () => {
+    expect(
+      shellRedirectTarget({
+        ...ready,
+        isCommerceShell: false,
+        focusedRouteName: 'Main',
+        rootRouteNames: ['Commerce', 'Main'],
+      }),
+    ).toBe('Main');
+    expect(
+      shellRedirectTarget({
+        ...ready,
+        isCommerceShell: true,
+        focusedRouteName: 'Commerce',
+        rootRouteNames: ['Main', 'Commerce'],
+      }),
+    ).toBe('Commerce');
+    expect(
+      shellRedirectTarget({
+        ...ready,
+        isCommerceShell: false,
+        focusedRouteName: 'Main',
+        rootRouteNames: ['Main'],
+      }),
+    ).toBeNull();
+  });
+});
+
 describe('shellResetState', () => {
   it('no arrastra el state anidado del shell anterior', () => {
     expect(shellResetState('Commerce')).toEqual({

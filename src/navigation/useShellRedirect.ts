@@ -15,16 +15,19 @@ export function useShellRedirect(): void {
   const pendingTarget = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!isAuthed || loading) return;
+    // Sin sesión no se espera la carga: tras cerrar sesión en Comercio hay que volver a `Main`.
+    if (isAuthed && loading) return;
     pendingTarget.current = null;
 
     const redirect = () => {
       if (!navigationRef.isReady()) return;
+      const rootState = navigationRef.getRootState();
       const target = shellRedirectTarget({
-        isAuthed: true,
+        isAuthed,
         shellLoading: false,
         isCommerceShell,
-        focusedRouteName: focusedRouteName(navigationRef.getRootState()),
+        focusedRouteName: focusedRouteName(rootState),
+        rootRouteNames: rootState?.routes?.map((r) => r.name),
       });
       if (!target) {
         pendingTarget.current = null;
