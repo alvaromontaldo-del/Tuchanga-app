@@ -21,6 +21,7 @@ import { RecotizacionCard } from '../../components/jobs/RecotizacionCard';
 import { ReportarProblemaModal } from '../../components/jobs/ReportarProblemaModal';
 import { SaldoFueraDeAppNotice } from '../../components/jobs/SaldoFueraDeAppNotice';
 import {
+  CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE,
   CONFORMIDAD_NEGATIVA,
   CONFORMIDAD_POSITIVA,
   CONFORMIDAD_PREGUNTA,
@@ -801,6 +802,7 @@ export function DetalleServicioScreen() {
         {myRole === 'cliente' && row.estado_trabajo === 'pendiente_conformidad' ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{CONFORMIDAD_PREGUNTA}</Text>
+            <Text style={styles.hint}>{CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE}</Text>
             <SaldoFueraDeAppNotice />
             <View style={styles.actions}>
               <Pressable

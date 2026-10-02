@@ -78,6 +78,8 @@ import { RecotizacionCard } from '../../components/jobs/RecotizacionCard';
 import { ReportarProblemaModal } from '../../components/jobs/ReportarProblemaModal';
 import { SaldoFueraDeAppNotice } from '../../components/jobs/SaldoFueraDeAppNotice';
 import {
+  CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE,
+  CONFORMIDAD_AUTOMATICA_AVISO_TRABAJADOR,
   CONFORMIDAD_NEGATIVA,
   CONFORMIDAD_POSITIVA,
   CONFORMIDAD_PREGUNTA,
@@ -1274,6 +1276,7 @@ export function ChatScreen({
               event === 'conformidad_solicitada' ||
               event === 'conformidad_aceptada' ||
               event === 'conformidad_rechazada' ||
+              event === 'conformidad_automatica' ||
               event === 'horario_confirmado' ||
               event === 'pin_validado' ||
               event === 'seña_pagada_cliente' ||
@@ -2244,6 +2247,7 @@ export function ChatScreen({
         {isSupabaseConfigured() && showClientConformidadBar && job ? (
           <View style={[styles.completeBar, styles.completeBarStacked]}>
             <Text style={styles.paySubtitle}>{CONFORMIDAD_PREGUNTA}</Text>
+            <Text style={styles.conformidadAutoHint}>{CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE}</Text>
             <SaldoFueraDeAppNotice />
             <View style={styles.conformidadActions}>
                 <Pressable
@@ -2283,7 +2287,7 @@ export function ChatScreen({
             <View style={styles.payBarText}>
               <Text style={styles.paySubtitle}>
                 Marcaste el trabajo como realizado. Esperamos que el cliente confirme si quedó
-                conforme.
+                conforme. {CONFORMIDAD_AUTOMATICA_AVISO_TRABAJADOR}
               </Text>
             </View>
           </View>
@@ -3764,6 +3768,7 @@ const styles = StyleSheet.create({
   payBarText: { flex: 1, minWidth: 0 },
   payTitle: { fontSize: 14, fontWeight: '900', color: colors.text },
   paySubtitle: { marginTop: 3, fontSize: 12, fontWeight: '700', color: colors.textSecondary },
+  conformidadAutoHint: { marginTop: 2, fontSize: 12, color: colors.textSecondary },
   payBtn: {
     backgroundColor: colors.primary,
     borderRadius: 12,
