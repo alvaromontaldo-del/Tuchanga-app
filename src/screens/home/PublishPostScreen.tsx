@@ -27,6 +27,7 @@ import {
 import { isSupabaseConfigured } from '../../config/supabase';
 import { createPostInSupabase } from '../../services/supabasePosts';
 import { mapContentModerationError } from '../../utils/contentModerationErrors';
+import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 
 type Props = FeedStackScreenProps<'PublishPost'>;
 
@@ -91,11 +92,13 @@ export function PublishPostScreen({ navigation }: Props) {
         imageUrls = remote.imageUrls;
       }
 
-      const name = (user?.firstName ?? user?.fullName ?? 'Vos').trim() || 'Vos';
+      const name = user?.firstName?.trim()
+        ? professionalDisplayNameForClient(user.firstName)
+        : 'Vos';
       addPost({
         id: postId,
         workerId: user?.id ?? CURRENT_USER_WORKER_ID,
-        workerFirstName: name.split(' ')[0] ?? name,
+        workerFirstName: name,
         workerAvatarUrl: user?.avatarUri ?? DEFAULT_AVATAR,
         workerRatingAverage: user?.ratingAverage,
         workerReviewCount: user?.reviewCount,

@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../lib/supabase';
 import type { WorkerPublicProfile } from '../types/feed';
 import { MAX_WORKER_TRADES } from '../types/feed';
+import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
 import { completedJobsFromPayload } from '../utils/workerReputation';
 import { fetchIntroVideoPath, playbackUrlForPath } from './introVideoSupabase';
 import { fetchMyProfilePrivate } from './supabaseUser';
@@ -79,7 +80,7 @@ export async function fetchWorkerPublicProfileFromSupabase(
   const { data: profile, error: pe } = await sb
     .from('profiles')
     .select(
-      'id,nombre,apellido,avatar_url,bio,professional_description,rating_average,review_count,total_jobs_done',
+      'id,nombre,avatar_url,bio,professional_description,rating_average,review_count,total_jobs_done',
     )
     .eq('id', workerUserId)
     .maybeSingle();
@@ -129,7 +130,7 @@ export async function fetchWorkerPublicProfileFromSupabase(
   });
 
   const primary = jobs.find((j) => j.es_principal) ?? jobs[0];
-  const firstName = profile.nombre?.trim() || 'Profesional';
+  const firstName = professionalDisplayNameForClient(profile.nombre);
   const professionalDesc =
     typeof profile === 'object' && profile !== null && 'professional_description' in profile
       ? String((profile as { professional_description: unknown }).professional_description ?? '').trim()

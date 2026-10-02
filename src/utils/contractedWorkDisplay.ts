@@ -1,18 +1,14 @@
 import { COSTO_SERVICIO_LABEL } from '../constants/serviceCostCopy';
 import { formatMoneyCeilAr } from './formatMoney';
+import { professionalDisplayNameForClient } from './professionalDisplayName';
 import type { WarrantyCountdown } from './warrantyDays';
 
 /**
  * Nombre visible del profesional en Trabajos contratados.
- * Solo el nombre de pila (`profiles.nombre`). Si el texto trae una inicial
- * de apellido colgada («Alvaro M.»), se descarta. Un nombre compuesto
- * («Ana María») se conserva entero.
+ * Delega en el helper único del cliente: solo el nombre, sin apellido ni inicial.
  */
 export function workerGivenName(nombre: string | null | undefined): string {
-  const s = (nombre ?? '').replace(/\s+/g, ' ').trim();
-  if (!s) return 'Profesional';
-  const withoutInitial = s.replace(/\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]\.?$/u, '').trim();
-  return withoutInitial || 'Profesional';
+  return professionalDisplayNameForClient(nombre);
 }
 
 /**

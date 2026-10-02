@@ -1,6 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { getSupabaseClient } from '../lib/supabase';
 import { navigationRef } from '../navigation/navigationRef';
+import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
 
 function waitForNavigation(maxMs = 8000): Promise<boolean> {
   const start = Date.now();
@@ -47,15 +48,17 @@ async function openChatFromPush(conversationId: string): Promise<void> {
 
   const { data: profile } = await sb
     .from('profiles')
-    .select('nombre, apellido')
+    .select(myRole === 'cliente' ? 'nombre' : 'nombre, apellido')
     .eq('id', otherId)
     .maybeSingle();
 
-  const otherDisplayName = profile
-    ? `${String((profile as { nombre?: string }).nombre ?? '').trim()} ${String(
-        (profile as { apellido?: string }).apellido ?? '',
-      ).trim()}`.trim() || 'Usuario'
-    : 'Usuario';
+  const row = profile as { nombre?: string; apellido?: string } | null;
+  const otherDisplayName =
+    myRole === 'cliente'
+      ? professionalDisplayNameForClient(row?.nombre)
+      : row
+        ? `${String(row.nombre ?? '').trim()} ${String(row.apellido ?? '').trim()}`.trim() || 'Usuario'
+        : 'Usuario';
 
   navigationRef.navigate('Main', {
     screen: 'Mensajes',
