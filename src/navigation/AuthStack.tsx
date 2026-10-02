@@ -2,6 +2,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ForgotPasswordRequestScreen } from '../screens/auth/ForgotPasswordRequestScreen';
 import { ResetPasswordScreen } from '../screens/auth/ResetPasswordScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
+import { SignupRoleScreen } from '../screens/auth/SignupRoleScreen';
 import { RegisterScreen } from '../screens/auth/RegisterScreen';
 import { RegisterCommerceScreen } from '../screens/auth/RegisterCommerceScreen';
 import { colors } from '../constants/theme';
@@ -11,7 +12,7 @@ import { useNativeStackScreenOptions } from './useNativeStackScreenOptions';
 const Stack = createNativeStackNavigator<AuthStackParamList>();
 
 /**
- * Navegación entre Login, Registro y Recuperación de contraseña.
+ * Navegación entre Login, elección de alta, Registro y Recuperación de contraseña.
  */
 export function AuthStack() {
   const screenOptions = useNativeStackScreenOptions({
@@ -24,6 +25,11 @@ export function AuthStack() {
       <Stack.Screen
         name="Login"
         component={LoginScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="SignupRole"
+        component={SignupRoleScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
