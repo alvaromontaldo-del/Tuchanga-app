@@ -7,6 +7,14 @@ import {
   type DisponibilidadOpcion,
   type DisponibilidadOpcionEstado,
 } from '../types/contrataciones';
+import {
+  AGENDA_BUSY_PENDING_JOB_STATUSES,
+  collectBusyAgendaSlots,
+  slotOverlapFromRpcError,
+  type AgendaJobRow,
+  type AgendaProposalRow,
+  type BusyAgendaSlot,
+} from '../utils/agendaSlotOverlap';
 import { normalizeDisplayAddress } from '../utils/formatAddress';
 import { calculateYachangaServiceFee } from '../utils/yachangaJobServiceFee';
 import { assertWarrantyDays } from '../utils/warrantyDays';
@@ -68,6 +76,9 @@ function throwContratacionRpcError(
   error: { message?: string; details?: string; hint?: string },
   fallback: string,
 ): never {
+  const overlap = slotOverlapFromRpcError(error);
+  if (overlap) throw overlap;
+
   const raw = [error.message, error.details, error.hint].filter(Boolean).join(' ').toLowerCase();
 
   if (raw.includes('message_blocked_contact')) {
@@ -567,6 +578,52 @@ export async function fetchDisponibilidadOpciones(
   const { data, error } = await query;
   if (error || !data) return [];
   return sortDisponibilidadChronological((data as Record<string, unknown>[]).map(mapDisponibilidadOpcion));
+}
+
+const AGENDA_BUSY_JOB_FETCH = [...AGENDA_BUSY_PENDING_JOB_STATUSES];
+
+/**
+ * Turnos que ocupan la agenda del profesional: confirmados (aceptado / en_curso)
+ * y propuestas todavía sin aceptar. El trabajo que se está editando se excluye
+ * después, en findAgendaSlotOverlap.
+ */
+export async function fetchWorkerAgendaBusySlots(workerId: string): Promise<BusyAgendaSlot[]> {
+  const sb = getSupabaseClient();
+  const { data, error } = await sb
+    .from('contrataciones')
+    .select('id,estado_trabajo,fecha_trabajo,hora_inicio,hora_fin')
+    .eq('worker_id', workerId)
+    .in('estado_trabajo', AGENDA_BUSY_JOB_FETCH);
+  if (error || !data) return [];
+
+  const jobs: AgendaJobRow[] = (data as Record<string, unknown>[]).map((row) => ({
+    id: String(row.id),
+    estadoTrabajo: String(row.estado_trabajo ?? ''),
+    fechaTrabajo: (row.fecha_trabajo as string | null) ?? null,
+    horaInicio: (row.hora_inicio as string | null) ?? null,
+    horaFin: (row.hora_fin as string | null) ?? null,
+  }));
+
+  const ids = jobs.map((job) => job.id);
+  let proposals: AgendaProposalRow[] = [];
+  if (ids.length > 0) {
+    const { data: ops, error: opsError } = await sb
+      .from('disponibilidad_opciones')
+      .select('contratacion_id,estado,fecha_trabajo,hora_inicio,hora_fin')
+      .in('contratacion_id', ids)
+      .eq('estado', 'propuesta');
+    if (!opsError && ops) {
+      proposals = (ops as Record<string, unknown>[]).map((row) => ({
+        contratacionId: String(row.contratacion_id),
+        estado: String(row.estado ?? ''),
+        fechaTrabajo: (row.fecha_trabajo as string | null) ?? null,
+        horaInicio: (row.hora_inicio as string | null) ?? null,
+        horaFin: (row.hora_fin as string | null) ?? null,
+      }));
+    }
+  }
+
+  return collectBusyAgendaSlots(jobs, proposals);
 }
 
 export type DisponibilidadSlotInput = {
