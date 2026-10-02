@@ -613,8 +613,9 @@ export async function fetchProfileBaseLocation(
 }
 
 /**
- * Domicilio del cliente: texto (`direccion_texto`) + coordenadas si existen.
- * Usado como default editable en solicitudes de materiales.
+ * Domicilio registrado: texto (`direccion_texto`) + coordenadas si existen.
+ * El texto de otro usuario no está en el select (PII). Las coordenadas salen
+ * de `profiles.location`, que sigue siendo legible.
  */
 export async function fetchProfileDeliveryAddress(userId: string): Promise<{
   address: string;
