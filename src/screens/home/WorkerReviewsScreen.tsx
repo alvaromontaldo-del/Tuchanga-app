@@ -15,6 +15,7 @@ import type {
 import type { WorkerReview } from '../../types/feed';
 import { formatPostDate } from '../../utils/formatDate';
 import { listKey } from '../../utils/safeAsync';
+import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { canShowWorkerReputation, completedJobsFromPayload } from '../../utils/workerReputation';
 
 type Props =
@@ -95,8 +96,8 @@ export function WorkerReviewsScreen({ route }: Props) {
         if (!cancelled) {
           if (jobsKnown != null) setCompletedJobs(jobsKnown);
           if (!mockWorker) {
-            const first = String(profileRow.nombre ?? '').trim().split(/\s+/)[0] || '';
-            setRemoteWorkerName(first || null);
+            const first = professionalDisplayNameForClient(profileRow.nombre);
+            setRemoteWorkerName(first === 'Profesional' ? null : first);
           } else {
             setRemoteWorkerName(null);
           }
@@ -152,7 +153,9 @@ export function WorkerReviewsScreen({ route }: Props) {
     };
   }, [backendWorkerId, mockWorker, workerId]);
 
-  const displayName = mockWorker?.firstName ?? remoteWorkerName ?? 'Profesional';
+  const displayName = professionalDisplayNameForClient(
+    mockWorker?.firstName ?? remoteWorkerName ?? '',
+  );
   const reputationLocked =
     completedJobs !== undefined && !canShowWorkerReputation(completedJobs);
 

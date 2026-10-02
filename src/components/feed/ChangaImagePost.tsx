@@ -11,6 +11,7 @@ import { formatPostDate } from '../../utils/formatDate';
 import type { FeedPost } from '../../types/feed';
 import { StarRating } from '../profile/StarRating';
 import { APP_NAME } from '../../constants/brand';
+import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 
 type Props = {
   post: FeedPost;
@@ -39,13 +40,14 @@ export function ChangaImagePost({
   const [menuOpen, setMenuOpen] = useState(false);
 
   const showMenu = Boolean(onRequestDelete || onRequestHide);
+  const workerName = professionalDisplayNameForClient(post.workerFirstName);
   const rating = post.workerRatingAverage;
   const reviewCount = post.workerReviewCount;
 
   async function onShare() {
     try {
-      const { workerFirstName, trade, workerId } = post;
-      const message = `¡Mirá el trabajo de ${workerFirstName} en ${APP_NAME}! Oficio: ${trade}. Link: https://tuchanga.app/perfil/${workerId}`;
+      const { trade, workerId } = post;
+      const message = `¡Mirá el trabajo de ${workerName} en ${APP_NAME}! Oficio: ${trade}. Link: https://tuchanga.app/perfil/${workerId}`;
       await Share.share({
         message,
         title: 'Compartir publicación',
@@ -71,13 +73,13 @@ export function ChangaImagePost({
           onPress={onOpenProfile}
           style={({ pressed }) => [styles.headerMain, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel={`Perfil de ${post.workerFirstName}`}
+          accessibilityLabel={`Perfil de ${workerName}`}
         >
           <ClickableAvatar uri={post.workerAvatarUrl} style={styles.avatar} />
           <View style={styles.headerText}>
             <View style={styles.nameRow}>
               <Text style={styles.name} numberOfLines={1}>
-                {post.workerFirstName}
+                {workerName}
               </Text>
               <StarRating
                 score={rating}

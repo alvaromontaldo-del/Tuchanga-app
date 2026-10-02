@@ -1,13 +1,13 @@
 import { getSupabaseClient } from '../lib/supabase';
 import type { SearchWorkerHit, SearchableWorker } from '../data/mockSearchWorkers';
-import { coarseCoord, lastNameInitial } from '../utils/publicWorkerSearch';
+import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
+import { coarseCoord } from '../utils/publicWorkerSearch';
 import { completedJobsFromPayload } from '../utils/workerReputation';
 import { fetchCompletedJobsByProfileIds } from './workerCompletedJobs';
 
 type RpcRow = {
   profile_id: string;
   nombre: string;
-  apellido: string;
   avatar_url: string | null;
   lat: number;
   lng: number;
@@ -50,7 +50,7 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
   const rows = (data ?? []) as RpcRow[];
 
   const hits = rows.map((r) => {
-    const firstName = r.nombre?.trim() || 'Profesional';
+    const firstName = professionalDisplayNameForClient(r.nombre);
     const categories = Array.isArray(r.all_trades) ? r.all_trades : [];
     const primary = r.primary_trade?.trim() || categories[0] || 'Servicios';
     // Solo el oficio principal en la tarjeta de búsqueda (sin descripción larga).
@@ -59,7 +59,6 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
     const worker: SearchableWorker = {
       id: r.profile_id,
       firstName,
-      lastInitial: lastNameInitial(r.apellido),
       summary,
       ratingAverage:
         typeof r.rating_average === 'number' && !Number.isNaN(r.rating_average)

@@ -29,6 +29,7 @@ import {
 } from '../../services/messaging';
 import { patchConversationRow, sortConversations } from '../../services/inboxState';
 import { formatConversationTime } from '../../utils/formatDate';
+import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import type { MessagesStackScreenProps } from '../../navigation/mainTypes';
 import { useAppToast } from '../../components/toast/toast';
 import { useRef } from 'react';
@@ -54,6 +55,12 @@ function firstNameOnly(name: string): string {
   if (!s) return 'Usuario';
   const parts = s.split(' ').filter(Boolean);
   return parts[0] ?? 'Usuario';
+}
+
+/** El cliente ve solo el nombre del profesional. El profesional sigue viendo el primer token del cliente. */
+function inboxPeerLabel(item: { myRole: ConversationRole; otherDisplayName: string }): string {
+  if (item.myRole === 'cliente') return professionalDisplayNameForClient(item.otherDisplayName);
+  return firstNameOnly(item.otherDisplayName);
 }
 
 function renderTicks(params: { mine: boolean; peerReadAt?: string | null; lastMessageAt?: string | null }) {
@@ -333,13 +340,13 @@ export function ConversationsListScreen({ navigation }: Props) {
                 {item.otherAvatarUrl ? (
                   <ClickableAvatar uri={item.otherAvatarUrl} style={styles.avatarImg} fill />
                 ) : (
-                  <Text style={styles.avatarText}>{initialsFromName(item.otherDisplayName)}</Text>
+                  <Text style={styles.avatarText}>{initialsFromName(inboxPeerLabel(item))}</Text>
                 )}
               </View>
               <View style={styles.rowText}>
                 <View style={styles.rowTop}>
                   <Text style={styles.rowTitle} numberOfLines={1}>
-                    {firstNameOnly(item.otherDisplayName)}
+                    {inboxPeerLabel(item)}
                   </Text>
                   <Text style={styles.time}>
                     {formatConversationTime(item.lastMessageAt ?? item.updatedAt)}
@@ -392,7 +399,7 @@ export function ConversationsListScreen({ navigation }: Props) {
             <Text style={styles.modalTitle}>Eliminar chat</Text>
             <Text style={styles.modalText}>
               {deleteTarget
-                ? `Se archivará la conversación con ${firstNameOnly(deleteTarget.otherDisplayName)} para ambos. Si vuelven a contactarse, empezarán un chat nuevo sin el historial anterior.`
+                ? `Se archivará la conversación con ${inboxPeerLabel(deleteTarget)} para ambos. Si vuelven a contactarse, empezarán un chat nuevo sin el historial anterior.`
                 : ''}
             </Text>
             <View style={styles.modalActions}>

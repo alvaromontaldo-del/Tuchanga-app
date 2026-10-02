@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../lib/supabase';
 import { fetchContratacionById } from '../services/contratacionesSupabase';
 import { fetchConversationParticipants } from '../services/quotesSupabase';
+import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
 import { navigationRef } from './navigationRef';
 
 export function openPagoCheckout(params: {
@@ -72,13 +73,18 @@ export async function openChatFromContratacion(
 
   const { data: profile } = await sb
     .from('profiles')
-    .select('nombre,apellido')
+    .select(myRole === 'cliente' ? 'nombre' : 'nombre,apellido')
     .eq('id', otherId)
     .maybeSingle();
 
-  const otherDisplayName = profile
-    ? `${String(profile.nombre ?? '').trim()} ${String(profile.apellido ?? '').trim()}`.trim() || 'Usuario'
-    : 'Usuario';
+  const profileRow = profile as { nombre?: string | null; apellido?: string | null } | null;
+  const otherDisplayName =
+    myRole === 'cliente'
+      ? professionalDisplayNameForClient(profileRow?.nombre)
+      : profileRow
+        ? `${String(profileRow.nombre ?? '').trim()} ${String(profileRow.apellido ?? '').trim()}`.trim() ||
+          'Usuario'
+        : 'Usuario';
 
   const headerSubtitle =
     myRole === 'cliente'
