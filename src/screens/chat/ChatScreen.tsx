@@ -59,7 +59,6 @@ import {
   type QuoteStatus,
 } from '../../services/quotesSupabase';
 import { postPinWorkerChatCopy } from '../../utils/postPinWorkUi';
-import { calculateYachangaServiceFee } from '../../utils/yachangaJobServiceFee';
 import {
   quoteWarrantyLabel,
   WARRANTY_DAYS_MAX,
@@ -450,14 +449,6 @@ export function ChatScreen({
   participantsRef.current = participants;
 
   const quoteNetNum = useMemo(() => Math.max(0, Math.floor(quoteNetAmount)), [quoteNetAmount]);
-  const quoteFeePreview = useMemo(
-    () => calculateYachangaServiceFee(quoteNetNum),
-    [quoteNetNum],
-  );
-  const quoteFinalPreview = useMemo(
-    () => quoteNetNum + quoteFeePreview,
-    [quoteNetNum, quoteFeePreview],
-  );
 
   const quoteById = useMemo(() => {
     const m = new Map<string, ChatQuote>();
@@ -608,8 +599,6 @@ export function ChatScreen({
       `$${currency.format(Math.max(0, Math.ceil(Number(n) || 0)))}`,
     [currency],
   );
-
-  const quoteNetDisplay = useMemo(() => formatMoney(quoteNetNum), [formatMoney, quoteNetNum]);
 
   const hasActiveQuote = useMemo(() => quotes.some((q) => q.status === 'pending'), [quotes]);
   const hasActiveJob = useMemo(() => Boolean(job && job.work_status === 'PENDING'), [job]);
@@ -1689,13 +1678,16 @@ export function ChatScreen({
 
                   {myRole === 'trabajador' ? (
                     <Text style={styles.quoteLine}>
-                      Neto (lo que cobrás): <Text style={styles.quoteStrong}>{formatMoney(q.net_amount)}</Text>
+                      Monto a cobrar:{' '}
+                      <Text style={styles.quoteStrong}>{formatMoney(q.net_amount)}</Text>
                     </Text>
                   ) : null}
 
-                  <Text style={styles.quoteLine}>
-                    Precio final: <Text style={styles.quoteStrong}>{formatMoney(q.final_amount)}</Text>
-                  </Text>
+                  {myRole !== 'trabajador' ? (
+                    <Text style={styles.quoteLine}>
+                      Precio final: <Text style={styles.quoteStrong}>{formatMoney(q.final_amount)}</Text>
+                    </Text>
+                  ) : null}
 
                   {myRole === 'cliente' ? (
                     <>
@@ -2583,11 +2575,9 @@ export function ChatScreen({
                     contentContainerStyle={styles.modalScrollContent}
                   >
                     <Text style={styles.modalTitle}>Cotizar</Text>
-                    <Text style={styles.modalText}>
-                      Ingresá el monto neto que querés cobrar. YaChanga suma el costo de servicio por tramos sobre ese monto: 10% hasta $50.000, 6% de $50.000 a $200.000 y 3% de $200.000 a $500.000, con un piso de $5.000 y un tope de $23.000. El precio final es tu neto más ese costo.
-                    </Text>
+                    <Text style={styles.modalText}>Ingresá el monto que querés cobrar.</Text>
 
-                    <Text style={styles.fieldLabel}>Monto neto</Text>
+                    <Text style={styles.fieldLabel}>Monto a cobrar</Text>
                     <TextInput
                       value={quoteNetText}
                       onChangeText={onChangeQuoteNetText}
@@ -2597,22 +2587,8 @@ export function ChatScreen({
                       returnKeyType="done"
                       style={styles.quoteInput}
                       placeholderTextColor={colors.textSecondary}
+                      accessibilityLabel="Monto a cobrar"
                     />
-
-                    <View style={styles.quotePreviewRow}>
-                      <Text style={styles.quotePreviewLabel}>Neto (lo que cobrás)</Text>
-                      <Text style={styles.quotePreviewValue}>{quoteNetDisplay}</Text>
-                    </View>
-
-                    <View style={styles.quotePreviewRow}>
-                      <Text style={styles.quotePreviewLabel}>Costo de servicio YaChanga</Text>
-                      <Text style={styles.quotePreviewValue}>{formatMoney(quoteFeePreview || 0)}</Text>
-                    </View>
-
-                    <View style={styles.quotePreviewRow}>
-                      <Text style={styles.quotePreviewLabel}>Precio final</Text>
-                      <Text style={styles.quotePreviewValue}>{formatMoney(quoteFinalPreview || 0)}</Text>
-                    </View>
 
                     <Text style={styles.fieldLabel}>Detalle del servicio *</Text>
                     <TextInput
@@ -3341,20 +3317,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     backgroundColor: colors.background,
   },
-  quotePreviewRow: {
-    marginTop: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: spacing.md,
-    borderRadius: 12,
-    backgroundColor: 'rgba(198,40,40,0.06)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(198,40,40,0.20)',
-  },
-  quotePreviewLabel: { fontSize: 13, fontWeight: '900', color: colors.textSecondary },
-  quotePreviewValue: { fontSize: 16, fontWeight: '900', color: colors.text },
   quoteModerationWarning: {
     marginTop: spacing.sm,
     fontSize: 12,

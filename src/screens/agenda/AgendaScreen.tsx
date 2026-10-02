@@ -34,6 +34,7 @@ import {
   localDateIso,
 } from '../../utils/contratacionStatus';
 import { formatPostDate } from '../../utils/formatDate';
+import { professionalPayoutAmount } from '../../utils/contractedWorkDisplay';
 import type { AgendaStackScreenProps } from '../../navigation/mainTypes';
 
 type Props = AgendaStackScreenProps<'Agenda'>;
@@ -57,6 +58,7 @@ function AgendaCard({
   });
   const showEstado = section === 'historial';
   const showUbicacion = section !== 'historial' && Boolean(clienteInfo?.direccionTexto);
+  const montoACobrar = professionalPayoutAmount(item);
   const horario = formatAgendaHorario(item, { includeDate: section !== 'hoy' });
   const detail = item.service_detail?.trim() || null;
   const ubicacionLine = [
@@ -79,7 +81,9 @@ function AgendaCard({
             </View>
           ) : null}
         </View>
-        <Text style={styles.cardMonto}>${currency.format(item.precio_final)}</Text>
+        <Text style={styles.cardMonto} accessibilityLabel="Monto a cobrar">
+          ${currency.format(montoACobrar)}
+        </Text>
       </View>
 
       <View style={styles.cardMeta}>

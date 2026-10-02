@@ -409,15 +409,14 @@ export function DetalleServicioScreen() {
 
         {myRole === 'trabajador' ? (
           <Text style={styles.priceLine}>
-            Neto: <Text style={styles.strong}>{fmt(row.precio_trabajador)}</Text>
+            Monto a cobrar: <Text style={styles.strong}>{fmt(row.precio_trabajador)}</Text>
           </Text>
-        ) : null}
-        <Text style={styles.priceLine}>
-          Precio final:{' '}
-          <Text style={styles.strong}>{formatMoneyCeilAr(row.precio_final)}</Text>
-        </Text>
-        {myRole === 'cliente' ? (
+        ) : (
           <>
+            <Text style={styles.priceLine}>
+              Precio final:{' '}
+              <Text style={styles.strong}>{formatMoneyCeilAr(row.precio_final)}</Text>
+            </Text>
             <Text style={styles.priceLine}>
               {COSTO_SERVICIO_LABEL}:{' '}
               <Text style={styles.strong}>{formatMoneyCeilAr(row.comision_app)}</Text>
@@ -430,11 +429,6 @@ export function DetalleServicioScreen() {
             </Text>
             <SaldoFueraDeAppNotice />
           </>
-        ) : (
-          <Text style={styles.priceLine}>
-            {COSTO_SERVICIO_LABEL}:{' '}
-            <Text style={styles.strong}>{formatMoneyCeilAr(row.comision_app)}</Text>
-          </Text>
         )}
 
         {row.fecha_trabajo ? (
