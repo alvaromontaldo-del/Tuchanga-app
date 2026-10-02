@@ -1,11 +1,10 @@
 -- Card 117. El cliente no ve el apellido ni la inicial del profesional.
 -- NO ejecutar desde la app: aplicar a mano y diffear contra producción.
 -- Misma firma, SECURITY DEFINER, search_path y grants.
--- search_workers_for_client: cuerpo de supabase/20261001_p1_push_search_pago_idempotency_69_70.sql
---   (última versión en el repo). Solo cambia la columna apellido y se quita
+-- Ambas funciones se reconstruyeron desde producción (pg_get_functiondef, 2026-10-02).
+-- search_workers_for_client: solo cambia la columna apellido (NULL) y se quita
 --   la búsqueda por apellido.
--- list_favorites: cuerpo de supabase/migrations/20260416120000_favorites.sql
---   (última versión en el repo). Solo cambia la columna de salida apellido.
+-- list_favorites: solo cambia la columna de salida apellido (NULL).
 
 CREATE OR REPLACE FUNCTION public.search_workers_for_client(
   p_client_lat double precision,
@@ -128,68 +127,64 @@ GRANT EXECUTE ON FUNCTION public.search_workers_for_client(double precision, dou
 GRANT EXECUTE ON FUNCTION public.search_workers_for_client(double precision, double precision, text, text[], uuid, int) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.search_workers_for_client(double precision, double precision, text, text[], uuid, int) TO service_role;
 
--- RPC: GET /favorites (detalle de profesionales)
-create or replace function public.list_favorites()
-returns table (
-  profile_id uuid,
-  nombre text,
-  apellido text,
-  avatar_url text,
-  primary_trade text,
-  all_trades text[],
-  summary_jobs text
-)
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  with base as (
-    select
-      p.id as profile_id,
+-- list_favorites: cuerpo de producción (pg_get_functiondef 2026-10-02, con
+-- rating_average / review_count / total_jobs_done). Solo cambia la columna de
+-- salida apellido a NULL. Grants sin cambios (los de producción).
+CREATE OR REPLACE FUNCTION public.list_favorites()
+ RETURNS TABLE(profile_id uuid, nombre text, apellido text, avatar_url text, primary_trade text, all_trades text[], summary_jobs text, rating_average numeric, review_count integer, total_jobs_done integer)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  WITH base AS (
+    SELECT
+      p.id AS profile_id,
       p.nombre,
       p.apellido,
       p.avatar_url,
+      coalesce(p.rating_average, 0) AS rating_average,
+      coalesce(p.review_count, 0) AS review_count,
+      coalesce(p.total_jobs_done, 0) AS total_jobs_done,
       (
-        select j2.nombre_oficio
-        from public.jobs j2
-        where j2.user_id = p.id
-        order by j2.es_principal desc, j2.created_at
-        limit 1
-      ) as primary_trade,
+        SELECT j2.nombre_oficio
+        FROM public.jobs j2
+        WHERE j2.user_id = p.id
+        ORDER BY j2.es_principal DESC, j2.created_at
+        LIMIT 1
+      ) AS primary_trade,
       coalesce(
         (
-          select array_agg(j3.nombre_oficio order by j3.nombre_oficio)
-          from public.jobs j3
-          where j3.user_id = p.id
+          SELECT array_agg(j3.nombre_oficio ORDER BY j3.nombre_oficio)
+          FROM public.jobs j3
+          WHERE j3.user_id = p.id
         ),
         '{}'::text[]
-      ) as all_trades,
+      ) AS all_trades,
       (
-        select string_agg(x.nombre_oficio || ': ' || left(coalesce(x.descripcion, ''), 100), ' · ' order by x.ord)
-        from (
-          select j.nombre_oficio, j.descripcion, row_number() over (order by j.es_principal desc, j.created_at) as ord
-          from public.jobs j
-          where j.user_id = p.id
+        SELECT string_agg(x.nombre_oficio || ': ' || left(coalesce(x.descripcion, ''), 100), ' · ' ORDER BY x.ord)
+        FROM (
+          SELECT j.nombre_oficio, j.descripcion, row_number() OVER (ORDER BY j.es_principal DESC, j.created_at) AS ord
+          FROM public.jobs j
+          WHERE j.user_id = p.id
         ) x
-        where x.ord <= 3
-      ) as summary_jobs,
+        WHERE x.ord <= 3
+      ) AS summary_jobs,
       f.created_at
-    from public.favorites f
-    join public.profiles p on p.id = f.professional_id
-    where f.user_id = auth.uid()
+    FROM public.favorites f
+    JOIN public.profiles p ON p.id = f.professional_id
+    WHERE f.user_id = auth.uid()
   )
-  select
+  SELECT
     b.profile_id,
     b.nombre,
     NULL::text AS apellido,
     b.avatar_url,
     b.primary_trade,
     b.all_trades,
-    b.summary_jobs
-  from base b
-  order by b.created_at desc;
-$$;
-
-revoke all on function public.list_favorites() from public;
-grant execute on function public.list_favorites() to authenticated;
+    b.summary_jobs,
+    b.rating_average,
+    b.review_count,
+    b.total_jobs_done
+  FROM base b
+  ORDER BY b.created_at DESC;
+$function$;

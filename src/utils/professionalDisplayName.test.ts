@@ -179,10 +179,12 @@ describe('vistas de cliente sin apellido ni inicial', () => {
     expect(sql).not.toMatch(/apellido_full\s+ILIKE/i);
     expect(sql).not.toMatch(/b\.apellido\b/);
     expect(sql).toMatch(/SECURITY DEFINER/);
-    expect(sql).toMatch(/security definer/);
-    expect(sql).toMatch(/search_path = public/);
+    expect(sql).toMatch(/STABLE SECURITY DEFINER/);
     expect(sql).toMatch(/SET search_path = public/);
+    expect(sql).toMatch(/SET search_path TO 'public'/);
     expect(sql).toContain('GRANT EXECUTE ON FUNCTION public.search_workers_for_client');
-    expect(sql).toContain('grant execute on function public.list_favorites() to authenticated');
+    // list_favorites sale del cuerpo de producción (con calificación) y no toca grants.
+    expect(sql).toContain('rating_average numeric, review_count integer, total_jobs_done integer');
+    expect(sql).not.toMatch(/^\s*(grant|revoke)\b[^;]*list_favorites/im);
   });
 });
