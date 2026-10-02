@@ -1,7 +1,8 @@
 -- Card #43. El profesional no puede proponer un turno que se pisa con su agenda.
 --
--- NO EJECUTADO. Aplicar a mano en el SQL editor de Supabase y diffear contra
--- producción (kyxehrxcdealbujvvnxp) antes de dejarlo.
+-- Aplicado en producción (kyxehrxcdealbujvvnxp) el 2026-10-02, con diff contra
+-- producción y prueba en seco. Segunda versión del mismo día: el helper también
+-- cuenta los bloques de agenda y la revisita de garantía aceptada.
 --
 -- Función viva que este archivo RECREA (CREATE OR REPLACE):
 --   public.proponer_disponibilidad_opciones(uuid, jsonb)
@@ -30,9 +31,23 @@
 --     estado_trabajo está en ('precio_aceptado', 'aceptado', 'en_curso')
 --     — pendiente de aceptación del cliente, incluida una propuesta de
 --     reagendado que todavía no se aprobó.
--- No ocupan: cancelado, finalizado, disputa, pendiente_conformidad,
--- pendiente_pago_diferencia, pendiente, precio_cotizado, ni opciones
--- descartada / aceptada (la aceptada ya está reflejada en el trabajo).
+--   * revisita de garantía aceptada: trabajo 'finalizado' con reclamo abierto
+--     (is_claim_open y claim_status IN ('open', 'pending_approval')). Al
+--     aceptar la revisita, aceptar_disponibilidad_opcion pone la fecha y hora
+--     de la revisita en el trabajo, que sigue en 'finalizado'.
+--   * professional_agenda_blocks con el MISMO predicado que
+--     _agenda_slot_overlaps (lo usan aceptar_disponibilidad_opcion y
+--     proponer_reagendar_visita): status IN ('reserved', 'tentative'), misma
+--     fecha_trabajo, hora_inicio < fin AND inicio < hora_fin. Cada bloque
+--     pertenece a un trabajo (contratacion_id NOT NULL; no hay bloques
+--     manuales), así que el mensaje de la app sigue siendo correcto. Como los
+--     bloques no se liberan al cancelar o finalizar, solo cuentan los de un
+--     trabajo vigente: 'aceptado', 'en_curso' o 'finalizado' con reclamo
+--     abierto. Un bloque viejo de un trabajo cancelado o finalizado no ocupa.
+-- No ocupan: cancelado, finalizado sin reclamo abierto, disputa,
+-- pendiente_conformidad, pendiente_pago_diferencia, pendiente,
+-- precio_cotizado, ni opciones descartada / aceptada (la aceptada ya está
+-- reflejada en el trabajo).
 --
 -- Solape: start < other_end AND end > other_start, en America/Buenos_Aires.
 -- Sin hora de fin (o fin <= inicio) se suman 60 minutos, igual que el
@@ -70,6 +85,7 @@ AS $fn$
 DECLARE
   v_start timestamptz;
   v_end timestamptz;
+  v_fin time;
 BEGIN
   IF p_worker_id IS NULL OR p_fecha IS NULL OR p_ini IS NULL THEN
     RETURN;
@@ -78,8 +94,13 @@ BEGIN
   v_start := (p_fecha + p_ini) AT TIME ZONE 'America/Buenos_Aires';
   IF p_fin IS NOT NULL AND p_fin > p_ini THEN
     v_end := (p_fecha + p_fin) AT TIME ZONE 'America/Buenos_Aires';
+    v_fin := p_fin;
   ELSE
     v_end := v_start + interval '60 minutes';
+    v_fin := (v_end AT TIME ZONE 'America/Buenos_Aires')::time;
+    IF v_fin <= p_ini THEN
+      v_fin := time '24:00';
+    END IF;
   END IF;
 
   RETURN QUERY
@@ -96,7 +117,14 @@ BEGIN
     FROM public.contrataciones c
     WHERE c.worker_id = p_worker_id
       AND c.id IS DISTINCT FROM p_exclude_contratacion_id
-      AND c.estado_trabajo IN ('aceptado', 'en_curso')
+      AND (
+        c.estado_trabajo IN ('aceptado', 'en_curso')
+        OR (
+          c.estado_trabajo = 'finalizado'
+          AND c.is_claim_open
+          AND c.claim_status IN ('open', 'pending_approval')
+        )
+      )
       AND c.fecha_trabajo IS NOT NULL
       AND c.hora_inicio IS NOT NULL
 
@@ -119,6 +147,31 @@ BEGIN
       AND c.estado_trabajo IN ('precio_aceptado', 'aceptado', 'en_curso')
       AND o.fecha_trabajo IS NOT NULL
       AND o.hora_inicio IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+      b.fecha_trabajo AS fecha,
+      (b.fecha_trabajo + b.hora_inicio) AT TIME ZONE 'America/Buenos_Aires' AS start_at,
+      (b.fecha_trabajo + b.hora_fin) AT TIME ZONE 'America/Buenos_Aires' AS end_at
+    FROM public.professional_agenda_blocks b
+    JOIN public.contrataciones c ON c.id = b.contratacion_id
+    WHERE b.worker_id = p_worker_id
+      AND b.contratacion_id IS DISTINCT FROM p_exclude_contratacion_id
+      -- Mismo predicado que _agenda_slot_overlaps.
+      AND b.status IN ('reserved', 'tentative')
+      AND b.fecha_trabajo = p_fecha
+      AND b.hora_inicio < v_fin
+      AND p_ini < b.hora_fin
+      -- Solo bloques de un trabajo vigente.
+      AND (
+        c.estado_trabajo IN ('aceptado', 'en_curso')
+        OR (
+          c.estado_trabajo = 'finalizado'
+          AND c.is_claim_open
+          AND c.claim_status IN ('open', 'pending_approval')
+        )
+      )
   )
   SELECT
     b.fecha,
