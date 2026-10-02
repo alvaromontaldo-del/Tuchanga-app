@@ -1,9 +1,11 @@
 import { getSupabaseClient } from '../lib/supabase';
 import type { WorkerPublicProfile } from '../types/feed';
 import { MAX_WORKER_TRADES } from '../types/feed';
+import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
 import { completedJobsFromPayload } from '../utils/workerReputation';
 import { fetchIntroVideoPath, playbackUrlForPath } from './introVideoSupabase';
 import { fetchMyProfilePrivate } from './supabaseUser';
+import { fetchWorkerAtiendeUrgencias } from './urgenciasSupabase';
 
 const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?u=profile';
 
@@ -75,11 +77,12 @@ export async function fetchWorkerPublicProfileFromSupabase(
   const sb = getSupabaseClient();
 
   const introPathPromise = fetchIntroVideoPath(workerUserId);
+  const urgenciasPromise = fetchWorkerAtiendeUrgencias(workerUserId);
 
   const { data: profile, error: pe } = await sb
     .from('profiles')
     .select(
-      'id,nombre,apellido,avatar_url,bio,professional_description,rating_average,review_count,total_jobs_done',
+      'id,nombre,avatar_url,bio,professional_description,rating_average,review_count,total_jobs_done',
     )
     .eq('id', workerUserId)
     .maybeSingle();
@@ -129,7 +132,7 @@ export async function fetchWorkerPublicProfileFromSupabase(
   });
 
   const primary = jobs.find((j) => j.es_principal) ?? jobs[0];
-  const firstName = profile.nombre?.trim() || 'Profesional';
+  const firstName = professionalDisplayNameForClient(profile.nombre);
   const professionalDesc =
     typeof profile === 'object' && profile !== null && 'professional_description' in profile
       ? String((profile as { professional_description: unknown }).professional_description ?? '').trim()
@@ -148,7 +151,8 @@ export async function fetchWorkerPublicProfileFromSupabase(
     birthDate = priv?.birth_date ?? '';
   }
 
-  const introVideoUrl = playbackUrlForPath(await introPathPromise);
+  const [introPath, atiendeUrgencias] = await Promise.all([introPathPromise, urgenciasPromise]);
+  const introVideoUrl = playbackUrlForPath(introPath);
 
   return {
     id: profile.id,
@@ -174,5 +178,6 @@ export async function fetchWorkerPublicProfileFromSupabase(
     ),
     totalJobsDone: completedJobsFromPayload(profile, 'total_jobs_done') ?? 0,
     trades,
+    atiendeUrgencias,
   };
 }

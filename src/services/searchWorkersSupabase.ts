@@ -1,13 +1,14 @@
 import { getSupabaseClient } from '../lib/supabase';
 import type { SearchWorkerHit, SearchableWorker } from '../data/mockSearchWorkers';
-import { coarseCoord, lastNameInitial } from '../utils/publicWorkerSearch';
+import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
+import { coarseCoord } from '../utils/publicWorkerSearch';
 import { completedJobsFromPayload } from '../utils/workerReputation';
+import { readAtiendeUrgencias } from '../utils/urgencias';
 import { fetchCompletedJobsByProfileIds } from './workerCompletedJobs';
 
 type RpcRow = {
   profile_id: string;
   nombre: string;
-  apellido: string;
   avatar_url: string | null;
   lat: number;
   lng: number;
@@ -19,6 +20,7 @@ type RpcRow = {
   rating_average?: number | null;
   review_count?: number | null;
   total_jobs_done?: number | null;
+  atiende_urgencias?: boolean | null;
 };
 
 const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?u=worker';
@@ -50,7 +52,7 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
   const rows = (data ?? []) as RpcRow[];
 
   const hits = rows.map((r) => {
-    const firstName = r.nombre?.trim() || 'Profesional';
+    const firstName = professionalDisplayNameForClient(r.nombre);
     const categories = Array.isArray(r.all_trades) ? r.all_trades : [];
     const primary = r.primary_trade?.trim() || categories[0] || 'Servicios';
     // Solo el oficio principal en la tarjeta de búsqueda (sin descripción larga).
@@ -59,7 +61,6 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
     const worker: SearchableWorker = {
       id: r.profile_id,
       firstName,
-      lastInitial: lastNameInitial(r.apellido),
       summary,
       ratingAverage:
         typeof r.rating_average === 'number' && !Number.isNaN(r.rating_average)
@@ -76,6 +77,7 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
       lat: coarseCoord(Number(r.lat)),
       lng: coarseCoord(Number(r.lng)),
       coverageKm: Math.max(1, Math.floor(Number(r.coverage_km) || 1)),
+      atiendeUrgencias: readAtiendeUrgencias(r.atiende_urgencias),
     };
 
     return {

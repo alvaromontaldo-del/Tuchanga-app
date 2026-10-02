@@ -4,6 +4,7 @@ import { removeSupabaseRealtimeTopic, removeSupabaseRealtimeTopicAsync } from '.
 import { jobKeepsChatOpen } from '../utils/claimChatVisibility';
 import { claimInboxRowLabel, warrantyClaimEventFecha } from '../utils/warrantyClaimChat';
 import { dedupeInboxByPeer } from '../utils/inboxPeers';
+import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
 import { mapChatSendError } from '../utils/chatErrors';
 import type { ApiConversation, ApiMessage, ConversationRole } from './chatApi';
 import type { InboxRealtimeEvent } from './inboxState';
@@ -267,11 +268,17 @@ export async function fetchConversationsSupabase(): Promise<ApiConversation[]> {
     const otherId = myRole === 'cliente' ? c.trabajador_id : c.cliente_id;
     const { data: prof } = await sb
       .from('profiles')
-      .select('nombre,apellido,avatar_url')
+      .select('nombre,avatar_url')
       .eq('id', otherId)
       .maybeSingle();
-    const full = prof ? `${prof.nombre ?? ''} ${prof.apellido ?? ''}`.trim() : 'Usuario';
-    const name = firstNameOnly(full);
+    const profile = prof as {
+      nombre?: string | null;
+      avatar_url?: string | null;
+    } | null;
+    const name =
+      myRole === 'cliente'
+        ? professionalDisplayNameForClient(profile?.nombre)
+        : firstNameOnly(profile?.nombre ?? 'Usuario');
 
     const { data: lastMsgs } = await sb
       .from('messages')
@@ -459,11 +466,12 @@ export async function findOrCreateConversationSupabase(
 
   const { data: prof } = await sb
     .from('profiles')
-    .select('nombre,apellido')
+    .select('nombre')
     .eq('id', workerUserId)
     .maybeSingle();
-  const full = prof ? `${prof.nombre ?? ''} ${prof.apellido ?? ''}`.trim() : 'Profesional';
-  const workerDisplayName = firstNameOnly(full);
+  const workerDisplayName = professionalDisplayNameForClient(
+    (prof as { nombre?: string | null } | null)?.nombre,
+  );
 
   return {
     conversationId: convId,

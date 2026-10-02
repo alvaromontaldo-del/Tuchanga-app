@@ -1,6 +1,8 @@
 import * as Notifications from 'expo-notifications';
 import { getSupabaseClient } from '../lib/supabase';
 import { navigationRef } from '../navigation/navigationRef';
+import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
+import { fetchPeerFullName } from './profileIdentitySupabase';
 
 function waitForNavigation(maxMs = 8000): Promise<boolean> {
   const start = Date.now();
@@ -47,15 +49,17 @@ async function openChatFromPush(conversationId: string): Promise<void> {
 
   const { data: profile } = await sb
     .from('profiles')
-    .select('nombre, apellido')
+    .select('nombre')
     .eq('id', otherId)
     .maybeSingle();
 
-  const otherDisplayName = profile
-    ? `${String((profile as { nombre?: string }).nombre ?? '').trim()} ${String(
-        (profile as { apellido?: string }).apellido ?? '',
-      ).trim()}`.trim() || 'Usuario'
-    : 'Usuario';
+  const row = profile as { nombre?: string } | null;
+  // #120: el apellido del cliente llega por RPC y solo al profesional de ese cliente.
+  const peerFullName = myRole === 'cliente' ? null : await fetchPeerFullName(otherId);
+  const otherDisplayName =
+    myRole === 'cliente'
+      ? professionalDisplayNameForClient(row?.nombre)
+      : peerFullName || String(row?.nombre ?? '').trim() || 'Usuario';
 
   navigationRef.navigate('Main', {
     screen: 'Mensajes',
@@ -75,7 +79,7 @@ async function openStoreBoardFromPush(data: Record<string, unknown>): Promise<vo
   const ready = await waitForNavigation();
   if (!ready) return;
   const column = typeof data.column === 'string' ? data.column : 'nuevas';
-  navigationRef.navigate('Main', {
+  navigationRef.navigate('Commerce', {
     screen: 'StoreMaterialRequests',
     params: {
       initialColumn: column,

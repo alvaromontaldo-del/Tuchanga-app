@@ -18,6 +18,12 @@ export type ServiceJob = {
   client_id: string;
   amount: number;
   seña: number;
+  precio_trabajador: number;
+  recotizacion_id: string | null;
+  recotizacion_precio_trabajador: number | null;
+  recotizacion_precio_final: number | null;
+  recotizacion_comision_app: number | null;
+  recotizacion_fundamentos: string | null;
   description: string;
   estado_trabajo: ContratacionEstadoTrabajo;
   estado_pago: ContratacionEstadoPago;
@@ -48,6 +54,12 @@ export function contratacionToServiceJob(c: Contratacion): ServiceJob {
     client_id: c.client_id,
     amount: c.precio_final,
     seña: c.comision_app,
+    precio_trabajador: c.precio_trabajador,
+    recotizacion_id: c.recotizacion_id,
+    recotizacion_precio_trabajador: c.recotizacion_precio_trabajador,
+    recotizacion_precio_final: c.recotizacion_precio_final,
+    recotizacion_comision_app: c.recotizacion_comision_app,
+    recotizacion_fundamentos: c.recotizacion_fundamentos,
     description: c.service_detail,
     estado_trabajo: c.estado_trabajo,
     estado_pago: c.estado_pago,

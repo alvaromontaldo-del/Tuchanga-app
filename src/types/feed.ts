@@ -72,6 +72,8 @@ export type WorkerPublicProfile = {
   trades: WorkerTradeEntry[];
   /** URL pública del video de presentación. Ausente = no tiene o la columna no está. */
   introVideoUrl?: string | null;
+  /** El profesional marcó que atiende urgencias. Ausente o false = sin badge. */
+  atiendeUrgencias?: boolean;
 };
 
 export const MAX_WORKER_TRADES = 5;

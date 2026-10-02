@@ -7,6 +7,7 @@ import { WorkerResultCard } from '../../components/search/WorkerResultCard';
 import { colors, spacing } from '../../constants/theme';
 import { useFavorites } from '../../context/FavoritesContext';
 import type { AccountStackScreenProps } from '../../navigation/accountTypes';
+import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { listKey } from '../../utils/safeAsync';
 
 type Props = AccountStackScreenProps<'Favorites'>;
@@ -89,7 +90,7 @@ export function FavoritesScreen({ navigation }: Props) {
               <WorkerResultCard
                 worker={{
                   id: p.id,
-                  firstName: p.firstName,
+                  firstName: professionalDisplayNameForClient(p.firstName),
                   summary: p.summary,
                   avatarUrl: p.avatarUrl,
                   ratingAverage: p.ratingAverage,

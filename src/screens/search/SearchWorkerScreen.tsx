@@ -22,7 +22,8 @@ import { isSupabaseConfigured } from '../../config/supabase';
 import { useAuth } from '../../context/AuthContext';
 import type { AuthUser } from '../../services/auth';
 import { fetchSearchWorkerHitsFromSupabase } from '../../services/searchWorkersSupabase';
-import { publicWorkerLabel } from '../../utils/publicWorkerSearch';
+import { filterSearchHitsByUrgencias } from '../../utils/urgencias';
+import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { getSupabaseClient } from '../../lib/supabase';
 import { SearchHeaderBar } from '../../components/search/SearchHeaderBar';
 import { fetchActiveTradeNamesFromSupabase } from '../../services/workerTradesSupabase';
@@ -86,6 +87,7 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
   }, [user]);
 
   const [hits, setHits] = useState<SearchWorkerHit[]>([]);
+  const [onlyUrgencias, setOnlyUrgencias] = useState(false);
   const [hitsLoading, setHitsLoading] = useState(false);
   const [hitsError, setHitsError] = useState<string | null>(null);
   const [searchRetry, setSearchRetry] = useState(0);
@@ -206,6 +208,11 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
     isRestoring,
   ]);
 
+  const visibleHits = useMemo(
+    () => filterSearchHitsByUrgencias(hits, onlyUrgencias),
+    [hits, onlyUrgencias],
+  );
+
   const useSupabaseSearch = isSupabaseConfigured();
 
   const triggerSearch = useCallback(() => {
@@ -324,13 +331,19 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
         text: 'No hay profesionales que coincidan con tu búsqueda dentro de su radio de cobertura. Probá otra palabra u otro oficio.',
       };
     }
+    if (onlyUrgencias && visibleHits.length === 0) {
+      return {
+        title: 'Sin urgencias en estos resultados',
+        text: 'Ningún profesional de esta búsqueda marcó que atiende urgencias. Quitá el filtro para ver el listado completo.',
+      };
+    }
     return { title: '', text: '' };
   }
 
   const empty = listEmptyMessage();
   const showBlockingLoading =
     hasSearchPoint && useSupabaseSearch && hitsLoading && !hitsError && hits.length === 0;
-  const showEmpty = !hasSearchPoint || hits.length === 0;
+  const showEmpty = !hasSearchPoint || visibleHits.length === 0;
 
   return (
     <AppScreen style={styles.safe} edges={['top', 'bottom', 'left', 'right']}>
@@ -349,11 +362,15 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
           setSelectedCategories([]);
           triggerSearch();
         }}
+        urgenciasFilter={{
+          active: onlyUrgencias,
+          onToggle: () => setOnlyUrgencias((on) => !on),
+        }}
       />
 
       <FlatList
         ref={listRef}
-        data={showEmpty ? [] : hits}
+        data={showEmpty ? [] : visibleHits}
         keyExtractor={(item, index) => listKey(item?.worker?.id, index, 'worker')}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
@@ -407,13 +424,14 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
           <WorkerResultCard
             worker={{
               id: item.worker.id,
-              firstName: publicWorkerLabel(item.worker.firstName, item.worker.lastInitial),
+              firstName: professionalDisplayNameForClient(item.worker.firstName),
               summary: item.worker.summary,
               avatarUrl: item.worker.avatarUrl,
               ratingAverage: item.worker.ratingAverage,
               reviewCount: item.worker.reviewCount,
               totalJobsDone: item.worker.totalJobsDone,
               distanceLabel: `A ${formatKm(item.distanceKm)}`,
+              atiendeUrgencias: item.worker.atiendeUrgencias,
             }}
             highlightQuery={query}
             onPress={() =>

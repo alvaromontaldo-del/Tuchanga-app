@@ -26,6 +26,15 @@ export const CONFORMIDAD_SI = 'Estoy conforme';
 
 export const CONFORMIDAD_PROBLEMA = 'Tuve un problema';
 
+/** #115: si el cliente no responde en 72 h, el trabajo se da por conforme solo. */
+export const CONFORMIDAD_AUTOMATICA_HORAS = 72;
+
+export const CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE =
+  'Si no respondés en 72 h, lo damos por conforme automáticamente.';
+
+export const CONFORMIDAD_AUTOMATICA_AVISO_TRABAJADOR =
+  'Si el cliente no responde en 72 h, se confirma solo.';
+
 export const PROBLEMA_MOTIVOS = [
   'El trabajo quedó incompleto',
   'No es lo que acordamos',

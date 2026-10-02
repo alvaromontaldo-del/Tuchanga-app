@@ -1,6 +1,8 @@
 import { getSupabaseClient } from '../lib/supabase';
 import { fetchContratacionById } from '../services/contratacionesSupabase';
 import { fetchConversationParticipants } from '../services/quotesSupabase';
+import { fetchPeerFullName } from '../services/profileIdentitySupabase';
+import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
 import { navigationRef } from './navigationRef';
 
 export function openPagoCheckout(params: {
@@ -72,13 +74,17 @@ export async function openChatFromContratacion(
 
   const { data: profile } = await sb
     .from('profiles')
-    .select('nombre,apellido')
+    .select('nombre')
     .eq('id', otherId)
     .maybeSingle();
 
-  const otherDisplayName = profile
-    ? `${String(profile.nombre ?? '').trim()} ${String(profile.apellido ?? '').trim()}`.trim() || 'Usuario'
-    : 'Usuario';
+  const profileRow = profile as { nombre?: string | null } | null;
+  // #120: el apellido del cliente llega por RPC y solo al profesional de ese cliente.
+  const peerFullName = myRole === 'cliente' ? null : await fetchPeerFullName(otherId);
+  const otherDisplayName =
+    myRole === 'cliente'
+      ? professionalDisplayNameForClient(profileRow?.nombre)
+      : peerFullName || String(profileRow?.nombre ?? '').trim() || 'Usuario';
 
   const headerSubtitle =
     myRole === 'cliente'

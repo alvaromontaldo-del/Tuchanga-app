@@ -15,12 +15,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AppButton } from '../../components/common/AppButton';
 import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
 import { SingleSelectModal } from '../../components/common/SingleSelectModal';
-import {
-  AddressDeliveryField,
-  type DeliveryGeoPoint,
-} from '../../components/location/AddressDeliveryField';
 import { useAppToast } from '../../components/toast/toast';
-import { rejectedAddressMessage } from '../../utils/streetAddressQuery';
 import { colors, radii, spacing } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useUserMode } from '../../context/UserModeContext';
@@ -32,7 +27,6 @@ import type {
   SearchStackParamList,
 } from '../../navigation/mainTypes';
 import { fetchRubrosWithActiveStores } from '../../services/materialRequestsSupabase';
-import { fetchProfileDeliveryAddress } from '../../services/supabaseUser';
 import type { MaterialItemDraft, StoreRubro } from '../../types/materials';
 
 type MaterialNavParamList =
@@ -66,22 +60,11 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
   const { isWorker } = useUserMode();
   const { submit, submitting } = useCreateMaterialRequest();
 
-  const paramLat = route.params?.clientLat;
-  const paramLng = route.params?.clientLng;
   const clientId = route.params?.clientId;
   const conversationId = route.params?.conversationId;
 
   const [title] = useState(route.params?.title?.trim() || 'Pedido de materiales');
   const [items, setItems] = useState<MaterialItemDraft[]>([emptyItem()]);
-  const [address, setAddress] = useState('');
-  const [deliveryGeo, setDeliveryGeo] = useState<DeliveryGeoPoint | null>(null);
-  const [clientLat, setClientLat] = useState<number | null>(
-    typeof paramLat === 'number' ? paramLat : null,
-  );
-  const [clientLng, setClientLng] = useState<number | null>(
-    typeof paramLng === 'number' ? paramLng : null,
-  );
-  const [loadingClientLoc, setLoadingClientLoc] = useState(false);
 
   const [rubros, setRubros] = useState<StoreRubro[]>([]);
   const [loadingRubros, setLoadingRubros] = useState(true);
@@ -116,29 +99,6 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (!clientId) return;
-    let cancelled = false;
-    setLoadingClientLoc(true);
-    void (async () => {
-      try {
-        const loc = await fetchProfileDeliveryAddress(clientId);
-        if (cancelled || !loc) return;
-        if (loc.address) setAddress(loc.address);
-        if (typeof paramLat !== 'number' && loc.lat != null) setClientLat(loc.lat);
-        if (typeof paramLng !== 'number' && loc.lng != null) setClientLng(loc.lng);
-        if (loc.address && loc.lat != null && loc.lng != null) {
-          setDeliveryGeo({ address: loc.address, lat: loc.lat, lng: loc.lng });
-        }
-      } finally {
-        if (!cancelled) setLoadingClientLoc(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [clientId, paramLat, paramLng]);
 
   const selectedRubro = useMemo(
     () => rubros.find((r) => r.id === selectedRubroId) ?? null,
@@ -179,19 +139,6 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
       toast.warning('Seleccioná el rubro.', 'Rubro');
       return;
     }
-    const trimmedAddress = (deliveryGeo?.address ?? address).trim();
-    if (!trimmedAddress) {
-      toast.warning('Ingresá la dirección de entrega.', 'Dirección');
-      return;
-    }
-    if (!deliveryGeo) {
-      const rejected = rejectedAddressMessage(address);
-      if (rejected) {
-        toast.warning(rejected, 'Dirección');
-        return;
-      }
-    }
-
     const cleaned: MaterialItemDraft[] = [];
     for (const it of items) {
       const description = it.description.trim();
@@ -215,16 +162,10 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
         ? cleaned[0].description.slice(0, 60)
         : 'Pedido de materiales');
 
-    const lat = deliveryGeo?.lat ?? clientLat;
-    const lng = deliveryGeo?.lng ?? clientLng;
-
     try {
       const result = await submit({
         professionalId: user.id,
         clientId,
-        clientLat: lat,
-        clientLng: lng,
-        clientAddress: trimmedAddress,
         conversationId,
         title: autoTitle,
         items: cleaned,
@@ -245,13 +186,9 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
     user?.id,
     title,
     selectedRubroId,
-    address,
-    deliveryGeo,
     items,
     submit,
     clientId,
-    clientLat,
-    clientLng,
     conversationId,
     toast,
     navigation,
@@ -277,25 +214,6 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <AddressDeliveryField
-          label="Dirección de entrega"
-          value={address}
-          onChangeText={setAddress}
-          geo={deliveryGeo}
-          onGeoChange={(g) => {
-            setDeliveryGeo(g);
-            if (g) {
-              setAddress(g.address);
-              setClientLat(g.lat);
-              setClientLng(g.lng);
-            }
-          }}
-          placeholder={loadingClientLoc ? 'Cargando…' : 'Calle, altura, localidad'}
-          near={
-            clientLat != null && clientLng != null ? { lat: clientLat, lng: clientLng } : null
-          }
-        />
-
         <Text style={styles.sectionLabel}>Rubro</Text>
         {loadingRubros ? (
           <ActivityIndicator color={colors.primary} style={{ marginBottom: spacing.md }} />

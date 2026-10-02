@@ -4,7 +4,10 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 import { ChangaCard } from '../feed/ChangaCard';
 import { StarRating } from '../profile/StarRating';
 import { colors, radii, spacing, typography } from '../../constants/theme';
+import { UrgenciasBadge } from './UrgenciasBadge';
+import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { asText, isRenderableUri } from '../../utils/safeAsync';
+import { urgenciasBadgeView } from '../../utils/urgencias';
 
 export type WorkerResultCardModel = {
   id: string;
@@ -15,6 +18,7 @@ export type WorkerResultCardModel = {
   reviewCount: number;
   totalJobsDone?: number;
   distanceLabel?: string;
+  atiendeUrgencias?: boolean;
 };
 
 function escapeRegExp(s: string) {
@@ -46,7 +50,8 @@ export function WorkerResultCard({
   showChevron?: boolean;
   highlightQuery?: string;
 }) {
-  const nameParts = highlightParts(asText(worker?.firstName, 'Profesional'), highlightQuery ?? '');
+  const visibleName = professionalDisplayNameForClient(asText(worker?.firstName, ''));
+  const nameParts = highlightParts(visibleName, highlightQuery ?? '');
   const summaryParts = highlightParts(asText(worker?.summary, ''), highlightQuery ?? '');
   const rawAvatar = worker?.avatarUrl;
   const avatarUrl = isRenderableUri(rawAvatar) ? rawAvatar.trim() : '';
@@ -71,6 +76,7 @@ export function WorkerResultCard({
             ),
           )}
         </Text>
+        {urgenciasBadgeView(worker.atiendeUrgencias) ? <UrgenciasBadge /> : null}
         <Text style={styles.resultSummary} numberOfLines={1}>
           {summaryParts.map((p, i) =>
             p.h ? (

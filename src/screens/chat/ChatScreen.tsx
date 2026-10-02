@@ -23,6 +23,7 @@ import { ExpandableText } from '../../components/common/ExpandableText';
 import { useAppToast } from '../../components/toast/toast';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { colors, radii, spacing } from '../../constants/theme';
+import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { useAuth } from '../../context/AuthContext';
 import { useFeed } from '../../context/FeedContext';
 import { useSocket } from '../../context/SocketContext';
@@ -59,7 +60,6 @@ import {
   type QuoteStatus,
 } from '../../services/quotesSupabase';
 import { postPinWorkerChatCopy } from '../../utils/postPinWorkUi';
-import { calculateYachangaServiceFee } from '../../utils/yachangaJobServiceFee';
 import {
   quoteWarrantyLabel,
   WARRANTY_DAYS_MAX,
@@ -74,9 +74,12 @@ import {
   type ServiceJob,
 } from '../../services/serviceJobsSupabase';
 import { AgendaOpcionesCliente } from '../../components/servicios/AgendaOpcionesCliente';
+import { RecotizacionCard } from '../../components/jobs/RecotizacionCard';
 import { ReportarProblemaModal } from '../../components/jobs/ReportarProblemaModal';
 import { SaldoFueraDeAppNotice } from '../../components/jobs/SaldoFueraDeAppNotice';
 import {
+  CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE,
+  CONFORMIDAD_AUTOMATICA_AVISO_TRABAJADOR,
   CONFORMIDAD_NEGATIVA,
   CONFORMIDAD_POSITIVA,
   CONFORMIDAD_PREGUNTA,
@@ -84,7 +87,6 @@ import {
   CONFORMIDAD_SI,
   COSTO_SERVICIO_LABEL,
   COSTO_SERVICIO_PAGADO,
-  COSTO_SERVICIO_PENDIENTE,
   puedeIniciarPagoCostoServicio,
   SALDO_PAGADO_AL_PROFESIONAL,
   textoVisibleSinSena,
@@ -96,8 +98,11 @@ import {
   clienteResponderConformidad,
   trabajadorConfirmarRecepcionOffline,
   fetchDisponibilidadOpciones,
+  aceptarRecotizacion,
   obtenerPinCliente,
   rechazarDisponibilidad,
+  rechazarRecotizacion,
+  recotizarEnCurso,
 } from '../../services/contratacionesSupabase';
 import type { DisponibilidadOpcion } from '../../types/contrataciones';
 import { openPagoCheckout } from '../../navigation/openPagoCheckout';
@@ -109,6 +114,17 @@ import {
   CHAT_CERRADO_POR_RECLAMO_DETALLE,
 } from '../../utils/claimChatVisibility';
 import { getSystemEvent, shouldRenderSystemMessageInChat } from '../../utils/chatSystemMessages';
+import {
+  isRecotizacionChatEvent,
+  quoteChipForJob,
+  readMetaNumber,
+  readMetaString,
+  recotizarAmountError,
+  recotizarFundamentosError,
+  recotizacionLiveStatus,
+  serviceFeePayBarCopy,
+  WORKER_WAITING_FEE_DIFF,
+} from '../../utils/recotizarUi';
 import { dedupeMaterialServiceFeePaidMessages } from '../../utils/materialFeePaidChat';
 import { newRandomUserId } from '../../utils/stableUserId';
 import { mapChatSendError } from '../../utils/chatErrors';
@@ -289,7 +305,11 @@ export function ChatScreen({
   const [blockActionBusy, setBlockActionBusy] = useState(false);
 
   const myId = user?.id ?? '';
-  const displayName = useMemo(() => firstNameOnly(otherDisplayName), [otherDisplayName]);
+  const viewingProfessional = Boolean(workerId) || participants?.myRole === 'cliente';
+  const displayName = useMemo(() => {
+    if (viewingProfessional) return professionalDisplayNameForClient(otherDisplayName);
+    return firstNameOnly(otherDisplayName);
+  }, [otherDisplayName, viewingProfessional]);
 
   const otherUserId = useMemo(() => {
     if (!participants) return null;
@@ -411,6 +431,12 @@ export function ChatScreen({
   const [quoteNetAmount, setQuoteNetAmount] = useState(0);
   const [quoteNetText, setQuoteNetText] = useState('');
   const [quoteDetail, setQuoteDetail] = useState('');
+  const [recotizarModalOpen, setRecotizarModalOpen] = useState(false);
+  const [recotizarText, setRecotizarText] = useState('');
+  const [recotizarAmount, setRecotizarAmount] = useState(0);
+  const [recotizarFundamentos, setRecotizarFundamentos] = useState('');
+  const [recotizarSubmitting, setRecotizarSubmitting] = useState(false);
+  const [recotizarBusy, setRecotizarBusy] = useState(false);
   const [incluyeGarantia, setIncluyeGarantia] = useState(false);
   const [warrantyDaysText, setWarrantyDaysText] = useState('');
   const warrantyDaysNum = useMemo(() => {
@@ -450,14 +476,6 @@ export function ChatScreen({
   participantsRef.current = participants;
 
   const quoteNetNum = useMemo(() => Math.max(0, Math.floor(quoteNetAmount)), [quoteNetAmount]);
-  const quoteFeePreview = useMemo(
-    () => calculateYachangaServiceFee(quoteNetNum),
-    [quoteNetNum],
-  );
-  const quoteFinalPreview = useMemo(
-    () => quoteNetNum + quoteFeePreview,
-    [quoteNetNum, quoteFeePreview],
-  );
 
   const quoteById = useMemo(() => {
     const m = new Map<string, ChatQuote>();
@@ -503,6 +521,12 @@ export function ChatScreen({
       participants?.myRole === 'cliente' &&
       job.estado_trabajo === 'precio_aceptado' &&
       agendaOpciones.length > 0,
+  );
+  const showWorkerWaitingFeeDiff = Boolean(
+    job &&
+      participants?.myRole === 'trabajador' &&
+      job.estado_trabajo === 'en_curso' &&
+      job.payment_status === 'PENDING',
   );
   const showWorkerJobBar = Boolean(
     job &&
@@ -609,10 +633,17 @@ export function ChatScreen({
     [currency],
   );
 
-  const quoteNetDisplay = useMemo(() => formatMoney(quoteNetNum), [formatMoney, quoteNetNum]);
-
   const hasActiveQuote = useMemo(() => quotes.some((q) => q.status === 'pending'), [quotes]);
   const hasActiveJob = useMemo(() => Boolean(job && job.work_status === 'PENDING'), [job]);
+  const quoteChip = useMemo(
+    () =>
+      quoteChipForJob({
+        role: participants?.myRole ?? null,
+        estadoTrabajo: job?.estado_trabajo ?? null,
+        hasActiveJob,
+      }),
+    [hasActiveJob, job?.estado_trabajo, participants?.myRole],
+  );
   const latestRejected = useMemo(() => {
     const rejected = quotes.filter((q) => q.status === 'rejected');
     return rejected.length ? rejected[rejected.length - 1] : null;
@@ -627,6 +658,38 @@ export function ChatScreen({
     setQuoteNetText(digits);
     const next = digits ? Math.min(Number(digits), 999_999_999) : 0;
     setQuoteNetAmount(Number.isFinite(next) ? Math.max(0, Math.floor(next)) : 0);
+  }
+
+  function onChangeRecotizarText(text: string) {
+    const digits = (text ?? '').replace(/\D/g, '').slice(0, 9);
+    setRecotizarText(digits);
+    const next = digits ? Math.min(Number(digits), 999_999_999) : 0;
+    setRecotizarAmount(Number.isFinite(next) ? Math.max(0, Math.floor(next)) : 0);
+  }
+
+  function respondRecotizacion(action: 'accept' | 'reject') {
+    if (!job || recotizarBusy) return;
+    setRecotizarBusy(true);
+    void (async () => {
+      try {
+        if (action === 'accept') await aceptarRecotizacion(job.id);
+        else await rechazarRecotizacion(job.id);
+        const next = await fetchLatestJobByConversation(conversationId);
+        if (next) setJob(next);
+        await refreshMessages();
+        toast.success(
+          action === 'accept' ? 'Recotización aceptada.' : 'Recotización rechazada.',
+          'Recotización',
+        );
+      } catch (e) {
+        toast.error(
+          textoVisibleSinSena(e instanceof Error ? e.message : 'No se pudo responder'),
+          'Recotización',
+        );
+      } finally {
+        setRecotizarBusy(false);
+      }
+    })();
   }
 
   // Para evitar duplicidad visual: si estamos dentro del chat en foreground,
@@ -1213,6 +1276,7 @@ export function ChatScreen({
               event === 'conformidad_solicitada' ||
               event === 'conformidad_aceptada' ||
               event === 'conformidad_rechazada' ||
+              event === 'conformidad_automatica' ||
               event === 'horario_confirmado' ||
               event === 'pin_validado' ||
               event === 'seña_pagada_cliente' ||
@@ -1222,7 +1286,11 @@ export function ChatScreen({
               event === 'saldo_confirmado_cliente' ||
               event === 'saldo_confirmado_trabajador' ||
               event === 'precio_aceptado_cliente' ||
-              event === 'precio_aceptado_trabajador'
+              event === 'precio_aceptado_trabajador' ||
+              event === 'recotizacion_propuesta' ||
+              event === 'recotizacion_propuesta_trabajador' ||
+              event === 'recotizacion_aceptada' ||
+              event === 'recotizacion_rechazada'
             ) {
               void fetchLatestJobByConversation(conversationId)
                 .then((next) => {
@@ -1530,6 +1598,35 @@ export function ChatScreen({
           return null;
         }
 
+        const systemMeta = normalizeMessageMetadata(item.metadata);
+        const systemEvent = getSystemEvent(systemMeta);
+        if (systemEvent && isRecotizacionChatEvent(systemEvent) && participants?.myRole) {
+          const status = recotizacionLiveStatus({
+            event: systemEvent,
+            messageRecotizacionId: readMetaString(systemMeta, 'recotizacion_id'),
+            jobEstado: job?.estado_trabajo,
+            jobRecotizacionId: job?.recotizacion_id,
+          });
+          const precioTrabajador = readMetaNumber(systemMeta, 'precio_trabajador');
+          if (precioTrabajador != null) {
+            return (
+              <View style={styles.systemRow}>
+                <RecotizacionCard
+                  role={participants.myRole}
+                  status={status}
+                  precioTrabajador={precioTrabajador}
+                  precioFinal={readMetaNumber(systemMeta, 'precio_final')}
+                  comision={readMetaNumber(systemMeta, 'comision_app')}
+                  fundamentos={readMetaString(systemMeta, 'fundamentos') ?? ''}
+                  busy={recotizarBusy}
+                  onAccept={() => respondRecotizacion('accept')}
+                  onReject={() => respondRecotizacion('reject')}
+                />
+              </View>
+            );
+          }
+        }
+
         return (
           <View style={styles.systemRow}>
             <View style={styles.systemCard}>
@@ -1689,13 +1786,16 @@ export function ChatScreen({
 
                   {myRole === 'trabajador' ? (
                     <Text style={styles.quoteLine}>
-                      Neto (lo que cobrás): <Text style={styles.quoteStrong}>{formatMoney(q.net_amount)}</Text>
+                      Monto a cobrar:{' '}
+                      <Text style={styles.quoteStrong}>{formatMoney(q.net_amount)}</Text>
                     </Text>
                   ) : null}
 
-                  <Text style={styles.quoteLine}>
-                    Precio final: <Text style={styles.quoteStrong}>{formatMoney(q.final_amount)}</Text>
-                  </Text>
+                  {myRole !== 'trabajador' ? (
+                    <Text style={styles.quoteLine}>
+                      Precio final: <Text style={styles.quoteStrong}>{formatMoney(q.final_amount)}</Text>
+                    </Text>
+                  ) : null}
 
                   {myRole === 'cliente' ? (
                     <>
@@ -1874,6 +1974,9 @@ export function ChatScreen({
       conversationId,
       formatMoney,
       hasActiveQuote,
+      job?.estado_trabajo,
+      job?.id,
+      job?.recotizacion_id,
       latestQuoteAny,
       latestRejected?.id,
       myId,
@@ -1882,6 +1985,7 @@ export function ChatScreen({
       peerReadAt,
       quoteBusy,
       quoteById,
+      recotizarBusy,
       refreshMessages,
       refreshQuotes,
       scrollToLatest,
@@ -2019,15 +2123,14 @@ export function ChatScreen({
         {isSupabaseConfigured() && showPay && job ? (
           <View style={styles.payBar}>
             <View style={styles.payBarText}>
-              <Text style={styles.payTitle}>{COSTO_SERVICIO_PENDIENTE}</Text>
-              <Text style={styles.paySubtitle}>
-                Para compartir tu ubicación al profesional, se requiere el pago del costo de servicio
-                YaChanga.
-              </Text>
-              <Text style={[styles.paySubtitle, { marginTop: spacing.xs }]}>
-                {COSTO_SERVICIO_LABEL} {formatMoney(job.seña)} · Saldo pendiente{' '}
-                {formatMoney(computeSaldoPendiente(job.amount, job.seña))}
-              </Text>
+              <Text style={styles.payTitle}>{serviceFeePayBarCopy(job.estado_trabajo).title}</Text>
+              <Text style={styles.paySubtitle}>{serviceFeePayBarCopy(job.estado_trabajo).body}</Text>
+              {serviceFeePayBarCopy(job.estado_trabajo).showQuotedFee ? (
+                <Text style={[styles.paySubtitle, { marginTop: spacing.xs }]}>
+                  {COSTO_SERVICIO_LABEL} {formatMoney(job.seña)} · Saldo pendiente{' '}
+                  {formatMoney(computeSaldoPendiente(job.amount, job.seña))}
+                </Text>
+              ) : null}
               <SaldoFueraDeAppNotice
                 accepted={aceptaSaldoFuera}
                 onToggle={() => setAceptaSaldoFuera((value) => !value)}
@@ -2144,6 +2247,7 @@ export function ChatScreen({
         {isSupabaseConfigured() && showClientConformidadBar && job ? (
           <View style={[styles.completeBar, styles.completeBarStacked]}>
             <Text style={styles.paySubtitle}>{CONFORMIDAD_PREGUNTA}</Text>
+            <Text style={styles.conformidadAutoHint}>{CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE}</Text>
             <SaldoFueraDeAppNotice />
             <View style={styles.conformidadActions}>
                 <Pressable
@@ -2183,7 +2287,7 @@ export function ChatScreen({
             <View style={styles.payBarText}>
               <Text style={styles.paySubtitle}>
                 Marcaste el trabajo como realizado. Esperamos que el cliente confirme si quedó
-                conforme.
+                conforme. {CONFORMIDAD_AUTOMATICA_AVISO_TRABAJADOR}
               </Text>
             </View>
           </View>
@@ -2235,6 +2339,14 @@ export function ChatScreen({
                 </Text>
               </Pressable>
             ) : null}
+          </View>
+        ) : null}
+
+        {isSupabaseConfigured() && showWorkerWaitingFeeDiff && job ? (
+          <View style={styles.completeBar}>
+            <View style={styles.payBarText}>
+              <Text style={styles.paySubtitle}>{WORKER_WAITING_FEE_DIFF}</Text>
+            </View>
           </View>
         ) : null}
 
@@ -2383,6 +2495,7 @@ export function ChatScreen({
       showWorkerSaldoRecibidoBar,
       showWorkerSeñaPagadaBar,
       showWorkerJobBar,
+      showWorkerWaitingFeeDiff,
       toast,
       workerJobPaid,
     ],
@@ -2583,11 +2696,9 @@ export function ChatScreen({
                     contentContainerStyle={styles.modalScrollContent}
                   >
                     <Text style={styles.modalTitle}>Cotizar</Text>
-                    <Text style={styles.modalText}>
-                      Ingresá el monto neto que querés cobrar. YaChanga suma el costo de servicio por tramos sobre ese monto: 10% hasta $50.000, 6% de $50.000 a $200.000 y 3% de $200.000 a $500.000, con un piso de $5.000 y un tope de $23.000. El precio final es tu neto más ese costo.
-                    </Text>
+                    <Text style={styles.modalText}>Ingresá el monto que querés cobrar.</Text>
 
-                    <Text style={styles.fieldLabel}>Monto neto</Text>
+                    <Text style={styles.fieldLabel}>Monto a cobrar</Text>
                     <TextInput
                       value={quoteNetText}
                       onChangeText={onChangeQuoteNetText}
@@ -2597,22 +2708,8 @@ export function ChatScreen({
                       returnKeyType="done"
                       style={styles.quoteInput}
                       placeholderTextColor={colors.textSecondary}
+                      accessibilityLabel="Monto a cobrar"
                     />
-
-                    <View style={styles.quotePreviewRow}>
-                      <Text style={styles.quotePreviewLabel}>Neto (lo que cobrás)</Text>
-                      <Text style={styles.quotePreviewValue}>{quoteNetDisplay}</Text>
-                    </View>
-
-                    <View style={styles.quotePreviewRow}>
-                      <Text style={styles.quotePreviewLabel}>Costo de servicio YaChanga</Text>
-                      <Text style={styles.quotePreviewValue}>{formatMoney(quoteFeePreview || 0)}</Text>
-                    </View>
-
-                    <View style={styles.quotePreviewRow}>
-                      <Text style={styles.quotePreviewLabel}>Precio final</Text>
-                      <Text style={styles.quotePreviewValue}>{formatMoney(quoteFinalPreview || 0)}</Text>
-                    </View>
 
                     <Text style={styles.fieldLabel}>Detalle del servicio *</Text>
                     <TextInput
@@ -2739,6 +2836,134 @@ export function ChatScreen({
                         }
                       >
                         <Text style={styles.modalBtnPrimaryText}>Enviar</Text>
+                      </Pressable>
+                    </View>
+                  </ScrollView>
+                </Pressable>
+              </Pressable>
+            </AppKeyboardAvoidingView>
+          </Modal>
+
+          <Modal
+            visible={recotizarModalOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setRecotizarModalOpen(false)}
+          >
+            <AppKeyboardAvoidingView style={styles.flex} keyboardVerticalOffset={0}>
+              <Pressable style={styles.modalBackdrop} onPress={() => setRecotizarModalOpen(false)}>
+                <Pressable
+                  style={[styles.modalCard, { paddingBottom: spacing.lg + Math.max(insets.bottom, 0) }]}
+                  onPress={() => {}}
+                >
+                  <ScrollView
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={styles.modalScrollContent}
+                  >
+                    <Text style={styles.modalTitle}>Recotizar</Text>
+                    <Text style={styles.modalText}>
+                      Ingresá el monto nuevo que querés cobrar y por qué cambia.
+                    </Text>
+                    <Text style={styles.fieldLabel}>Monto a cobrar</Text>
+                    <TextInput
+                      value={recotizarText}
+                      onChangeText={onChangeRecotizarText}
+                      placeholder="0"
+                      keyboardType="number-pad"
+                      inputMode="numeric"
+                      returnKeyType="done"
+                      style={styles.quoteInput}
+                      placeholderTextColor={colors.textSecondary}
+                      accessibilityLabel="Monto a cobrar de la recotización"
+                    />
+                    <Text style={styles.fieldLabel}>Fundamentos *</Text>
+                    <TextInput
+                      value={recotizarFundamentos}
+                      onChangeText={setRecotizarFundamentos}
+                      placeholder="Por qué hace falta un monto distinto"
+                      placeholderTextColor={colors.textSecondary}
+                      style={styles.quoteDetailInput}
+                      multiline
+                      maxLength={1000}
+                      accessibilityLabel="Fundamentos de la recotización"
+                    />
+                    <View style={styles.modalActions}>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.modalBtn,
+                          styles.modalBtnGhost,
+                          pressed && styles.pressed,
+                        ]}
+                        onPress={() => setRecotizarModalOpen(false)}
+                      >
+                        <Text style={styles.modalBtnGhostText}>Cancelar</Text>
+                      </Pressable>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.modalBtn,
+                          styles.modalBtnPrimary,
+                          (recotizarSubmitting ||
+                            Boolean(recotizarAmountError(recotizarAmount, job?.precio_trabajador ?? null)) ||
+                            Boolean(recotizarFundamentosError(recotizarFundamentos))) &&
+                            styles.modalBtnDisabled,
+                          pressed && styles.pressed,
+                        ]}
+                        disabled={
+                          recotizarSubmitting ||
+                          Boolean(recotizarAmountError(recotizarAmount, job?.precio_trabajador ?? null)) ||
+                          Boolean(recotizarFundamentosError(recotizarFundamentos))
+                        }
+                        onPress={() => {
+                          if (!job || participants?.myRole !== 'trabajador') return;
+                          const amountError = recotizarAmountError(
+                            recotizarAmount,
+                            job.precio_trabajador,
+                          );
+                          const textError = recotizarFundamentosError(recotizarFundamentos);
+                          if (amountError) {
+                            toast.error(amountError, 'Recotizar');
+                            return;
+                          }
+                          if (textError) {
+                            toast.error(textError, 'Recotizar');
+                            return;
+                          }
+                          if (recotizarSubmitting) return;
+                          setRecotizarSubmitting(true);
+                          void (async () => {
+                            try {
+                              await recotizarEnCurso(
+                                job.id,
+                                recotizarAmount,
+                                recotizarFundamentos.trim(),
+                              );
+                              setRecotizarModalOpen(false);
+                              setRecotizarAmount(0);
+                              setRecotizarText('');
+                              setRecotizarFundamentos('');
+                              const next = await fetchLatestJobByConversation(conversationId);
+                              if (next) setJob(next);
+                              await refreshMessages();
+                              scrollToLatest();
+                              toast.success('Recotización enviada.', 'Recotizar');
+                            } catch (e) {
+                              toast.error(
+                                textoVisibleSinSena(
+                                  e instanceof Error ? e.message : 'No se pudo recotizar',
+                                ),
+                                'Recotizar',
+                              );
+                            } finally {
+                              setRecotizarSubmitting(false);
+                            }
+                          })();
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Enviar recotización"
+                      >
+                        <Text style={styles.modalBtnPrimaryText}>
+                          {recotizarSubmitting ? 'Enviando…' : 'Enviar'}
+                        </Text>
                       </Pressable>
                     </View>
                   </ScrollView>
@@ -2876,8 +3101,19 @@ export function ChatScreen({
                 <View style={styles.headerChipsInline}>
                   <Pressable
                     onPress={() => {
-                      if (hasActiveJob) {
+                      if (quoteChip.mode === 'recotizar_pendiente') {
+                        toast.warning('Ya hay una recotización pendiente de respuesta.', 'Recotizar');
+                        return;
+                      }
+                      if (quoteChip.mode === 'cotizar_bloqueado') {
                         toast.warning('Ya hay un trabajo activo en este chat.', 'Trabajo');
+                        return;
+                      }
+                      if (quoteChip.mode === 'recotizar') {
+                        setRecotizarModalOpen(true);
+                        setRecotizarAmount(0);
+                        setRecotizarText('');
+                        setRecotizarFundamentos('');
                         return;
                       }
                       setQuoteModalOpen(true);
@@ -2889,17 +3125,17 @@ export function ChatScreen({
                       setWarrantyDaysText('');
                     }}
                     accessibilityRole="button"
-                    accessibilityLabel="Cotizar"
+                    accessibilityLabel={quoteChip.label}
                     hitSlop={4}
                     style={({ pressed }) => [
                       styles.headerActionChip,
-                      hasActiveJob && styles.modalBtnDisabled,
+                      quoteChip.disabled && styles.modalBtnDisabled,
                       pressed && styles.pressed,
                     ]}
-                    disabled={hasActiveJob}
+                    disabled={quoteChip.disabled}
                   >
                     <Ionicons name="calculator-outline" size={14} color={colors.text} />
-                    <Text style={styles.headerActionChipText}>Cotizar</Text>
+                    <Text style={styles.headerActionChipText}>{quoteChip.label}</Text>
                   </Pressable>
                   <Pressable
                     onPress={() => {
@@ -3341,20 +3577,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     backgroundColor: colors.background,
   },
-  quotePreviewRow: {
-    marginTop: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: spacing.md,
-    borderRadius: 12,
-    backgroundColor: 'rgba(198,40,40,0.06)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(198,40,40,0.20)',
-  },
-  quotePreviewLabel: { fontSize: 13, fontWeight: '900', color: colors.textSecondary },
-  quotePreviewValue: { fontSize: 16, fontWeight: '900', color: colors.text },
   quoteModerationWarning: {
     marginTop: spacing.sm,
     fontSize: 12,
@@ -3546,6 +3768,7 @@ const styles = StyleSheet.create({
   payBarText: { flex: 1, minWidth: 0 },
   payTitle: { fontSize: 14, fontWeight: '900', color: colors.text },
   paySubtitle: { marginTop: 3, fontSize: 12, fontWeight: '700', color: colors.textSecondary },
+  conformidadAutoHint: { marginTop: 2, fontSize: 12, color: colors.textSecondary },
   payBtn: {
     backgroundColor: colors.primary,
     borderRadius: 12,

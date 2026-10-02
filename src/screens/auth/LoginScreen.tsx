@@ -1,13 +1,5 @@
 import { useEffect, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { AppScreen } from '../../components/layout/AppScreen';
 import { BrandLogoHorizontal } from '../../components/brand/BrandMark';
 import { AppButton } from '../../components/common/AppButton';
@@ -15,14 +7,21 @@ import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoi
 import { AppTextInput } from '../../components/common/AppTextInput';
 import { TextLink } from '../../components/common/TextLink';
 import { useAppToast } from '../../components/toast/toast';
-import { colors, radii, spacing } from '../../constants/theme';
+import { colors, spacing } from '../../constants/theme';
+import {
+  defaultSessionRoleAfterLogin,
+  isWorkerAuthUser,
+  loginAuthDismiss,
+} from '../../constants/defaultLoginRole';
 import { AccountDeactivationModal } from '../../components/auth/AccountDeactivationModal';
 import { useAuth } from '../../context/AuthContext';
 import { useCommerceShell, COMMERCE_SHELL_STATUSES } from '../../context/CommerceShellContext';
 import { showPendingCommerceNoticeOnce } from '../../context/pendingCommerceNotice';
-import { closeAuthModalAndGoToInicio, closeAuthModalAndRedirect } from '../../navigation/openAuthModal';
-import { RoleChoiceList } from '../../components/auth/RoleChoiceList';
-import { registerAuthTarget } from '../../navigation/registerEntry';
+import {
+  closeAuthModal,
+  closeAuthModalAndGoToInicio,
+  closeAuthModalAndRedirect,
+} from '../../navigation/openAuthModal';
 import type { AuthStackScreenProps } from '../../navigation/types';
 import { signIn } from '../../services/auth';
 import { isValidEmail } from '../../utils/validation';
@@ -37,18 +36,11 @@ export function LoginScreen({ navigation, route }: Props) {
     deactivationMessage,
     clearDeactivationMessage,
   } = useAuth();
-  const {
-    enterCommerceIntent,
-    clearCommerceIntent,
-    chooseSessionRole,
-    clearSessionRole,
-    refresh: refreshCommerce,
-  } = useCommerceShell();
+  const { chooseSessionRole, refresh: refreshCommerce } = useCommerceShell();
   const toast = useAppToast();
   const { width } = useWindowDimensions();
   const contentWidth = Math.min(width - spacing.lg * 2, 440);
 
-  const [asCommerce, setAsCommerce] = useState(Boolean(route.params?.asCommerce));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -56,10 +48,6 @@ export function LoginScreen({ navigation, route }: Props) {
   const [deactivationNotice, setDeactivationNotice] = useState<string | null>(null);
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
-
-  useEffect(() => {
-    if (route.params?.asCommerce) setAsCommerce(true);
-  }, [route.params?.asCommerce]);
 
   useEffect(() => {
     if (!flashMessage) return;
@@ -100,9 +88,6 @@ export function LoginScreen({ navigation, route }: Props) {
     setSubmitError('');
     setLoading(true);
     try {
-      if (asCommerce) await enterCommerceIntent();
-      else await clearCommerceIntent();
-
       const result = await signIn(email, password);
       if (!result.ok) {
         setSubmitError(result.message);
@@ -117,22 +102,20 @@ export function LoginScreen({ navigation, route }: Props) {
       const hasStore = stores.some((s) => COMMERCE_SHELL_STATUSES.has(s.status));
       const hasPendingOnly =
         !hasStore && stores.some((s) => s.status === 'pending_approval');
+      // Comercio habilitado gana sobre profesional y cliente.
+      const role = defaultSessionRoleAfterLogin({
+        hasEnabledCommerce: hasStore,
+        isWorker: isWorkerAuthUser(result.user),
+      });
 
-      if (hasStore) {
-        // Provisional: mismo email con comercio -> elegir rol (o ir directo si marco Soy comercio).
-        if (asCommerce) await chooseSessionRole('commerce');
-        else await clearSessionRole();
-      } else if (asCommerce && hasPendingOnly) {
-        showPendingCommerceNoticeOnce(result.user.id);
-        await chooseSessionRole('client');
-      } else if (asCommerce) {
-        await chooseSessionRole('commerce');
-      } else {
-        await chooseSessionRole('client');
-      }
+      if (hasPendingOnly) showPendingCommerceNoticeOnce(result.user.id);
+      await chooseSessionRole(role);
 
       const redirectTo = route.params?.redirectTo;
-      if (redirectTo && !asCommerce && !hasStore) closeAuthModalAndRedirect(redirectTo);
+      const dismiss = loginAuthDismiss({ role, redirectTo });
+      // Comercio: closeAuthModal() y el shell abre la ruta raíz `Commerce`.
+      if (dismiss === 'close') closeAuthModal();
+      else if (dismiss === 'redirect') closeAuthModalAndRedirect(redirectTo);
       else closeAuthModalAndGoToInicio();
     } catch (e) {
       setSubmitError(
@@ -160,40 +143,7 @@ export function LoginScreen({ navigation, route }: Props) {
             <View style={styles.brandWrap}>
               <BrandLogoHorizontal variant="hero" maxWidth={contentWidth} style={styles.brandLogo} />
             </View>
-            <Text style={styles.subtitle}>
-              {asCommerce ? 'Ingresá como comercio' : 'Ingresá a tu cuenta'}
-            </Text>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.commerceToggle,
-                asCommerce && styles.commerceToggleOn,
-                pressed && styles.pressed,
-              ]}
-              onPress={() => setAsCommerce((v) => !v)}
-              accessibilityRole="switch"
-              accessibilityState={{ checked: asCommerce }}
-              accessibilityLabel="Soy comercio"
-            >
-              <Ionicons
-                name="storefront-outline"
-                size={22}
-                color={asCommerce ? colors.primary : colors.textSecondary}
-              />
-              <View style={styles.commerceToggleText}>
-                <Text style={[styles.commerceToggleTitle, asCommerce && styles.commerceToggleTitleOn]}>
-                  Soy comercio
-                </Text>
-                <Text style={styles.commerceToggleSub}>
-                  Pedidos de materiales y cotizaciones
-                </Text>
-              </View>
-              <Ionicons
-                name={asCommerce ? 'checkbox' : 'square-outline'}
-                size={24}
-                color={asCommerce ? colors.primary : colors.textSecondary}
-              />
-            </Pressable>
+            <Text style={styles.subtitle}>Ingresá a tu cuenta</Text>
 
             <AppTextInput
               label="Email"
@@ -237,13 +187,22 @@ export function LoginScreen({ navigation, route }: Props) {
             ) : null}
 
             <View style={styles.footer}>
-              <Text style={styles.muted}>¿No tenés cuenta? Elegí cómo registrarte</Text>
-              <RoleChoiceList
-                onPick={(role) => {
-                  const target = registerAuthTarget(role);
-                  navigation.navigate(target.screen, target.params);
-                }}
-              />
+              <Text style={styles.footerLine}>
+                ¿No tenés cuenta? Elegí cómo{' '}
+                <Text
+                  style={styles.registerLink}
+                  onPress={() =>
+                    navigation.navigate(
+                      'SignupRole',
+                      route.params?.redirectTo ? { redirectTo: route.params.redirectTo } : undefined,
+                    )
+                  }
+                  accessibilityRole="link"
+                  accessibilityLabel="Elegí cómo registrarte"
+                >
+                  registrarte
+                </Text>
+              </Text>
             </View>
           </View>
         </ScrollView>
@@ -277,55 +236,21 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginBottom: spacing.md,
   },
-  commerceToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    borderRadius: radii.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  commerceToggleOn: {
-    borderColor: colors.primary,
-    backgroundColor: '#FDECEA',
-  },
-  commerceToggleText: { flex: 1, gap: 2 },
-  commerceToggleTitle: { fontSize: 15, fontWeight: '800', color: colors.text },
-  commerceToggleTitleOn: { color: colors.primary },
-  commerceToggleSub: { fontSize: 12, color: colors.textSecondary },
   footer: {
     marginTop: spacing.md,
     alignItems: 'center',
-    gap: spacing.sm,
   },
-  registerChoices: {
-    flexDirection: 'row',
-    alignSelf: 'stretch',
-    gap: spacing.sm,
-  },
-  registerChip: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 12,
-    borderRadius: radii.input,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: colors.surface,
-  },
-  registerChipText: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: colors.primary,
-  },
-  muted: {
+  footerLine: {
     color: colors.textSecondary,
     fontSize: 15,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  registerLink: {
+    color: colors.primary,
+    fontSize: 15,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
   submitError: {
     marginTop: spacing.md,
@@ -334,5 +259,4 @@ const styles = StyleSheet.create({
     color: colors.error,
     lineHeight: 20,
   },
-  pressed: { opacity: 0.9 },
 });

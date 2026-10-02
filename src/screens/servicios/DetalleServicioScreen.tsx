@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,9 +17,11 @@ import {
 import { useNavigation, useRoute, useFocusEffect, type RouteProp } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExpandableText } from '../../components/common/ExpandableText';
+import { RecotizacionCard } from '../../components/jobs/RecotizacionCard';
 import { ReportarProblemaModal } from '../../components/jobs/ReportarProblemaModal';
 import { SaldoFueraDeAppNotice } from '../../components/jobs/SaldoFueraDeAppNotice';
 import {
+  CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE,
   CONFORMIDAD_NEGATIVA,
   CONFORMIDAD_POSITIVA,
   CONFORMIDAD_PREGUNTA,
@@ -42,6 +44,7 @@ import {
   clienteResponderConformidad,
   fetchContratacionById,
   fetchDisponibilidadOpciones,
+  fetchWorkerAgendaBusySlots,
   obtenerDireccionCliente,
   obtenerPinCliente,
   proponerDisponibilidadOpciones,
@@ -63,6 +66,16 @@ import {
   puedeNotificarSaldoOffline,
 } from '../../utils/contratacionStatus';
 import { formatMoneyCeilAr } from '../../utils/formatMoney';
+import {
+  AGENDA_DEFAULT_DURATION_MINUTES,
+  agendaPickerFieldForOverlap,
+  findAgendaSlotOverlap,
+  SlotOverlapError,
+  type AgendaOverlapHit,
+  type BusyAgendaSlot,
+} from '../../utils/agendaSlotOverlap';
+
+const DEFAULT_SLOT_MS = AGENDA_DEFAULT_DURATION_MINUTES * 60 * 1000;
 
 export type DetalleServicioParams = {
   contratacionId: string;
@@ -93,7 +106,7 @@ type SlotDraft = {
 
 function newSlotDraft(): SlotDraft {
   const now = new Date();
-  const fin = new Date(now.getTime() + 60 * 60 * 1000);
+  const fin = new Date(now.getTime() + DEFAULT_SLOT_MS);
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     fecha: now,
@@ -210,6 +223,12 @@ export function DetalleServicioScreen() {
   const [conformidadAviso, setConformidadAviso] = useState<typeof CONFORMIDAD_POSITIVA | null>(
     null,
   );
+  const [busySlots, setBusySlots] = useState<BusyAgendaSlot[]>([]);
+  const [agendaFocusSlotId, setAgendaFocusSlotId] = useState<string | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const contentRef = useRef<View>(null);
+  const slotRefs = useRef<Record<string, View | null>>({});
+  const preserveSlotsRef = useRef(false);
 
   const openPicker = useCallback(
     (slotId: string, field: PickerField) => {
@@ -229,14 +248,45 @@ export function DetalleServicioScreen() {
           if (s.id !== picker.slotId) return s;
           const next = { ...s, [picker.field]: date };
           if (picker.field === 'horaInicio') {
-            next.horaFin = new Date(date.getTime() + 60 * 60 * 1000);
+            next.horaFin = new Date(date.getTime() + DEFAULT_SLOT_MS);
           }
           return next;
         }),
       );
       setPicker(null);
+      setAgendaFocusSlotId(null);
     },
     [picker],
+  );
+
+  const focusAgendaSlot = useCallback(
+    (slotId: string, field: PickerField) => {
+      setAgendaFocusSlotId(slotId);
+      const node = slotRefs.current[slotId];
+      const content = contentRef.current;
+      if (node && content) {
+        node.measureLayout(
+          content,
+          (_x, y) => {
+            scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
+          },
+          () => {},
+        );
+      }
+      openPicker(slotId, field);
+    },
+    [openPicker],
+  );
+
+  const presentAgendaOverlap = useCallback(
+    (hit: AgendaOverlapHit) => {
+      const slot = slots[hit.proposalIndex];
+      preserveSlotsRef.current = true;
+      toast.error(hit.message, 'Agenda');
+      if (!slot) return;
+      focusAgendaSlot(slot.id, agendaPickerFieldForOverlap(toDateIso(slot.fecha), hit.conflict.fecha));
+    },
+    [focusAgendaSlot, slots, toast],
   );
 
   const myRole = useMemo(() => {
@@ -268,11 +318,20 @@ export function DetalleServicioScreen() {
       if (data?.estado_trabajo === 'precio_aceptado') {
         const ops = await fetchDisponibilidadOpciones(contratacionId);
         setOpcionesAgenda(ops);
-        if (data.worker_id === user?.id) {
+        if (data.worker_id === user?.id && !preserveSlotsRef.current) {
           setSlots(ops.length > 0 ? opcionesToSlotDrafts(ops) : [newSlotDraft()]);
         }
       } else {
         setOpcionesAgenda([]);
+      }
+      if (data?.worker_id && data.worker_id === user?.id) {
+        try {
+          setBusySlots(await fetchWorkerAgendaBusySlots(data.worker_id));
+        } catch {
+          setBusySlots([]);
+        }
+      } else {
+        setBusySlots([]);
       }
     } catch {
       /* red o fila incompleta: se mantiene lo ya cargado */
@@ -349,6 +408,9 @@ export function DetalleServicioScreen() {
     useCallback(() => {
       if (!isSupabaseConfigured()) return;
       void reload();
+      return () => {
+        preserveSlotsRef.current = false;
+      };
     }, [reload]),
   );
 
@@ -389,7 +451,8 @@ export function DetalleServicioScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.content}>
+        <View ref={contentRef} collapsable={false}>
         <View style={styles.badgeRow}>
           <Text style={styles.badge}>{formatContratacionEstado(row.estado_trabajo)}</Text>
           <Text style={styles.pagoBadge}>
@@ -409,15 +472,14 @@ export function DetalleServicioScreen() {
 
         {myRole === 'trabajador' ? (
           <Text style={styles.priceLine}>
-            Neto: <Text style={styles.strong}>{fmt(row.precio_trabajador)}</Text>
+            Monto a cobrar: <Text style={styles.strong}>{fmt(row.precio_trabajador)}</Text>
           </Text>
-        ) : null}
-        <Text style={styles.priceLine}>
-          Precio final:{' '}
-          <Text style={styles.strong}>{formatMoneyCeilAr(row.precio_final)}</Text>
-        </Text>
-        {myRole === 'cliente' ? (
+        ) : (
           <>
+            <Text style={styles.priceLine}>
+              Precio final:{' '}
+              <Text style={styles.strong}>{formatMoneyCeilAr(row.precio_final)}</Text>
+            </Text>
             <Text style={styles.priceLine}>
               {COSTO_SERVICIO_LABEL}:{' '}
               <Text style={styles.strong}>{formatMoneyCeilAr(row.comision_app)}</Text>
@@ -430,11 +492,6 @@ export function DetalleServicioScreen() {
             </Text>
             <SaldoFueraDeAppNotice />
           </>
-        ) : (
-          <Text style={styles.priceLine}>
-            {COSTO_SERVICIO_LABEL}:{' '}
-            <Text style={styles.strong}>{formatMoneyCeilAr(row.comision_app)}</Text>
-          </Text>
         )}
 
         {row.fecha_trabajo ? (
@@ -478,7 +535,14 @@ export function DetalleServicioScreen() {
                 : 'El cliente elegirá una opción o rechazará todas.'}
             </Text>
             {slots.map((slot, index) => (
-              <View key={slot.id} style={styles.slotCard}>
+              <View
+                key={slot.id}
+                collapsable={false}
+                ref={(node) => {
+                  slotRefs.current[slot.id] = node;
+                }}
+                style={[styles.slotCard, agendaFocusSlotId === slot.id && styles.slotCardFocus]}
+              >
                 <Text style={styles.slotTitle}>Opción {index + 1}</Text>
                 <Pressable
                   style={({ pressed }) => [styles.pickerField, pressed && styles.pressed]}
@@ -553,18 +617,34 @@ export function DetalleServicioScreen() {
                   toast.error(validationError, 'Agenda');
                   return;
                 }
+                const proposals = slots.map((s) => ({
+                  fecha: toDateIso(s.fecha),
+                  horaInicio: toTimeString(s.horaInicio),
+                  horaFin: toTimeString(s.horaFin),
+                }));
+                const overlap = findAgendaSlotOverlap({
+                  proposals,
+                  busy: busySlots,
+                  excludeContratacionId: row.id,
+                });
+                if (overlap) {
+                  presentAgendaOverlap(overlap);
+                  return;
+                }
                 if (busy) return;
                 setBusy(true);
                 void (async () => {
                   try {
                     await proponerDisponibilidadOpciones(
                       row.id,
-                      slots.map((s) => ({
-                        fechaTrabajo: toDateIso(s.fecha),
-                        horaInicio: toTimeString(s.horaInicio),
-                        horaFin: toTimeString(s.horaFin),
+                      proposals.map((s) => ({
+                        fechaTrabajo: s.fecha,
+                        horaInicio: s.horaInicio,
+                        horaFin: s.horaFin,
                       })),
                     );
+                    preserveSlotsRef.current = false;
+                    setAgendaFocusSlotId(null);
                     toast.success(
                       opcionesAgenda.length > 0 ? 'Disponibilidad actualizada' : 'Disponibilidad enviada',
                       'Agenda',
@@ -574,6 +654,18 @@ export function DetalleServicioScreen() {
                       navigation.goBack();
                     }
                   } catch (e) {
+                    if (e instanceof SlotOverlapError) {
+                      const slot = slots[e.proposalIndex];
+                      preserveSlotsRef.current = true;
+                      toast.error(e.message, 'Agenda');
+                      if (slot) {
+                        focusAgendaSlot(
+                          slot.id,
+                          agendaPickerFieldForOverlap(toDateIso(slot.fecha), e.conflictFecha),
+                        );
+                      }
+                      return;
+                    }
                     toast.error(e instanceof Error ? e.message : 'No se pudo enviar', 'Agenda');
                   } finally {
                     setBusy(false);
@@ -657,22 +749,25 @@ export function DetalleServicioScreen() {
           </View>
         ) : null}
 
-        {row.estado_trabajo === 'pendiente_pago_diferencia' && myRole === 'cliente' ? (
-          <View style={styles.actions}>
-            <Pressable
-              style={[styles.btnGhost, busy && styles.btnDisabled]}
-              disabled={busy}
-              onPress={() => void runAction(() => rechazarRecotizacion(row.id))}
-            >
-              <Text style={styles.btnGhostText}>Rechazar recotización</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.btnPrimary, busy && styles.btnDisabled]}
-              disabled={busy}
-              onPress={() => void runAction(() => aceptarRecotizacion(row.id))}
-            >
-              <Text style={styles.btnPrimaryText}>Aceptar recotización</Text>
-            </Pressable>
+        {row.estado_trabajo === 'pendiente_pago_diferencia' &&
+        row.recotizacion_precio_trabajador != null ? (
+          <View style={styles.section}>
+          <RecotizacionCard
+            fill
+            role={myRole}
+            status="pendiente"
+            precioTrabajador={row.recotizacion_precio_trabajador}
+            precioFinal={row.recotizacion_precio_final}
+            comision={row.recotizacion_comision_app}
+            fundamentos={row.recotizacion_fundamentos ?? ''}
+            busy={busy}
+            onAccept={() =>
+              void runAction(() => aceptarRecotizacion(row.id), 'Recotización aceptada')
+            }
+            onReject={() =>
+              void runAction(() => rechazarRecotizacion(row.id), 'Recotización rechazada')
+            }
+          />
           </View>
         ) : null}
 
@@ -707,6 +802,7 @@ export function DetalleServicioScreen() {
         {myRole === 'cliente' && row.estado_trabajo === 'pendiente_conformidad' ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{CONFORMIDAD_PREGUNTA}</Text>
+            <Text style={styles.hint}>{CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE}</Text>
             <SaldoFueraDeAppNotice />
             <View style={styles.actions}>
               <Pressable
@@ -755,6 +851,7 @@ export function DetalleServicioScreen() {
             <Text style={styles.btnGhostText}>{SALDO_PAGADO_AL_PROFESIONAL}</Text>
           </Pressable>
         ) : null}
+        </View>
       </ScrollView>
 
       <ReportarProblemaModal
@@ -783,7 +880,8 @@ export function DetalleServicioScreen() {
                 if (s.id !== slotId) return s;
                 const next = { ...s, [field]: selected };
                 if (field === 'horaInicio') {
-                  next.horaFin = new Date(selected.getTime() + 60 * 60 * 1000);
+                  next.horaFin = new Date(selected.getTime() + DEFAULT_SLOT_MS);
+                  return next;
                 }
                 return next;
               }),
@@ -979,6 +1077,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
+  },
+  slotCardFocus: {
+    borderColor: colors.primary,
+    borderWidth: 2,
   },
   slotTitle: { fontWeight: '800', marginBottom: spacing.sm, color: colors.text },
   slotRemove: { alignSelf: 'flex-start', paddingVertical: 4 },
