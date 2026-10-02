@@ -3,6 +3,7 @@ import type { SearchWorkerHit, SearchableWorker } from '../data/mockSearchWorker
 import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
 import { coarseCoord } from '../utils/publicWorkerSearch';
 import { completedJobsFromPayload } from '../utils/workerReputation';
+import { readAtiendeUrgencias } from '../utils/urgencias';
 import { fetchCompletedJobsByProfileIds } from './workerCompletedJobs';
 
 type RpcRow = {
@@ -19,6 +20,7 @@ type RpcRow = {
   rating_average?: number | null;
   review_count?: number | null;
   total_jobs_done?: number | null;
+  atiende_urgencias?: boolean | null;
 };
 
 const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?u=worker';
@@ -75,6 +77,7 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
       lat: coarseCoord(Number(r.lat)),
       lng: coarseCoord(Number(r.lng)),
       coverageKm: Math.max(1, Math.floor(Number(r.coverage_km) || 1)),
+      atiendeUrgencias: readAtiendeUrgencias(r.atiende_urgencias),
     };
 
     return {

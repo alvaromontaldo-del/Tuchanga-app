@@ -5,6 +5,7 @@ import { professionalDisplayNameForClient } from '../utils/professionalDisplayNa
 import { completedJobsFromPayload } from '../utils/workerReputation';
 import { fetchIntroVideoPath, playbackUrlForPath } from './introVideoSupabase';
 import { fetchMyProfilePrivate } from './supabaseUser';
+import { fetchWorkerAtiendeUrgencias } from './urgenciasSupabase';
 
 const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?u=profile';
 
@@ -76,6 +77,7 @@ export async function fetchWorkerPublicProfileFromSupabase(
   const sb = getSupabaseClient();
 
   const introPathPromise = fetchIntroVideoPath(workerUserId);
+  const urgenciasPromise = fetchWorkerAtiendeUrgencias(workerUserId);
 
   const { data: profile, error: pe } = await sb
     .from('profiles')
@@ -149,7 +151,8 @@ export async function fetchWorkerPublicProfileFromSupabase(
     birthDate = priv?.birth_date ?? '';
   }
 
-  const introVideoUrl = playbackUrlForPath(await introPathPromise);
+  const [introPath, atiendeUrgencias] = await Promise.all([introPathPromise, urgenciasPromise]);
+  const introVideoUrl = playbackUrlForPath(introPath);
 
   return {
     id: profile.id,
@@ -175,5 +178,6 @@ export async function fetchWorkerPublicProfileFromSupabase(
     ),
     totalJobsDone: completedJobsFromPayload(profile, 'total_jobs_done') ?? 0,
     trades,
+    atiendeUrgencias,
   };
 }

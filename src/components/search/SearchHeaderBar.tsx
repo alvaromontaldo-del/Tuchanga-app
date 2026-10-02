@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandLogoHorizontal } from '../brand/BrandMark';
 import { colors, spacing } from '../../constants/theme';
+import { ATIENDE_URGENCIAS_FILTER } from '../../utils/urgencias';
 
 type Props = {
   value: string;
@@ -27,6 +28,8 @@ type Props = {
   selectedLabel?: string | null;
   onPressLauncher?: () => void;
   onClearSelected?: () => void;
+  /** Chip opcional de la búsqueda de profesionales. Home no lo usa. */
+  urgenciasFilter?: { active: boolean; onToggle: () => void } | null;
 };
 
 export function SearchHeaderBar({
@@ -43,6 +46,7 @@ export function SearchHeaderBar({
   selectedLabel,
   onPressLauncher,
   onClearSelected,
+  urgenciasFilter,
 }: Props) {
   const insets = useSafeAreaInsets();
   const inputRef = useRef<TextInput | null>(null);
@@ -117,6 +121,26 @@ export function SearchHeaderBar({
           <Text style={styles.filterText}>{filtersLabel}</Text>
         </TouchableOpacity>
       </View>
+
+      {urgenciasFilter ? (
+        <TouchableOpacity
+          onPress={urgenciasFilter.onToggle}
+          activeOpacity={0.75}
+          style={[styles.urgChip, urgenciasFilter.active && styles.urgChipOn]}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: urgenciasFilter.active }}
+          accessibilityLabel={ATIENDE_URGENCIAS_FILTER}
+        >
+          <Ionicons
+            name="flash"
+            size={14}
+            color={urgenciasFilter.active ? '#FFFFFF' : '#E65100'}
+          />
+          <Text style={[styles.urgChipText, urgenciasFilter.active && styles.urgChipTextOn]}>
+            {ATIENDE_URGENCIAS_FILTER}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
 
       {selectedLabel ? (
         <View style={styles.selectedWrap}>
@@ -211,6 +235,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(17,24,39,0.06)',
+  },
+  urgChip: {
+    marginTop: spacing.sm,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#E65100',
+    backgroundColor: '#FFFFFF',
+  },
+  urgChipOn: {
+    backgroundColor: '#E65100',
+  },
+  urgChipText: {
+    color: '#E65100',
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  urgChipTextOn: {
+    color: '#FFFFFF',
   },
 });
 
