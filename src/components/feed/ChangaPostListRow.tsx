@@ -5,6 +5,7 @@ import { StarRating } from '../profile/StarRating';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import type { FeedPost } from '../../types/feed';
 import { formatPostDate } from '../../utils/formatDate';
+import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { canShowWorkerReputation } from '../../utils/workerReputation';
 
 export type ChangaPostListRowProps = {
@@ -60,7 +61,7 @@ export function ChangaPostListRow({
 
           <View style={styles.body}>
             <Text style={styles.title} numberOfLines={1}>
-              {post.workerFirstName}
+              {professionalDisplayNameForClient(post.workerFirstName)}
             </Text>
             <View style={styles.metaRow}>
               <Text style={styles.subtitle} numberOfLines={1}>

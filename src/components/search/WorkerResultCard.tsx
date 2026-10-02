@@ -4,6 +4,7 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 import { ChangaCard } from '../feed/ChangaCard';
 import { StarRating } from '../profile/StarRating';
 import { colors, radii, spacing, typography } from '../../constants/theme';
+import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { asText, isRenderableUri } from '../../utils/safeAsync';
 
 export type WorkerResultCardModel = {
@@ -46,7 +47,8 @@ export function WorkerResultCard({
   showChevron?: boolean;
   highlightQuery?: string;
 }) {
-  const nameParts = highlightParts(asText(worker?.firstName, 'Profesional'), highlightQuery ?? '');
+  const visibleName = professionalDisplayNameForClient(asText(worker?.firstName, ''));
+  const nameParts = highlightParts(visibleName, highlightQuery ?? '');
   const summaryParts = highlightParts(asText(worker?.summary, ''), highlightQuery ?? '');
   const rawAvatar = worker?.avatarUrl;
   const avatarUrl = isRenderableUri(rawAvatar) ? rawAvatar.trim() : '';

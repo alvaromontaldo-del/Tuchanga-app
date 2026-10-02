@@ -28,6 +28,7 @@ import { openOrCreateChat } from '../../services/messaging';
 import { fetchWorkerPublicProfileFromSupabase } from '../../services/workerProfileSupabase';
 import { IntroVideoPlayer } from '../../components/profile/IntroVideoPlayer';
 import { StarRating } from '../../components/profile/StarRating';
+import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { canShowWorkerReputation } from '../../utils/workerReputation';
 import type {
   AccountStackScreenProps,
@@ -255,7 +256,7 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
   const showVisitorActions = isOtherProfile && !viewingOwnProfile;
   const chatReady = isMessagingAvailable();
 
-  const workerFirst = worker.firstName;
+  const workerFirst = professionalDisplayNameForClient(worker.firstName);
   const favId = workerBackendId ?? '';
   const favOn = favId ? isFavorite(favId) : false;
 
@@ -277,7 +278,7 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
         professionalId: favId,
         optimisticData: {
           id: favId,
-          firstName: w.firstName,
+          firstName: workerFirst,
           summary: w.bio || `${primaryTradeLabel}`,
           avatarUrl: w.avatarUrl,
           ratingAverage: w.ratingAverage,
@@ -388,7 +389,7 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
         ) : null}
 
         <ClickableAvatar uri={worker.avatarUrl} style={styles.avatar} />
-        <Text style={styles.name}>{worker.firstName}</Text>
+        <Text style={styles.name}>{workerFirst}</Text>
         {worker.introVideoUrl ? <IntroVideoPlayer uri={worker.introVideoUrl} /> : null}
         {ageLabel ? <Text style={styles.age}>{ageLabel}</Text> : null}
 
@@ -463,7 +464,7 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
                   <Text style={styles.contactBtnText}>Registrate para contactar</Text>
                 </Pressable>
                 <Text style={styles.contactHint}>
-                  Creá tu cuenta para chatear con {worker.firstName}.
+                  Creá tu cuenta para chatear con {workerFirst}.
                 </Text>
               </>
             ) : (
@@ -495,7 +496,7 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
           </View>
         ) : null}
 
-        <Text style={styles.sectionTitle}>Sobre {worker.firstName}</Text>
+        <Text style={styles.sectionTitle}>Sobre {workerFirst}</Text>
         {worker.bio?.trim() ? (
           <ExpandableText text={worker.bio.trim()} textStyle={styles.bio} />
         ) : null}

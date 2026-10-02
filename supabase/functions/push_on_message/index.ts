@@ -36,6 +36,17 @@ function firstNameFromProfile(
   return raw.split(/\s+/).filter(Boolean)[0] ?? fallback;
 }
 
+/** Push que ve el cliente: solo el nombre del profesional, sin apellido ni inicial. */
+function givenNameForClient(nombre: string | null | undefined, fallback: string): string {
+  const s = (nombre ?? "")
+    .replace(/[\r\n\u2028\u2029]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!s) return fallback;
+  const withoutInitial = s.replace(/\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]\.?$/u, "").trim();
+  return withoutInitial || fallback;
+}
+
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
@@ -138,7 +149,7 @@ Deno.serve(async (req) => {
 
   const { data: prof, error: pe } = await sb
     .from("profiles")
-    .select("expo_push_token,nombre,apellido")
+    .select("expo_push_token")
     .eq("id", recipient)
     .maybeSingle();
 
@@ -151,12 +162,15 @@ Deno.serve(async (req) => {
   if (msg.type === "system" && audience) {
     title = "YaChanga";
   } else {
+    const notifyingClient = recipient === conv.cliente_id;
     const senderProfile = await sb
       .from("profiles")
-      .select("nombre,apellido")
+      .select(notifyingClient ? "nombre" : "nombre,apellido")
       .eq("id", sender)
       .maybeSingle();
-    title = firstNameFromProfile(senderProfile.data, "Nuevo mensaje");
+    title = notifyingClient
+      ? givenNameForClient(senderProfile.data?.nombre, "Nuevo mensaje")
+      : firstNameFromProfile(senderProfile.data, "Nuevo mensaje");
   }
 
   const event =

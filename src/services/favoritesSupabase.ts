@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../lib/supabase';
+import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
 import { completedJobsFromPayload } from '../utils/workerReputation';
 
 export type FavoriteProfessional = {
@@ -19,7 +20,6 @@ export type FavoriteProfessional = {
 type RpcFavoriteRow = {
   profile_id: string;
   nombre: string;
-  apellido: string;
   avatar_url: string | null;
   primary_trade: string | null;
   all_trades: string[] | null;
@@ -63,7 +63,7 @@ export async function fetchFavoritesFromSupabase(): Promise<FavoriteProfessional
   const rows = (data ?? []) as RpcFavoriteRow[];
 
   return rows.map((r) => {
-    const firstName = r.nombre?.trim() || 'Profesional';
+    const firstName = professionalDisplayNameForClient(r.nombre);
     const categories = Array.isArray(r.all_trades) ? r.all_trades : [];
     const primary = r.primary_trade?.trim() || categories[0] || 'Servicios';
     const summary =

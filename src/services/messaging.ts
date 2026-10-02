@@ -1,4 +1,5 @@
 import { isSupabaseConfigured } from '../config/supabase';
+import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
 import {
   fetchConversations,
   deleteConversation as deleteConversationApi,
@@ -98,7 +99,10 @@ export async function openOrCreateChat(
   if (isSupabaseConfigured()) {
     return findOrCreateConversationSupabase(body.workerUserId, body.primaryTrade);
   }
-  return findOrCreateConversation(userId, body);
+  return findOrCreateConversation(userId, {
+    ...body,
+    workerDisplayName: professionalDisplayNameForClient(body.workerDisplayName),
+  });
 }
 
 export function subscribeChatMessages(

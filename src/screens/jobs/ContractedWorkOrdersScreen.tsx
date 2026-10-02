@@ -19,9 +19,9 @@ import {
   warrantyClaimAction,
   warrantyClaimButtonLabel,
   warrantyClaimRequiresConfirmation,
-  workerGivenName,
   type ContractedWorkSection,
 } from '../../utils/contractedWorkDisplay';
+import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { COSTO_SERVICIO_PAGADO } from '../../constants/serviceCostCopy';
 import { warrantyAnchorIso, warrantyCountdown } from '../../utils/warrantyDays';
 
@@ -153,7 +153,7 @@ export function ContractedWorkOrdersScreen({ navigation }: Props) {
         if (error) return;
         const map: Record<string, string> = {};
         for (const p of (data ?? []) as { id: string; nombre?: string | null }[]) {
-          map[String(p.id)] = workerGivenName(p.nombre);
+          map[String(p.id)] = professionalDisplayNameForClient(p.nombre);
         }
         if (!cancelled) setWorkerNameById(map);
       } catch {
