@@ -23,6 +23,7 @@ import { ExpandableText } from '../../components/common/ExpandableText';
 import { useAppToast } from '../../components/toast/toast';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { colors, radii, spacing } from '../../constants/theme';
+import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { useAuth } from '../../context/AuthContext';
 import { useFeed } from '../../context/FeedContext';
 import { useSocket } from '../../context/SocketContext';
@@ -288,7 +289,11 @@ export function ChatScreen({
   const [blockActionBusy, setBlockActionBusy] = useState(false);
 
   const myId = user?.id ?? '';
-  const displayName = useMemo(() => firstNameOnly(otherDisplayName), [otherDisplayName]);
+  const viewingProfessional = Boolean(workerId) || participants?.myRole === 'cliente';
+  const displayName = useMemo(() => {
+    if (viewingProfessional) return professionalDisplayNameForClient(otherDisplayName);
+    return firstNameOnly(otherDisplayName);
+  }, [otherDisplayName, viewingProfessional]);
 
   const otherUserId = useMemo(() => {
     if (!participants) return null;

@@ -1,6 +1,7 @@
 import { File as ExpoFsFile } from 'expo-file-system';
 import { getSupabaseClient } from '../lib/supabase';
 import { mapContentModerationError } from '../utils/contentModerationErrors';
+import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
 import { completedJobsFromPayload } from '../utils/workerReputation';
 import { fetchCompletedJobsByProfileIds } from './workerCompletedJobs';
 
@@ -142,8 +143,7 @@ type PostFeedRow = {
 };
 
 function mapPostFeedRow(x: PostFeedRow) {
-  const fullName = (x.worker_nombre ?? '').trim() || 'Profesional';
-  const firstName = fullName.split(' ')[0] || fullName;
+  const firstName = professionalDisplayNameForClient(x.worker_nombre);
   const urls = Array.isArray(x.image_urls) ? x.image_urls : [];
   return {
     id: x.id,

@@ -16,37 +16,35 @@ import { SessionRolePickerModal } from '../components/auth/SessionRolePickerModa
 import { PagoCheckoutScreen } from '../screens/pagos/PagoCheckoutScreen';
 import { PagoRetornoScreen } from '../screens/pagos/PagoRetornoScreen';
 import { usePagoRetornoDeepLink } from './usePagoRetornoDeepLink';
+import { useShellRedirect } from './useShellRedirect';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 const MIN_SPLASH_MS = 2000;
 
-function MainScreen() {
+function ShellBoot() {
+  return (
+    <View
+      style={{
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: colors.background,
+      }}
+    >
+      <ActivityIndicator size="large" color={colors.primary} />
+    </View>
+  );
+}
+
+/** Tabs de cliente y profesional. No monta el stack de comercio. */
+function ClientRoot() {
   const { isAuthed } = useAuth();
   const { isCommerceShell, loading } = useCommerceShell();
+  useShellRedirect();
 
-  if (isAuthed && loading) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: colors.background,
-        }}
-      >
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
-
-  if (isAuthed && isCommerceShell) {
-    return (
-      <>
-        <CommerceStack />
-        <SessionRolePickerModal />
-      </>
-    );
+  if (isAuthed && (loading || isCommerceShell)) {
+    return <ShellBoot />;
   }
 
   return (
@@ -54,6 +52,26 @@ function MainScreen() {
       <MainTabNavigator />
       <SessionRolePickerModal />
     </FeedProvider>
+  );
+}
+
+/**
+ * Stack de comercio, en su propia ruta raíz.
+ * Espera a que el rol y los locales estén cargados antes del primer render.
+ */
+function CommerceRoot() {
+  const { isCommerceShell, loading } = useCommerceShell();
+  useShellRedirect();
+
+  if (loading || !isCommerceShell) {
+    return <ShellBoot />;
+  }
+
+  return (
+    <>
+      <CommerceStack />
+      <SessionRolePickerModal />
+    </>
   );
 }
 
@@ -116,7 +134,8 @@ export function RootNavigator() {
 
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Main" component={MainScreen} />
+      <Stack.Screen name="Main" component={ClientRoot} />
+      <Stack.Screen name="Commerce" component={CommerceRoot} />
       <Stack.Screen
         name="AuthModal"
         component={AuthStack}

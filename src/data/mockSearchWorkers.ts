@@ -11,11 +11,6 @@ import { rubroBlobMatchesQuery } from '../utils/rubroSearch';
 export type SearchableWorker = {
   id: string;
   firstName: string;
-  /**
-   * Inicial del apellido para la búsqueda pública.
-   * No es el apellido completo.
-   */
-  lastInitial?: string;
   /** Línea corta para la lista */
   summary: string;
   ratingAverage: number;

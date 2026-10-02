@@ -73,7 +73,11 @@ import { colors, radii, spacing } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useCommerceShell } from '../../context/CommerceShellContext';
 import { showPendingCommerceNoticeOnce } from '../../context/pendingCommerceNotice';
-import { closeAuthModalAndGoToInicio, closeAuthModalAndRedirect } from '../../navigation/openAuthModal';
+import {
+  closeAuthModal,
+  closeAuthModalAndGoToInicio,
+  closeAuthModalAndRedirect,
+} from '../../navigation/openAuthModal';
 import {
   fetchStoreRubrosCatalog,
   registerMyStore,
@@ -850,6 +854,7 @@ export function RegisterScreen({ navigation, route }: Props) {
           : '¡Cuenta creada! Bienvenido/a a YaChanga.',
       );
       await signIn(result.user, true);
+      let commerceSignupStatus: string | null = null;
       if (asCommerce) {
         await enterCommerceIntent();
         await chooseSessionRole('commerce');
@@ -882,6 +887,7 @@ export function RegisterScreen({ navigation, route }: Props) {
           }
         }
         if (created) {
+          commerceSignupStatus = created.status;
           await refreshCommerceShell();
           if (created.status === 'pending_approval') {
             showPendingCommerceNoticeOnce(result.user.id);
@@ -890,6 +896,7 @@ export function RegisterScreen({ navigation, route }: Props) {
         }
       }
       if (redirectTo && !asCommerce) closeAuthModalAndRedirect(redirectTo);
+      else if (asCommerce && commerceSignupStatus !== 'pending_approval') closeAuthModal();
       else closeAuthModalAndGoToInicio();
     } finally {
       setLoading(false);
