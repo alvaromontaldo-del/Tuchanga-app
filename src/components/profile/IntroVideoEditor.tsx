@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Camera } from 'expo-camera';
+import { Camera, CameraView } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -15,17 +16,23 @@ import { colors, radii, spacing } from '../../constants/theme';
 import {
   deleteIntroVideo,
   fetchIntroVideoPath,
+  measureLocalVideoFile,
   playbackUrlForPath,
   saveIntroVideoFromUri,
 } from '../../services/introVideoSupabase';
 import {
+  INTRO_VIDEO_MAX_BYTES,
   INTRO_VIDEO_MAX_SECONDS,
+  INTRO_VIDEO_RECORD_QUALITY,
+  INTRO_VIDEO_TARGET_VIDEO_BPS,
   introVideoMimeFromAsset,
+  introVideoRecordingOptions,
+  introVideoTooLargeMessage,
   isIntroVideoTooLarge,
   isIntroVideoTooLong,
   isLocalVideoUri,
 } from '../../utils/introVideo';
-import { canPlayIntroVideo, canRecordIntroVideo } from '../../utils/introVideoNative';
+import { canPlayIntroVideo, canRecordIntroVideo, canUseIntroVideoCamera } from '../../utils/introVideoNative';
 import { ensureCameraPermission, openAppSettings } from '../../utils/mediaPermissions';
 import { useAppToast } from '../toast/toast';
 import { IntroVideoPlayer } from './IntroVideoPlayer';
@@ -40,21 +47,32 @@ type Draft = {
   fileSize?: number | null;
 };
 
+function measuredFileSize(uri: string, fallback?: number | null): number | null {
+  return measureLocalVideoFile(uri) ?? (fallback != null && Number.isFinite(fallback) && fallback > 0 ? fallback : null);
+}
+
 /**
- * Grabación con el picker de cámara que ya está en el binario
- * (`launchCameraAsync` + tope 30 s + vista previa nativa en iOS).
+ * Graba con la cámara que ya está en el binario (expo-camera 17):
+ * 480p, 700 kbps y tope de 10 MB. Sin ese módulo, cae al picker en calidad baja.
  * Guardar sube el archivo; descartar no toca el perfil.
  */
 export function IntroVideoEditor({ userId }: Props) {
   const toast = useAppToast();
+  const inAppCamera = canUseIntroVideoCamera();
   const recordingAvailable = canRecordIntroVideo();
   const playbackAvailable = canPlayIntroVideo();
+  const cameraRef = useRef<CameraView | null>(null);
+  const recordingRef = useRef(false);
   const [savedPath, setSavedPath] = useState<string | null>(null);
   const [savedUrl, setSavedUrl] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'upload' | 'delete' | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [elapsedSec, setElapsedSec] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,43 +91,66 @@ export function IntroVideoEditor({ userId }: Props) {
     };
   }, [userId]);
 
-  const record = useCallback(async () => {
-    if (!recordingAvailable || busy) return;
-    const cameraOk = await ensureCameraPermission();
-    if (!cameraOk) return;
+  const acceptRecorded = useCallback(
+    (uri: string, fileSize?: number | null) => {
+      const size = measuredFileSize(uri, fileSize);
+      if (isIntroVideoTooLarge(size)) {
+        toast.error(introVideoTooLargeMessage(size), 'Video', { durationMs: 4800 });
+        return;
+      }
+      const mime = introVideoMimeFromAsset({ uri });
+      if (!mime) {
+        toast.error('Solo se aceptan videos MP4 o MOV. Volvé a grabarlo.', 'Video', {
+          durationMs: 4200,
+        });
+        return;
+      }
+      setDraft({ uri, mime, fileSize: size });
+      if (size != null && size >= INTRO_VIDEO_MAX_BYTES - 256 * 1024) {
+        toast.warning(
+          'La grabación llegó al tamaño máximo y se cortó. Podés guardarla o volver a grabar.',
+          'Video',
+          { durationMs: 4800 },
+        );
+      }
+    },
+    [toast],
+  );
+
+  const ensureMic = useCallback(async () => {
     try {
       const current = await Camera.getMicrophonePermissionsAsync();
-      if (!current.granted) {
-        const asked = await Camera.requestMicrophonePermissionsAsync();
-        if (!asked.granted) {
-          Alert.alert(
-            'Permiso de micrófono',
-            'Para grabar el video con audio necesitamos el micrófono. Si ya lo bloqueaste, abrí Ajustes.',
-            [
-              { text: 'Cancelar', style: 'cancel' },
-              { text: 'Abrir Ajustes', onPress: () => void openAppSettings() },
-            ],
-          );
-          return;
-        }
-      }
+      if (current.granted) return true;
+      const asked = await Camera.requestMicrophonePermissionsAsync();
+      if (asked.granted) return true;
+      Alert.alert(
+        'Permiso de micrófono',
+        'Para grabar el video con audio necesitamos el micrófono. Si ya lo bloqueaste, abrí Ajustes.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Abrir Ajustes', onPress: () => void openAppSettings() },
+        ],
+      );
+      return false;
     } catch {
       toast.error(
         'Esta versión de la app no puede usar el micrófono para el video.',
         'Video',
         { durationMs: 4200 },
       );
-      return;
+      return false;
     }
+  }, [toast]);
 
+  const recordWithPicker = useCallback(async () => {
     try {
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ['videos'],
         videoMaxDuration: INTRO_VIDEO_MAX_SECONDS,
         allowsEditing: Platform.OS === 'ios',
-        quality: 0.6,
-        videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
-        videoExportPreset: ImagePicker.VideoExportPreset.MediumQuality,
+        quality: 0,
+        videoQuality: ImagePicker.UIImagePickerControllerQualityType.Low,
+        videoExportPreset: ImagePicker.VideoExportPreset.H264_640x480,
         cameraType: ImagePicker.CameraType.front,
       });
       if (result.canceled) return;
@@ -126,20 +167,7 @@ export function IntroVideoEditor({ userId }: Props) {
         });
         return;
       }
-      if (isIntroVideoTooLarge(asset.fileSize)) {
-        toast.error('El video pesa más de 30 MB. Volvé a grabarlo, más corto.', 'Video', {
-          durationMs: 4200,
-        });
-        return;
-      }
-      const mime = introVideoMimeFromAsset(asset);
-      if (!mime) {
-        toast.error('Solo se aceptan videos MP4 o MOV. Volvé a grabarlo.', 'Video', {
-          durationMs: 4200,
-        });
-        return;
-      }
-      setDraft({ uri, mime, fileSize: asset.fileSize });
+      acceptRecorded(uri, asset.fileSize);
     } catch (e) {
       toast.error(
         e instanceof Error ? e.message : 'No se pudo abrir la cámara para grabar.',
@@ -147,7 +175,66 @@ export function IntroVideoEditor({ userId }: Props) {
         { durationMs: 4200 },
       );
     }
-  }, [busy, recordingAvailable, toast]);
+  }, [acceptRecorded, toast]);
+
+  const record = useCallback(async () => {
+    if (!recordingAvailable || busy || cameraOpen) return;
+    const cameraOk = await ensureCameraPermission();
+    if (!cameraOk) return;
+    const micOk = await ensureMic();
+    if (!micOk) return;
+    if (inAppCamera) {
+      setCameraReady(false);
+      setElapsedSec(0);
+      setCameraOpen(true);
+      return;
+    }
+    await recordWithPicker();
+  }, [busy, cameraOpen, ensureMic, inAppCamera, recordWithPicker, recordingAvailable]);
+
+  const closeCamera = useCallback(() => {
+    if (recordingRef.current) {
+      cameraRef.current?.stopRecording();
+      return;
+    }
+    setCameraOpen(false);
+  }, []);
+
+  const startRecording = useCallback(async () => {
+    const camera = cameraRef.current;
+    if (!camera || !cameraReady || recordingRef.current) return;
+    recordingRef.current = true;
+    setRecording(true);
+    setElapsedSec(0);
+    const started = Date.now();
+    const tick = setInterval(() => {
+      setElapsedSec(
+        Math.min(INTRO_VIDEO_MAX_SECONDS, Math.floor((Date.now() - started) / 1000)),
+      );
+    }, 200);
+    try {
+      const recorded = await camera.recordAsync(introVideoRecordingOptions(Platform.OS));
+      const uri = recorded?.uri?.trim() ?? '';
+      if (!uri) {
+        toast.error('No se pudo guardar la grabación. Volvé a intentar.', 'Video', {
+          durationMs: 4200,
+        });
+        return;
+      }
+      acceptRecorded(uri);
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : 'No se pudo grabar el video.',
+        'Video',
+        { durationMs: 4200 },
+      );
+    } finally {
+      clearInterval(tick);
+      recordingRef.current = false;
+      setRecording(false);
+      setCameraOpen(false);
+    }
+  }, [acceptRecorded, cameraReady, toast]);
 
   const saveDraft = useCallback(async () => {
     if (!draft || busy) return;
@@ -226,8 +313,8 @@ export function IntroVideoEditor({ userId }: Props) {
     <View style={styles.wrap}>
       <Text style={styles.title}>Video de presentación</Text>
       <Text style={styles.hint}>
-        Opcional. Hasta {INTRO_VIDEO_MAX_SECONDS} segundos con la cámara del teléfono. El perfil
-        funciona igual si no cargás uno.
+        Opcional. Hasta {INTRO_VIDEO_MAX_SECONDS} segundos con la cámara del teléfono, comprimido a
+        480p. El perfil funciona igual si no cargás uno.
       </Text>
 
       {loading ? <ActivityIndicator color={colors.primary} style={styles.spinner} /> : null}
@@ -311,7 +398,7 @@ export function IntroVideoEditor({ userId }: Props) {
         <Pressable
           onPress={() => void record()}
           disabled={busy != null || loading}
-          style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.primaryBtn, styles.recordBtn, pressed && styles.pressed]}
           accessibilityRole="button"
           accessibilityLabel="Grabar video de presentación"
         >
@@ -319,6 +406,70 @@ export function IntroVideoEditor({ userId }: Props) {
           <Text style={styles.primaryText}>Grabar video</Text>
         </Pressable>
       ) : null}
+
+      <Modal visible={cameraOpen} animationType="slide" onRequestClose={closeCamera}>
+        <View style={styles.cameraShell}>
+          {cameraOpen ? (
+            <CameraView
+              ref={cameraRef}
+              style={styles.camera}
+              facing="front"
+              mode="video"
+              mute={false}
+              videoQuality={INTRO_VIDEO_RECORD_QUALITY}
+              videoBitrate={INTRO_VIDEO_TARGET_VIDEO_BPS}
+              onCameraReady={() => setCameraReady(true)}
+              onMountError={() => {
+                setCameraOpen(false);
+                toast.error('No se pudo abrir la cámara. Volvé a intentar.', 'Video', {
+                  durationMs: 4200,
+                });
+              }}
+            />
+          ) : null}
+          <View style={styles.cameraTopBar}>
+            <Text style={styles.timer}>
+              0:{String(elapsedSec).padStart(2, '0')} / 0:{String(INTRO_VIDEO_MAX_SECONDS).padStart(2, '0')}
+            </Text>
+            <Pressable
+              onPress={closeCamera}
+              hitSlop={12}
+              style={({ pressed }) => [styles.cameraIconBtn, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel={recording ? 'Detener grabación' : 'Cerrar cámara'}
+            >
+              <Ionicons name="close" size={24} color="#fff" />
+            </Pressable>
+          </View>
+          <View style={styles.cameraBottomBar}>
+            <Text style={styles.cameraHint}>Cámara frontal · 480p · se corta a los 30 s</Text>
+            {recording ? (
+              <Pressable
+                onPress={() => cameraRef.current?.stopRecording()}
+                style={({ pressed }) => [styles.shutter, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Detener grabación"
+              >
+                <View style={styles.stopInner} />
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => void startRecording()}
+                disabled={!cameraReady}
+                style={({ pressed }) => [
+                  styles.shutter,
+                  pressed && styles.pressed,
+                  !cameraReady && styles.disabled,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Empezar a grabar"
+              >
+                <View style={styles.recordInner} />
+              </Pressable>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -336,6 +487,7 @@ const styles = StyleSheet.create({
   },
   progressText: { color: colors.text, fontWeight: '700' },
   actions: { marginTop: spacing.md, gap: spacing.sm },
+  recordBtn: { marginTop: spacing.lg },
   primaryBtn: {
     minHeight: 44,
     borderRadius: radii.button,
@@ -362,4 +514,54 @@ const styles = StyleSheet.create({
   secondaryText: { color: colors.text, fontWeight: '700', fontSize: 14 },
   pressed: { opacity: 0.85 },
   disabled: { opacity: 0.6 },
+  cameraShell: { flex: 1, backgroundColor: '#000' },
+  camera: { flex: 1 },
+  cameraTopBar: {
+    position: 'absolute',
+    top: 48,
+    left: spacing.md,
+    right: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  timer: { color: '#fff', fontWeight: '800', fontSize: 16 },
+  cameraIconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  cameraBottomBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 36,
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  cameraHint: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  shutter: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 4,
+    borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recordInner: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: colors.primary,
+  },
+  stopInner: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: colors.primary,
+  },
 });

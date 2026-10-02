@@ -1,10 +1,15 @@
+import { File as ExpoFsFile } from 'expo-file-system';
 import { getSupabaseAnonKey, getSupabaseUrl } from '../config/supabase';
 import { getSupabaseClient } from '../lib/supabase';
 import {
   INTRO_VIDEO_BUCKET,
   buildIntroVideoObjectPath,
   introVideoExtension,
+  introVideoHttpErrorMessage,
+  introVideoNetworkErrorMessage,
+  introVideoObjectsToDelete,
   introVideoPlaybackUrl,
+  introVideoTooLargeMessage,
   isIntroVideoTooLarge,
   isSafeIntroVideoPath,
 } from '../utils/introVideo';
@@ -29,23 +34,52 @@ async function accessToken(): Promise<string> {
   return token;
 }
 
-function uploadErrorMessage(status: number, body: string): string {
-  const lower = body.toLowerCase();
-  if (status === 413 || lower.includes('payload') || lower.includes('too large') || lower.includes('maximum')) {
-    return 'El video pesa más de 30 MB. Volvé a grabarlo, más corto.';
-  }
-  if (status === 415 || lower.includes('mime')) {
-    return 'Solo se aceptan videos MP4 o MOV.';
-  }
-  if (lower.includes('intro_video') || lower.includes('schema') || lower.includes('function')) {
-    return 'El video se subió, pero falta aplicar el SQL del video en Supabase.';
-  }
-  return 'No se pudo subir el video. Probá de nuevo.';
+function positiveSize(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value) || value <= 0) return null;
+  return value;
 }
 
-function uploadWithXhr(params: {
+/** `File.size` no está en el tipo web del módulo; en el teléfono `info().size` sí. */
+export function measureLocalVideoFile(uri: string): number | null {
+  try {
+    const file = new ExpoFsFile(uri) as ExpoFsFile & {
+      info?: () => { size?: number | null };
+    };
+    return positiveSize(file.info?.().size);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Lee el video con el File de expo-file-system (file:// y content://).
+ * No usar xhr.send({ uri }): en RN 0.81 Android eso pasa por ContentResolver,
+ * que no abre file:// y responde «Could not retrieve file for uri…» como
+ * error de red. iOS trata esa URI como un request y también cae en onerror.
+ * Un clip de 2 s fallaba igual que uno grande, con «revisá tu conexión».
+ */
+async function readLocalVideoBytes(uri: string): Promise<Uint8Array> {
+  try {
+    const bytes = new Uint8Array(await new ExpoFsFile(uri).arrayBuffer());
+    if (bytes.byteLength > 0) return bytes;
+  } catch {
+    /* fetch de respaldo, mismo patrón que el avatar */
+  }
+  try {
+    const res = await fetch(uri);
+    if (res.ok) {
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes.byteLength > 0) return bytes;
+    }
+  } catch {
+    /* abajo */
+  }
+  throw new Error('No se pudo leer el video en el teléfono. Volvé a grabarlo.');
+}
+
+function uploadBytesWithXhr(params: {
   url: string;
-  fileUri: string;
+  bytes: Uint8Array;
   token: string;
   mime: string;
   onProgress?: UploadProgress;
@@ -64,16 +98,14 @@ function uploadWithXhr(params: {
       }
     };
     xhr.onload = () => resolve({ status: xhr.status, body: xhr.responseText ?? '' });
-    xhr.onerror = () => reject(new Error('No se pudo subir el video. Revisá tu conexión.'));
+    xhr.onerror = () => {
+      const native = typeof xhr.responseText === 'string' ? xhr.responseText : '';
+      reject(new Error(introVideoNetworkErrorMessage(native)));
+    };
     xhr.ontimeout = () =>
       reject(new Error('La subida tardó demasiado. Probá de nuevo con mejor señal.'));
-    const fileName = params.fileUri.split('/').pop()?.split('?')[0] || 'intro.mp4';
-    // RN manda el archivo por URI (sin pasarlo por el fetch de 32 s de Supabase).
-    xhr.send({
-      uri: params.fileUri,
-      type: params.mime,
-      name: fileName,
-    } as unknown as XMLHttpRequestBodyInit);
+    // Uint8Array → base64 en el bridge de RN y body binario con el Content-Type de arriba.
+    xhr.send(params.bytes as unknown as XMLHttpRequestBodyInit);
   });
 }
 
@@ -119,6 +151,30 @@ async function removeStorageObject(path: string | null | undefined): Promise<voi
   }
 }
 
+/** Borra intros viejos de la carpeta del dueño. No toca `keepPath`. */
+async function removeReplacedIntroVideos(keepPath: string, previousPath?: string | null): Promise<void> {
+  if (previousPath && previousPath !== keepPath) {
+    await removeStorageObject(previousPath);
+  }
+  const folder = keepPath.split('/')[0] ?? '';
+  if (!folder) return;
+  const sb = getSupabaseClient();
+  const { data, error } = await sb.storage.from(INTRO_VIDEO_BUCKET).list(folder, { limit: 100 });
+  if (error) {
+    console.warn('[intro-video] no se pudo listar videos viejos', error.message);
+    return;
+  }
+  const names = (data ?? [])
+    .map((item) => item.name)
+    .filter((name): name is string => typeof name === 'string');
+  const stale = introVideoObjectsToDelete(names, folder, keepPath);
+  if (stale.length === 0) return;
+  const { error: rmErr } = await sb.storage.from(INTRO_VIDEO_BUCKET).remove(stale);
+  if (rmErr) {
+    console.warn('[intro-video] no se pudieron borrar videos viejos', rmErr.message);
+  }
+}
+
 export async function saveIntroVideoFromUri(params: {
   userId: string;
   localUri: string;
@@ -127,8 +183,9 @@ export async function saveIntroVideoFromUri(params: {
   previousPath?: string | null;
   onProgress?: UploadProgress;
 }): Promise<{ path: string; playbackUrl: string }> {
-  if (isIntroVideoTooLarge(params.fileSize)) {
-    throw new Error('El video pesa más de 30 MB. Volvé a grabarlo, más corto.');
+  const knownSize = measureLocalVideoFile(params.localUri) ?? positiveSize(params.fileSize);
+  if (isIntroVideoTooLarge(knownSize)) {
+    throw new Error(introVideoTooLargeMessage(knownSize));
   }
 
   const path = buildIntroVideoObjectPath(params.userId, introVideoExtension(params.mime));
@@ -139,17 +196,24 @@ export async function saveIntroVideoFromUri(params: {
   const token = await accessToken();
   const url = storageObjectUrl(path);
   params.onProgress?.(0);
+  const bytes = await readLocalVideoBytes(params.localUri);
+  if (isIntroVideoTooLarge(bytes.byteLength)) {
+    throw new Error(introVideoTooLargeMessage(bytes.byteLength));
+  }
 
-  const uploaded = await uploadWithXhr({
+  const uploaded = await uploadBytesWithXhr({
     url,
-    fileUri: params.localUri,
+    bytes,
     token,
     mime: params.mime,
     onProgress: params.onProgress,
   });
 
+  if (uploaded.status === 0) {
+    throw new Error(introVideoNetworkErrorMessage(uploaded.body));
+  }
   if (uploaded.status < 200 || uploaded.status >= 300) {
-    throw new Error(uploadErrorMessage(uploaded.status, uploaded.body));
+    throw new Error(introVideoHttpErrorMessage(uploaded.status, uploaded.body));
   }
 
   try {
@@ -159,9 +223,7 @@ export async function saveIntroVideoFromUri(params: {
     throw e;
   }
 
-  if (params.previousPath && params.previousPath !== path) {
-    await removeStorageObject(params.previousPath);
-  }
+  await removeReplacedIntroVideos(path, params.previousPath);
 
   const playbackUrl = playbackUrlForPath(path);
   if (!playbackUrl) throw new Error('No se pudo armar el enlace del video.');
