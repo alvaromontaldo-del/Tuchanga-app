@@ -88,9 +88,9 @@ El costo de servicio de materiales es otra función (`calculate_material_service
 | `obtener_pin_cliente` | Cliente | PIN post-seña |
 | `verificar_pin` | Trabajador | → `en_curso` |
 | `obtener_direccion_cliente` | Trabajador | Post-seña |
-| `recotizar_en_curso` | Trabajador | Nueva neto; A/B/C según diferencia |
-| `aceptar_recotizacion` | Cliente | |
-| `rechazar_recotizacion` | Cliente | → `finalizado` + crédito 90% |
+| `recotizar_en_curso` | Trabajador | (#4) Monto nuevo + fundamentos, con PIN validado. Queda pendiente del cliente; una sola a la vez; no mientras falte pagar una diferencia |
+| `aceptar_recotizacion` | Cliente | Aplica el monto. Si sube el costo de servicio, `estado_pago` → `pendiente_seña` y el checkout cobra solo la diferencia (`diferencia_seña`); hasta acreditarla no se puede marcar realizado |
+| `rechazar_recotizacion` | Cliente | (#4) Sigue el monto original y el trabajo vuelve a `en_curso`. Ya no finaliza ni acredita crédito |
 | `cliente_notificar_pago_offline` | Cliente | Conciliación |
 | `trabajador_confirmar_recepcion_offline` | Trabajador | → `totalmente_pagado` |
 | `trabajador_finalizar_trabajo` | Trabajador | Pide conformidad |

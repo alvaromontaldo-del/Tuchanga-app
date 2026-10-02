@@ -20,6 +20,7 @@ type MessageMeta = {
   audience?: string;
   event?: string;
   diferencia?: number;
+  tipo_pago?: string;
 };
 
 type MessageRow = {
@@ -192,10 +193,13 @@ Deno.serve(async (req) => {
     body =
       "El profesional marcó el trabajo como finalizado. Podés dejar tu reseña.";
   } else if (event === "seña_pagada_trabajador") {
-    body =
-      "El costo de servicio YaChanga fue pagado. Revisá el chat para coordinar la visita.";
+    body = meta?.tipo_pago === "diferencia_seña"
+      ? "El cliente pagó la diferencia del costo de servicio. Ya podés marcar el trabajo como realizado."
+      : "El costo de servicio YaChanga fue pagado. Revisá el chat para coordinar la visita.";
   } else if (event === "seña_pagada_cliente") {
-    body = "Tu costo de servicio YaChanga fue acreditado. El saldo del trabajo se paga directo al profesional, fuera de la app.";
+    body = meta?.tipo_pago === "diferencia_seña"
+      ? "Pagaste la diferencia del costo de servicio YaChanga. El trabajo sigue en curso."
+      : "Tu costo de servicio YaChanga fue acreditado. El saldo del trabajo se paga directo al profesional, fuera de la app.";
   } else if (event === "saldo_pagado_trabajador") {
     body =
       "El cliente indicó que pagó el saldo. Confirmá la recepción del pago en el chat.";
