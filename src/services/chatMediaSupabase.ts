@@ -9,6 +9,7 @@ import { mapChatSendError } from '../utils/chatErrors';
 import { normalizeLocalImageUri } from '../utils/normalizeLocalImage';
 import { storageOwnerFolder } from '../utils/storageOwnerFolder';
 import type { ApiMessage } from './chatApi';
+import { fetchMyProfileIdentity } from './profileIdentitySupabase';
 import { fetchMyProfilePrivate } from './supabaseUser';
 
 const IMAGE_BODY_PREVIEW = '📷 Foto';
@@ -45,14 +46,15 @@ async function resolveOwnerFolder(userId: string): Promise<string> {
   const {
     data: { user },
   } = await sb.auth.getUser();
-  const [nameRes, priv] = await Promise.all([
-    sb.from('profiles').select('apellido').eq('id', userId).maybeSingle(),
-    user?.id === userId ? fetchMyProfilePrivate() : Promise.resolve(null),
+  const isMe = user?.id === userId;
+  const [identity, priv] = await Promise.all([
+    isMe ? fetchMyProfileIdentity() : Promise.resolve(null),
+    isMe ? fetchMyProfilePrivate() : Promise.resolve(null),
   ]);
   return storageOwnerFolder({
     userId,
     dni: priv?.dni,
-    lastName: (nameRes.data as { apellido?: string | null } | null)?.apellido,
+    lastName: identity?.apellido,
   });
 }
 

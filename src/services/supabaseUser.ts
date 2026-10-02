@@ -1,6 +1,7 @@
 import type { PostgrestError, User } from '@supabase/supabase-js';
 import { File as ExpoFsFile } from 'expo-file-system';
 import { getSupabaseClient } from '../lib/supabase';
+import { fetchMyProfileIdentity } from './profileIdentitySupabase';
 import type { AuthUser, SignUpPayload } from './auth';
 import { normalizeDisplayAddress } from '../utils/formatAddress';
 import { storageOwnerFolder, userAuthDisplayName } from '../utils/storageOwnerFolder';
@@ -19,11 +20,13 @@ import { completedJobsFromPayload } from '../utils/workerReputation';
  * bio → p_bio → bio (si la migración y la función en BD lo incluyen)
  */
 
-/** Columnas de profiles que no son PII. DNI, teléfono, domicilio y nacimiento salen de get_my_profile_private. */
+/**
+ * Columnas de profiles que no son PII. DNI, teléfono, domicilio y nacimiento salen de
+ * get_my_profile_private; apellido y ubicación exacta, de get_my_profile_identity (#120).
+ */
 const PROFILE_PUBLIC_CORE =
-  'id,nombre,apellido,avatar_url,coverage_km,created_at,rating_average,review_count,total_jobs_done,professional_description' as const;
-const PROFILE_PUBLIC_WITH_LOC = `${PROFILE_PUBLIC_CORE},location` as const;
-const PROFILE_PUBLIC_FULL = `${PROFILE_PUBLIC_WITH_LOC},bio` as const;
+  'id,nombre,avatar_url,coverage_km,created_at,rating_average,review_count,total_jobs_done,professional_description' as const;
+const PROFILE_PUBLIC_FULL = `${PROFILE_PUBLIC_CORE},bio` as const;
 
 export type MyProfilePrivate = {
   dni: string | null;
@@ -97,10 +100,6 @@ async function fetchProfileRowForUser(userId: string): Promise<ProfileRow | null
   let res = await supabase.from('profiles').select(PROFILE_PUBLIC_FULL).eq('id', userId).maybeSingle();
 
   if (res.error) {
-    res = await supabase.from('profiles').select(PROFILE_PUBLIC_WITH_LOC).eq('id', userId).maybeSingle();
-  }
-
-  if (res.error) {
     res = await supabase.from('profiles').select(PROFILE_PUBLIC_CORE).eq('id', userId).maybeSingle();
   }
 
@@ -117,10 +116,20 @@ async function fetchProfileRowForUser(userId: string): Promise<ProfileRow | null
   } = await supabase.auth.getUser();
   if (user?.id !== userId) return row;
 
-  const priv = await fetchMyProfilePrivate();
-  if (!priv) return row;
+  const [priv, identity] = await Promise.all([fetchMyProfilePrivate(), fetchMyProfileIdentity()]);
+  const own: ProfileRow = identity
+    ? {
+        ...row,
+        apellido: identity.apellido,
+        location:
+          identity.lat != null && identity.lng != null
+            ? { type: 'Point', coordinates: [identity.lng, identity.lat] }
+            : null,
+      }
+    : row;
+  if (!priv) return own;
   return {
-    ...row,
+    ...own,
     dni: priv.dni,
     telefono: priv.telefono,
     direccion_texto: priv.direccion_texto,
@@ -614,8 +623,9 @@ export async function fetchProfileBaseLocation(
 
 /**
  * Domicilio registrado: texto (`direccion_texto`) + coordenadas si existen.
- * El texto de otro usuario no está en el select (PII). Las coordenadas salen
- * de `profiles.location`, que sigue siendo legible.
+ * Solo sirve para el propio usuario: el texto y las coordenadas de otro no se
+ * leen de profiles (PII, #120). Para el cliente de un chat se usa el RPC
+ * get_conversation_client_delivery_address.
  */
 export async function fetchProfileDeliveryAddress(userId: string): Promise<{
   address: string;

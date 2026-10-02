@@ -152,16 +152,22 @@ describe('vistas de cliente sin apellido ni inicial', () => {
     const posts = read('src/services/supabasePosts.ts');
     expect(posts).not.toMatch(/profiles\([^)]*apellido/);
 
+    // #120: ya nadie lee profiles.apellido directo. El profesional recibe el apellido
+    // de su cliente por get_peer_display_name; el cliente solo pide el nombre.
     const chat = read('src/services/chatSupabase.ts');
-    expect(chat).toContain("myRole === 'cliente' ? 'nombre,avatar_url' : 'nombre,apellido,avatar_url'");
+    expect(chat).toContain(".select('nombre,avatar_url')");
     expect(chat).toContain(".select('nombre')");
-    expect(chat).not.toContain(".select('nombre,apellido')");
+    expect(chat).not.toMatch(/select\([^)]*apellido/);
 
     const pushRoute = read('src/services/notificationRouting.ts');
-    expect(pushRoute).toContain("myRole === 'cliente' ? 'nombre' : 'nombre, apellido'");
+    expect(pushRoute).toContain(".select('nombre')");
+    expect(pushRoute).not.toMatch(/select\([^)]*apellido/);
+    expect(pushRoute).toContain("myRole === 'cliente' ? null : await fetchPeerFullName(otherId)");
 
     const pago = read('src/navigation/openPagoCheckout.ts');
-    expect(pago).toContain("myRole === 'cliente' ? 'nombre' : 'nombre,apellido'");
+    expect(pago).toContain(".select('nombre')");
+    expect(pago).not.toMatch(/select\([^)]*apellido/);
+    expect(pago).toContain("myRole === 'cliente' ? null : await fetchPeerFullName(otherId)");
 
     const pushFn = read('supabase/functions/push_on_message/index.ts');
     expect(pushFn).toContain('notifyingClient ? "nombre" : "nombre,apellido"');

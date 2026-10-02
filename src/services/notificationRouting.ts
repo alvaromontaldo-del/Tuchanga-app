@@ -2,6 +2,7 @@ import * as Notifications from 'expo-notifications';
 import { getSupabaseClient } from '../lib/supabase';
 import { navigationRef } from '../navigation/navigationRef';
 import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
+import { fetchPeerFullName } from './profileIdentitySupabase';
 
 function waitForNavigation(maxMs = 8000): Promise<boolean> {
   const start = Date.now();
@@ -48,17 +49,17 @@ async function openChatFromPush(conversationId: string): Promise<void> {
 
   const { data: profile } = await sb
     .from('profiles')
-    .select(myRole === 'cliente' ? 'nombre' : 'nombre, apellido')
+    .select('nombre')
     .eq('id', otherId)
     .maybeSingle();
 
-  const row = profile as { nombre?: string; apellido?: string } | null;
+  const row = profile as { nombre?: string } | null;
+  // #120: el apellido del cliente llega por RPC y solo al profesional de ese cliente.
+  const peerFullName = myRole === 'cliente' ? null : await fetchPeerFullName(otherId);
   const otherDisplayName =
     myRole === 'cliente'
       ? professionalDisplayNameForClient(row?.nombre)
-      : row
-        ? `${String(row.nombre ?? '').trim()} ${String(row.apellido ?? '').trim()}`.trim() || 'Usuario'
-        : 'Usuario';
+      : peerFullName || String(row?.nombre ?? '').trim() || 'Usuario';
 
   navigationRef.navigate('Main', {
     screen: 'Mensajes',
