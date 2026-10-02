@@ -44,6 +44,8 @@ const CONTRATACION_SELECT = [
   'recotizacion_precio_trabajador',
   'recotizacion_precio_final',
   'recotizacion_comision_app',
+  'recotizacion_fundamentos',
+  'recotizacion_id',
   'paid_at',
   'seña_pagada_at',
   'completed_by_worker_at',
@@ -141,6 +143,11 @@ function mapContratacionRow(r: Record<string, unknown>): Contratacion {
       r.recotizacion_precio_final != null ? toNum(r.recotizacion_precio_final) : null,
     recotizacion_comision_app:
       r.recotizacion_comision_app != null ? toNum(r.recotizacion_comision_app) : null,
+    recotizacion_fundamentos:
+      typeof r.recotizacion_fundamentos === 'string' && r.recotizacion_fundamentos.trim()
+        ? r.recotizacion_fundamentos.trim()
+        : null,
+    recotizacion_id: r.recotizacion_id != null ? String(r.recotizacion_id) : null,
     paid_at: (r.paid_at as string | null) ?? null,
     seña_pagada_at: (r.seña_pagada_at as string | null) ?? null,
     completed_by_worker_at: (r.completed_by_worker_at as string | null) ?? null,
@@ -744,11 +751,13 @@ export async function obtenerDireccionCliente(contratacionId: string): Promise<{
 export async function recotizarEnCurso(
   contratacionId: string,
   nuevoPrecioTrabajador: number,
+  fundamentos: string,
 ): Promise<void> {
   const sb = getSupabaseClient();
   const { error } = await sb.rpc('recotizar_en_curso', {
     p_contratacion_id: contratacionId,
     p_nuevo_precio_trabajador: nuevoPrecioTrabajador,
+    p_fundamentos: fundamentos.trim(),
   });
   if (error) throw error;
 }

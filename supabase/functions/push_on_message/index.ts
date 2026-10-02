@@ -16,13 +16,20 @@ type WebhookPayload<T> = {
   old_record: T | null;
 };
 
+type MessageMeta = {
+  audience?: string;
+  event?: string;
+  diferencia?: number;
+  tipo_pago?: string;
+};
+
 type MessageRow = {
   id: string;
   conversation_id: string;
   sender_id: string;
   body: string;
   type?: string;
-  metadata?: { audience?: string; event?: string } | string | null;
+  metadata?: MessageMeta | string | null;
   created_at?: string;
 };
 
@@ -89,12 +96,12 @@ Deno.serve(async (req) => {
     return json(200, { ok: true, ignored: true });
   }
 
-  let meta: { audience?: string; event?: string } | null = null;
+  let meta: MessageMeta | null = null;
   if (msg.metadata && typeof msg.metadata === "object") {
     meta = msg.metadata;
   } else if (typeof msg.metadata === "string") {
     try {
-      meta = JSON.parse(msg.metadata) as { audience?: string; event?: string };
+      meta = JSON.parse(msg.metadata) as MessageMeta;
     } catch {
       meta = null;
     }
@@ -186,10 +193,13 @@ Deno.serve(async (req) => {
     body =
       "El profesional marcó el trabajo como finalizado. Podés dejar tu reseña.";
   } else if (event === "seña_pagada_trabajador") {
-    body =
-      "El costo de servicio YaChanga fue pagado. Revisá el chat para coordinar la visita.";
+    body = meta?.tipo_pago === "diferencia_seña"
+      ? "El cliente pagó la diferencia del costo de servicio. Ya podés marcar el trabajo como realizado."
+      : "El costo de servicio YaChanga fue pagado. Revisá el chat para coordinar la visita.";
   } else if (event === "seña_pagada_cliente") {
-    body = "Tu costo de servicio YaChanga fue acreditado. El saldo del trabajo se paga directo al profesional, fuera de la app.";
+    body = meta?.tipo_pago === "diferencia_seña"
+      ? "Pagaste la diferencia del costo de servicio YaChanga. El trabajo sigue en curso."
+      : "Tu costo de servicio YaChanga fue acreditado. El saldo del trabajo se paga directo al profesional, fuera de la app.";
   } else if (event === "saldo_pagado_trabajador") {
     body =
       "El cliente indicó que pagó el saldo. Confirmá la recepción del pago en el chat.";
@@ -200,6 +210,21 @@ Deno.serve(async (req) => {
     body = "El profesional confirmó que recibió el pago del saldo.";
   } else if (event === "saldo_confirmado_trabajador") {
     body = "Confirmaste la recepción del saldo. El trabajo quedó pagado.";
+  } else if (event === "recotizacion_propuesta") {
+    body = "El profesional propuso un nuevo monto. Aceptalo o rechazalo en el chat.";
+  } else if (event === "recotizacion_propuesta_trabajador") {
+    body = "Enviaste una recotización. El cliente tiene que aceptarla o rechazarla.";
+  } else if (event === "recotizacion_aceptada") {
+    const diff = Number(meta?.diferencia ?? 0);
+    body = audience === "trabajador"
+      ? "El cliente aceptó la recotización. El trabajo sigue con el monto nuevo."
+      : diff > 0
+        ? "Aceptaste la recotización. Falta pagar la diferencia del costo de servicio YaChanga."
+        : "Aceptaste la recotización. El trabajo sigue con el monto nuevo.";
+  } else if (event === "recotizacion_rechazada") {
+    body = audience === "trabajador"
+      ? "El cliente rechazó la recotización. El trabajo sigue con el monto original."
+      : "Rechazaste la recotización. El trabajo sigue con el monto original.";
   } else if (event === "precio_aceptado_trabajador") {
     const { data: clientProf } = await sb
       .from("profiles")

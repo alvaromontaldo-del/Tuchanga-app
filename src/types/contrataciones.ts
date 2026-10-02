@@ -29,6 +29,8 @@ export type Contratacion = {
   recotizacion_precio_trabajador: number | null;
   recotizacion_precio_final: number | null;
   recotizacion_comision_app: number | null;
+  recotizacion_fundamentos: string | null;
+  recotizacion_id: string | null;
   paid_at: string | null;
   seña_pagada_at: string | null;
   completed_by_worker_at: string | null;
@@ -74,7 +76,11 @@ export type ChatSystemEvent =
   | 'saldo_pagado_cliente'
   | 'saldo_pagado_trabajador'
   | 'saldo_confirmado_cliente'
-  | 'saldo_confirmado_trabajador';
+  | 'saldo_confirmado_trabajador'
+  | 'recotizacion_propuesta'
+  | 'recotizacion_propuesta_trabajador'
+  | 'recotizacion_aceptada'
+  | 'recotizacion_rechazada';
 
 export type QuotationMessageMetadata = {
   contratacion_id: string;
