@@ -28,6 +28,8 @@ export type SearchableWorker = {
   lng: number;
   /** Radio en km: solo aparece si el cliente está a ≤ esta distancia. */
   coverageKm: number;
+  /** Marcó «Atiendo urgencias». Ausente = no. */
+  atiendeUrgencias?: boolean;
 };
 
 export type SearchWorkerHit = {

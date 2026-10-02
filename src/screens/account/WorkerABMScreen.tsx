@@ -9,6 +9,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -39,6 +40,16 @@ import {
   persistProfessionalDescriptionInSupabase,
 } from '../../services/supabaseUser';
 import { fetchSearchWorkerHitsFromSupabase } from '../../services/searchWorkersSupabase';
+import {
+  fetchMyAtiendeUrgencias,
+  isMissingUrgenciasSchema,
+  setMyAtiendeUrgencias,
+} from '../../services/urgenciasSupabase';
+import {
+  ATIENDE_URGENCIAS_HINT,
+  ATIENDE_URGENCIAS_TITLE,
+  toggleAtiendeUrgencias,
+} from '../../utils/urgencias';
 import type { AuthUser } from '../../services/auth';
 
 type Props = AccountStackScreenProps<'WorkerABM'>;
@@ -209,6 +220,8 @@ export function WorkerABMScreen({ navigation }: Props) {
     () => workerProfile?.trades?.length ? workerProfile.trades : [newTrade({ isPrimary: true })],
   );
   const [saving, setSaving] = useState(false);
+  const [atiendeUrgencias, setAtiendeUrgencias] = useState(false);
+  const urgenciasTouched = useRef(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [deleteBanner, setDeleteBanner] = useState<string>('');
 
@@ -240,6 +253,8 @@ export function WorkerABMScreen({ navigation }: Props) {
     setProfessionalDescription('');
     setTrades([newTrade({ isPrimary: true })]);
     setCoverageKm('10');
+    urgenciasTouched.current = false;
+    setAtiendeUrgencias(false);
   }, [userId]);
 
   // Hidratar desde storage (perfil trabajador local) cuando esté disponible.
@@ -269,6 +284,18 @@ export function WorkerABMScreen({ navigation }: Props) {
       );
     }
   }, [workerProfile, user?.baseLocation?.lat, user?.baseLocation?.lng, user?.worker?.coverageKm, user?.worker?.trades]);
+
+  useEffect(() => {
+    if (!userId || !isSupabaseConfigured()) return;
+    let cancelled = false;
+    void fetchMyAtiendeUrgencias().then((value) => {
+      if (cancelled || urgenciasTouched.current) return;
+      setAtiendeUrgencias(value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   function setPrimary(idx: number) {
     setTrades((prev) => prev.map((t, i) => ({ ...t, isPrimary: i === idx })));
@@ -426,6 +453,21 @@ export function WorkerABMScreen({ navigation }: Props) {
                 isPrimary: t.isPrimary,
               })),
             });
+          }
+
+          try {
+            await setMyAtiendeUrgencias(atiendeUrgencias);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : '';
+            if (atiendeUrgencias || !isMissingUrgenciasSchema(msg)) {
+              toast.warning(
+                `El resto del perfil se guardó, pero no pudimos guardar «Atiendo urgencias».\n\n${
+                  msg || 'Error desconocido.'
+                }`,
+                'Urgencias',
+                { durationMs: 4200 },
+              );
+            }
           }
 
           // Verificación rápida: el RPC debería devolver al menos este usuario si quedó visible.
@@ -797,6 +839,23 @@ export function WorkerABMScreen({ navigation }: Props) {
             ) : null}
             </View>
 
+            <View style={styles.urgenciasCard}>
+              <View style={styles.urgenciasText}>
+                <Text style={styles.urgenciasTitle}>{ATIENDE_URGENCIAS_TITLE}</Text>
+                <Text style={styles.fieldHint}>{ATIENDE_URGENCIAS_HINT}</Text>
+              </View>
+              <Switch
+                value={atiendeUrgencias}
+                onValueChange={() => {
+                  urgenciasTouched.current = true;
+                  setAtiendeUrgencias((current) => toggleAtiendeUrgencias(current));
+                }}
+                accessibilityLabel={ATIENDE_URGENCIAS_TITLE}
+                trackColor={{ false: '#D1D5DB', true: '#FDBA74' }}
+                thumbColor={atiendeUrgencias ? '#E65100' : '#F3F4F6'}
+              />
+            </View>
+
             {isSupabaseConfigured() && userId ? <IntroVideoEditor userId={userId} /> : null}
 
             <View style={styles.actionsSpacer} />
@@ -950,6 +1009,24 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginBottom: spacing.sm,
     lineHeight: 18,
+  },
+  urgenciasCard: {
+    marginTop: spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radii.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+  },
+  urgenciasText: { flex: 1, minWidth: 0 },
+  urgenciasTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.text,
+    marginBottom: 4,
   },
   yearsInput: {
     width: 80,

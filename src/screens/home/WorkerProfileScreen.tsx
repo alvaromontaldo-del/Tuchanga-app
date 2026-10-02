@@ -27,8 +27,10 @@ import { openAuthModal } from '../../navigation/openAuthModal';
 import { openOrCreateChat } from '../../services/messaging';
 import { fetchWorkerPublicProfileFromSupabase } from '../../services/workerProfileSupabase';
 import { IntroVideoPlayer } from '../../components/profile/IntroVideoPlayer';
+import { UrgenciasBadge } from '../../components/search/UrgenciasBadge';
 import { StarRating } from '../../components/profile/StarRating';
 import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
+import { urgenciasBadgeView } from '../../utils/urgencias';
 import { canShowWorkerReputation } from '../../utils/workerReputation';
 import type {
   AccountStackScreenProps,
@@ -390,6 +392,11 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
 
         <ClickableAvatar uri={worker.avatarUrl} style={styles.avatar} />
         <Text style={styles.name}>{workerFirst}</Text>
+        {urgenciasBadgeView(worker.atiendeUrgencias) ? (
+          <View style={styles.urgenciasWrap}>
+            <UrgenciasBadge />
+          </View>
+        ) : null}
         {worker.introVideoUrl ? <IntroVideoPlayer uri={worker.introVideoUrl} /> : null}
         {ageLabel ? <Text style={styles.age}>{ageLabel}</Text> : null}
 
@@ -602,6 +609,10 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.textSecondary,
     textAlign: 'center',
+  },
+  urgenciasWrap: {
+    alignItems: 'center',
+    marginTop: spacing.sm,
   },
   tradesSummary: {
     flexDirection: 'row',
