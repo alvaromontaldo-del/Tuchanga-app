@@ -94,8 +94,14 @@ describe('toggle Atiendo urgencias', () => {
     expect(screen).toContain('ATIENDE_URGENCIAS_HINT');
     expect(screen).toContain('<Switch');
     expect(screen).toContain('toggleAtiendeUrgencias(current)');
-    expect(screen).toContain('setMyAtiendeUrgencias(atiendeUrgencias)');
+    expect(screen).toContain('setMyAtiendeUrgencias(atiendeUrgenciasAlGuardar)');
     expect(screen).toContain('title="Guardar"');
+    const descriptionPatch = screen.indexOf('await persistProfessionalDescriptionInSupabase');
+    const syncCatch = screen.indexOf("'Sincronización'");
+    const urgenciasCall = screen.indexOf('await setMyAtiendeUrgencias(atiendeUrgenciasAlGuardar)');
+    expect(descriptionPatch).toBeGreaterThan(0);
+    expect(syncCatch).toBeGreaterThan(descriptionPatch);
+    expect(urgenciasCall).toBeGreaterThan(syncCatch);
     expect(isMissingUrgenciasSchema('function set_my_atiende_urgencias does not exist')).toBe(true);
     expect(isMissingUrgenciasSchema('permission denied')).toBe(false);
   });
