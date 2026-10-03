@@ -11,10 +11,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/nominatim';
 import {
   activeStreetQuery,
+  addressToPersist,
   emptyAddressSearchMessage,
   isIgnorableAddressEcho,
+  isNegligiblePinMove,
   visibleSuggestionAddress,
 } from '../../utils/streetAddressQuery';
+import { LocationMap } from './LocationMap';
 import { colors, radii, spacing } from '../../constants/theme';
 import { getHighAccuracyPosition } from '../../utils/deviceGeolocation';
 
@@ -36,6 +39,12 @@ type Props = {
   near?: { lat: number; lng: number } | null;
   /** Muestra «Usar ubicación actual». El alta de comercio lo apaga. */
   showUseCurrentLocation?: boolean;
+  /**
+   * Mapa con pin movible al tener coordenadas.
+   * Mismo patrón que el registro de cliente/profesional: elegir sugerencia → mapa.
+   * No agrega «Ubicarme»: el alta de comercio no debe ofrecer GPS del local.
+   */
+  showMap?: boolean;
 };
 
 /**
@@ -53,6 +62,7 @@ export function AddressDeliveryField({
   placeholder = 'Calle, altura, localidad',
   near,
   showUseCurrentLocation = true,
+  showMap = false,
 }: Props) {
   const [searching, setSearching] = useState(false);
   const [locating, setLocating] = useState(false);
@@ -64,6 +74,12 @@ export function AddressDeliveryField({
   const typedQueryRef = useRef<string | null>(null);
   const programmaticQueryRef = useRef<string | null>(null);
   const echoUntilRef = useRef(0);
+  const confirmedLabelRef = useRef<string | null>(null);
+  const pinMovedRef = useRef(false);
+  const pickedPointRef = useRef<{ lat: number; lng: number } | null>(null);
+  const reverseReqRef = useRef(0);
+  const geoRef = useRef(geo);
+  geoRef.current = geo;
 
   const commitText = useCallback((next: string) => {
     programmaticQueryRef.current = next.trim();
@@ -129,7 +145,50 @@ export function AddressDeliveryField({
     return () => clearTimeout(t);
   }, [value, runGeocode]);
 
+  const refineAddressFromPin = useCallback(
+    async (lat: number, lng: number) => {
+      const reqId = ++reverseReqRef.current;
+      try {
+        const addr = await reverseNominatimStreet(lat, lng);
+        if (reqId !== reverseReqRef.current || !addr) return;
+        const typed = typedQueryRef.current;
+        const kept = addressToPersist({
+          typedQuery: typed,
+          confirmedLabel: confirmedLabelRef.current,
+          currentLabel: addr,
+          pinMoved: pinMovedRef.current,
+        });
+        confirmedLabelRef.current = kept;
+        commitText(kept);
+        onGeoChange({ address: kept, lat, lng });
+      } catch {
+        /* si Nominatim falla, quedan las coordenadas del pin */
+      }
+    },
+    [commitText, onGeoChange],
+  );
+
+  const onMapPinMoved = useCallback(
+    (lat: number, lng: number) => {
+      const current = geoRef.current;
+      const origin =
+        pickedPointRef.current ?? (current ? { lat: current.lat, lng: current.lng } : null);
+      if (isNegligiblePinMove(origin, { lat, lng })) return;
+      pinMovedRef.current = true;
+      pickedPointRef.current = { lat, lng };
+      const address = current?.address ?? '';
+      onGeoChange({ address, lat, lng });
+      const id = ++reverseReqRef.current;
+      setTimeout(() => {
+        if (id !== reverseReqRef.current) return;
+        void refineAddressFromPin(lat, lng);
+      }, 550);
+    },
+    [onGeoChange, refineAddressFromPin],
+  );
+
   const locateMe = useCallback(async () => {
+    reverseReqRef.current += 1;
     setLocating(true);
     try {
       const result = await getHighAccuracyPosition();
@@ -137,6 +196,8 @@ export function AddressDeliveryField({
       const { lat, lng } = result.position;
       setDevicePos({ lat, lng });
       typedQueryRef.current = null;
+      pinMovedRef.current = false;
+      pickedPointRef.current = { lat, lng };
       let address = value.trim();
       try {
         const rev = await reverseNominatimStreet(lat, lng);
@@ -147,7 +208,9 @@ export function AddressDeliveryField({
       } catch {
         /* keep text */
       }
-      onGeoChange({ address: address || 'Ubicación actual', lat, lng });
+      const resolved = address || 'Ubicación actual';
+      confirmedLabelRef.current = resolved;
+      onGeoChange({ address: resolved, lat, lng });
       setResults([]);
       setSettledQuery('');
     } finally {
@@ -175,8 +238,12 @@ export function AddressDeliveryField({
               ) {
                 return;
               }
+              reverseReqRef.current += 1;
               typedQueryRef.current = t;
               programmaticQueryRef.current = null;
+              confirmedLabelRef.current = null;
+              pinMovedRef.current = false;
+              pickedPointRef.current = null;
               onChangeText(t);
               onGeoChange(null);
             }}
@@ -230,7 +297,11 @@ export function AddressDeliveryField({
               style={styles.resultRow}
               onPress={() => {
                 const typed = activeStreetQuery(value, typedQueryRef.current);
+                reverseReqRef.current += 1;
                 typedQueryRef.current = typed;
+                confirmedLabelRef.current = label;
+                pinMovedRef.current = false;
+                pickedPointRef.current = { lat: r.lat, lng: r.lng };
                 commitText(label);
                 onGeoChange({ address: label, lat: r.lat, lng: r.lng });
                 setResults([]);
@@ -259,6 +330,15 @@ export function AddressDeliveryField({
             {geo.address} · {geo.lat.toFixed(4)}, {geo.lng.toFixed(4)}
           </Text>
         </View>
+      ) : null}
+
+      {showMap && geo ? (
+        <LocationMap
+          geo={{ lat: geo.lat, lng: geo.lng }}
+          coverageMeters={0}
+          showCoverage={false}
+          onPinMoved={onMapPinMoved}
+        />
       ) : null}
     </View>
   );

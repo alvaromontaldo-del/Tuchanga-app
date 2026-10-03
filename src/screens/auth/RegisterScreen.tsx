@@ -981,9 +981,14 @@ export function RegisterScreen({ navigation, route }: Props) {
                 </Pressable>
                 {errors.storeAvatar ? <Text style={styles.error}>{errors.storeAvatar}</Text> : null}
 
+                <Text style={styles.hint}>
+                  Buscá la calle y elegí una sugerencia para ver el mapa. Si no queda exacto, mové el
+                  pin.
+                </Text>
                 <AddressDeliveryField
                   label="Dirección del comercio *"
                   showUseCurrentLocation={false}
+                  showMap
                   value={storeAddress}
                   onChangeText={(t) => {
                     setStoreAddress(t);
@@ -1013,20 +1018,6 @@ export function RegisterScreen({ navigation, route }: Props) {
                 />
                 {errors.storeAddress ? <Text style={styles.error}>{errors.storeAddress}</Text> : null}
                 {errors.storeLocation ? <Text style={styles.error}>{errors.storeLocation}</Text> : null}
-                {storeLat != null && storeLng != null ? (
-                  <View style={styles.storeMap}>
-                    <LocationMap
-                      geo={{ lat: storeLat, lng: storeLng }}
-                      coverageMeters={0}
-                      showCoverage={false}
-                      onPinMoved={(lat, lng) => {
-                        setStoreLat(lat);
-                        setStoreLng(lng);
-                        setErrors((p) => ({ ...p, storeLocation: undefined }));
-                      }}
-                    />
-                  </View>
-                ) : null}
 
                 <Text style={styles.fieldLabelStatic}>Rubros * (podés elegir varios)</Text>
                 <Text style={styles.hint}>
@@ -1903,12 +1894,6 @@ const styles = StyleSheet.create({
   avatarTitle: { fontSize: 15, fontWeight: '800', color: colors.text },
   avatarHint: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
   storeAvatarGap: { marginTop: spacing.sm, marginBottom: spacing.md },
-  storeMap: {
-    height: 220,
-    borderRadius: radii.input,
-    overflow: 'hidden',
-    marginBottom: spacing.md,
-  },
   row2: { flexDirection: 'row', gap: spacing.md },
   col: { flex: 1 },
   phoneBlock: { marginBottom: spacing.md },
