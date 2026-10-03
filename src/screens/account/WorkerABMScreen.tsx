@@ -437,6 +437,14 @@ export function WorkerABMScreen({ navigation }: Props) {
       await saveWorkerProfile(profile);
 
       if (isSupabaseConfigured()) {
+        // El valor que el profesional dejó en el switch al tocar Guardar.
+        // No se lee después de los await: un efecto no puede pisarlo a mitad de camino.
+        const atiendeUrgenciasAlGuardar = atiendeUrgencias;
+        // Solo si tocó el switch. Si la lectura inicial falló (queda en false),
+        // guardar el resto del perfil no le apaga «Atiendo urgencias».
+        const guardarUrgencias = urgenciasTouched.current;
+        let profileSyncFailed = false;
+
         try {
           await persistWorkerGeoToSupabase(profile.baseLocation, profile.coverageKm);
           await persistProfessionalDescriptionInSupabase(profile.professionalDescription);
@@ -455,25 +463,6 @@ export function WorkerABMScreen({ navigation }: Props) {
             });
           }
 
-          // Solo si el profesional tocó el switch: si la lectura inicial falló
-          // (queda en false), guardar el perfil no le apaga «Atiendo urgencias».
-          if (urgenciasTouched.current) {
-            try {
-              await setMyAtiendeUrgencias(atiendeUrgencias);
-            } catch (e) {
-              const msg = e instanceof Error ? e.message : '';
-              if (atiendeUrgencias || !isMissingUrgenciasSchema(msg)) {
-                toast.warning(
-                  `El resto del perfil se guardó, pero no pudimos guardar «Atiendo urgencias».\n\n${
-                    msg || 'Error desconocido.'
-                  }`,
-                  'Urgencias',
-                  { durationMs: 4200 },
-                );
-              }
-            }
-          }
-
           // Verificación rápida: el RPC debería devolver al menos este usuario si quedó visible.
           const probe = await fetchSearchWorkerHitsFromSupabase({
             clientLat: profile.baseLocation.lat,
@@ -490,6 +479,7 @@ export function WorkerABMScreen({ navigation }: Props) {
             );
           }
         } catch (e) {
+          profileSyncFailed = true;
           toast.warning(
             `Guardamos en el dispositivo, pero no se pudo sincronizar el perfil profesional en el servidor.\n\n${
               e instanceof Error ? e.message : 'Error desconocido.'
@@ -497,6 +487,27 @@ export function WorkerABMScreen({ navigation }: Props) {
             'Sincronización',
             { durationMs: 5200 },
           );
+        }
+
+        // Propio try: el PATCH de la descripción responde 403 (authenticated no
+        // tiene UPDATE sobre profiles, salvo expo_push_token). Si este RPC queda
+        // en ese try, el 403 corta el guardado y el check no se persiste.
+        if (guardarUrgencias) {
+          try {
+            await setMyAtiendeUrgencias(atiendeUrgenciasAlGuardar);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : '';
+            if (atiendeUrgenciasAlGuardar || !isMissingUrgenciasSchema(msg)) {
+              const detail = msg || 'Error desconocido.';
+              toast.warning(
+                profileSyncFailed
+                  ? `No pudimos guardar «Atiendo urgencias».\n\n${detail}`
+                  : `El resto del perfil se guardó, pero no pudimos guardar «Atiendo urgencias».\n\n${detail}`,
+                'Urgencias',
+                { durationMs: 4200 },
+              );
+            }
+          }
         }
       }
 
