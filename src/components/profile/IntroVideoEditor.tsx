@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Camera, CameraView } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { forwardRef, memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,13 +15,15 @@ import {
 import { colors, radii, spacing } from '../../constants/theme';
 import {
   deleteIntroVideo,
+  deleteStagedIntroVideo,
   fetchIntroVideoPath,
-  measureLocalVideoFile,
   playbackUrlForPath,
   saveIntroVideoFromUri,
+  stageIntroVideoFile,
 } from '../../services/introVideoSupabase';
 import {
   INTRO_VIDEO_MAX_SECONDS,
+  INTRO_VIDEO_PREVIEW_SIZE,
   INTRO_VIDEO_RECORD_MAX_BYTES,
   INTRO_VIDEO_RECORD_QUALITY,
   INTRO_VIDEO_TARGET_VIDEO_BPS,
@@ -49,17 +51,44 @@ type Draft = {
   source: 'camera' | 'picker';
 };
 
-function measuredFileSize(uri: string, fallback?: number | null): number | null {
-  return measureLocalVideoFile(uri) ?? (fallback != null && Number.isFinite(fallback) && fallback > 0 ? fallback : null);
-}
+const ANDROID_PREVIEW =
+  Platform.OS === 'android' ? { pictureSize: INTRO_VIDEO_PREVIEW_SIZE } : null;
+
+/**
+ * El contador del modal se actualiza seguido. Si la cámara se vuelve a renderizar
+ * con él, la preview se traba. Este hijo solo cambia cuando cambian sus props.
+ */
+const IntroVideoCameraPreview = memo(
+  forwardRef<CameraView, { onReady: () => void; onError: () => void }>(function IntroVideoCameraPreview(
+    { onReady, onError },
+    ref,
+  ) {
+    return (
+      <CameraView
+        ref={ref}
+        style={styles.camera}
+        facing="front"
+        mode="video"
+        mute={false}
+        videoQuality={INTRO_VIDEO_RECORD_QUALITY}
+        videoBitrate={INTRO_VIDEO_TARGET_VIDEO_BPS}
+        videoStabilizationMode="off"
+        {...(ANDROID_PREVIEW ?? {})}
+        onCameraReady={onReady}
+        onMountError={onError}
+      />
+    );
+  }),
+);
 
 /**
  * Graba con la cámara que ya está en el binario (expo-camera 17) en Android y iOS:
- * 480p, 400 kbps y corte a los 7 MB (el bucket acepta 10).
+ * 480p, 320 kbps y corte a los 6 MB (el bucket acepta 10). Hasta 20 segundos.
  * iOS además pide codec H.264 en recordAsync; sin eso el bitrate no aplica.
  * Sin ExpoCamera, cae al picker: en iOS recomprime a 640×480; en Android el
  * sistema no comprime y, si el archivo se pasa, se avisa en español.
- * Guardar sube el archivo; descartar no toca el perfil.
+ * El peso que se muestra es el del archivo copiado que después se sube.
+ * Guardar sube ese archivo; descartar no toca el perfil.
  */
 export function IntroVideoEditor({ userId }: Props) {
   const toast = useAppToast();
@@ -78,6 +107,7 @@ export function IntroVideoEditor({ userId }: Props) {
   const [cameraReady, setCameraReady] = useState(false);
   const [recording, setRecording] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
+  const [preparing, setPreparing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,26 +127,42 @@ export function IntroVideoEditor({ userId }: Props) {
   }, [userId]);
 
   const acceptRecorded = useCallback(
-    (uri: string, fileSize?: number | null, source: 'camera' | 'picker' = 'camera') => {
-      const size = measuredFileSize(uri, fileSize);
-      if (isIntroVideoTooLarge(size)) {
-        toast.error(introVideoTooLargeMessage(size, source), 'Video', { durationMs: 5200 });
-        return;
-      }
-      const mime = introVideoMimeFromAsset({ uri });
-      if (!mime) {
-        toast.error('Solo se aceptan videos MP4 o MOV. Volvé a grabarlo.', 'Video', {
-          durationMs: 4200,
+    async (uri: string, fileSize?: number | null, source: 'camera' | 'picker' = 'camera') => {
+      setPreparing(true);
+      try {
+        const staged = await stageIntroVideoFile(uri, fileSize);
+        if (isIntroVideoTooLarge(staged.bytes)) {
+          await deleteStagedIntroVideo(staged.uri);
+          toast.error(introVideoTooLargeMessage(staged.bytes, source), 'Video', { durationMs: 5200 });
+          return;
+        }
+        const mime = introVideoMimeFromAsset({ uri: staged.uri });
+        if (!mime) {
+          await deleteStagedIntroVideo(staged.uri);
+          toast.error('Solo se aceptan videos MP4 o MOV. Volvé a grabarlo.', 'Video', {
+            durationMs: 4200,
+          });
+          return;
+        }
+        setDraft((prev) => {
+          if (prev && prev.uri !== staged.uri) void deleteStagedIntroVideo(prev.uri);
+          return { uri: staged.uri, mime, fileSize: staged.bytes, source };
         });
-        return;
-      }
-      setDraft({ uri, mime, fileSize: size, source });
-      if (size != null && size >= INTRO_VIDEO_RECORD_MAX_BYTES - 256 * 1024) {
-        toast.warning(
-          `La grabación llegó al tamaño máximo y se cortó. ${formatIntroVideoSizeLabel(size)} Podés guardarla o volver a grabar.`,
+        if (staged.bytes >= INTRO_VIDEO_RECORD_MAX_BYTES - 256 * 1024) {
+          toast.warning(
+            `La grabación llegó al tamaño máximo y se cortó. ${formatIntroVideoSizeLabel(staged.bytes)} Podés guardarla o volver a grabar.`,
+            'Video',
+            { durationMs: 5200 },
+          );
+        }
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? e.message : 'No se pudo preparar el video. Volvé a grabarlo.',
           'Video',
-          { durationMs: 5200 },
+          { durationMs: 4800 },
         );
+      } finally {
+        setPreparing(false);
       }
     },
     [toast],
@@ -172,9 +218,11 @@ export function IntroVideoEditor({ userId }: Props) {
         return;
       }
       if (isIntroVideoTooLong(asset.duration)) {
-        toast.error('El video puede durar hasta 30 segundos. Volvé a grabarlo.', 'Video', {
-          durationMs: 4200,
-        });
+        toast.error(
+          `El video puede durar hasta ${INTRO_VIDEO_MAX_SECONDS} segundos. Volvé a grabarlo.`,
+          'Video',
+          { durationMs: 4200 },
+        );
         return;
       }
       acceptRecorded(uri, asset.fileSize, 'picker');
@@ -188,7 +236,7 @@ export function IntroVideoEditor({ userId }: Props) {
   }, [acceptRecorded, toast]);
 
   const record = useCallback(async () => {
-    if (!recordingAvailable || busy || cameraOpen) return;
+    if (!recordingAvailable || busy || cameraOpen || preparing) return;
     const cameraOk = await ensureCameraPermission();
     if (!cameraOk) return;
     const micOk = await ensureMic();
@@ -200,7 +248,7 @@ export function IntroVideoEditor({ userId }: Props) {
       return;
     }
     await recordWithPicker();
-  }, [busy, cameraOpen, ensureMic, inAppCamera, recordWithPicker, recordingAvailable]);
+  }, [busy, cameraOpen, ensureMic, inAppCamera, preparing, recordWithPicker, recordingAvailable]);
 
   const closeCamera = useCallback(() => {
     if (recordingRef.current) {
@@ -221,7 +269,7 @@ export function IntroVideoEditor({ userId }: Props) {
       setElapsedSec(
         Math.min(INTRO_VIDEO_MAX_SECONDS, Math.floor((Date.now() - started) / 1000)),
       );
-    }, 200);
+    }, 500);
     try {
       const recorded = await camera.recordAsync(introVideoRecordingOptions(Platform.OS));
       const uri = recorded?.uri?.trim() ?? '';
@@ -262,7 +310,9 @@ export function IntroVideoEditor({ userId }: Props) {
       });
       setSavedPath(saved.path);
       setSavedUrl(saved.playbackUrl);
+      const localUri = draft.uri;
       setDraft(null);
+      void deleteStagedIntroVideo(localUri);
       toast.success('Video de presentación guardado.', 'Perfil', { durationMs: 3200 });
     } catch (e) {
       toast.error(
@@ -278,8 +328,16 @@ export function IntroVideoEditor({ userId }: Props) {
 
   const discardDraft = useCallback(() => {
     if (busy) return;
+    const localUri = draft?.uri;
     setDraft(null);
-  }, [busy]);
+    void deleteStagedIntroVideo(localUri);
+  }, [busy, draft?.uri]);
+
+  const onCameraReady = useCallback(() => setCameraReady(true), []);
+  const onCameraError = useCallback(() => {
+    setCameraOpen(false);
+    toast.error('No se pudo abrir la cámara. Volvé a intentar.', 'Video', { durationMs: 4200 });
+  }, [toast]);
 
   const removeSaved = useCallback(() => {
     if (busy || !savedPath) return;
@@ -328,7 +386,10 @@ export function IntroVideoEditor({ userId }: Props) {
         para que entre en el perfil. El perfil funciona igual si no cargás uno.
       </Text>
 
-      {loading ? <ActivityIndicator color={colors.primary} style={styles.spinner} /> : null}
+      {loading || preparing ? (
+        <ActivityIndicator color={colors.primary} style={styles.spinner} />
+      ) : null}
+      {preparing ? <Text style={styles.hint}>Preparando el video…</Text> : null}
 
       {showPlayer && previewUri ? <IntroVideoPlayer uri={previewUri} /> : null}
       {draft ? (
@@ -354,8 +415,8 @@ export function IntroVideoEditor({ userId }: Props) {
         <View style={styles.actions}>
           <Pressable
             onPress={() => void saveDraft()}
-            disabled={busy != null}
-            style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed, busy && styles.disabled]}
+            disabled={busy != null || preparing}
+            style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed, (busy || preparing) && styles.disabled]}
             accessibilityRole="button"
             accessibilityLabel="Guardar video de presentación"
           >
@@ -363,7 +424,7 @@ export function IntroVideoEditor({ userId }: Props) {
           </Pressable>
           <Pressable
             onPress={() => void record()}
-            disabled={busy != null}
+            disabled={busy != null || preparing}
             style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}
             accessibilityRole="button"
             accessibilityLabel="Volver a grabar"
@@ -373,7 +434,7 @@ export function IntroVideoEditor({ userId }: Props) {
           </Pressable>
           <Pressable
             onPress={discardDraft}
-            disabled={busy != null}
+            disabled={busy != null || preparing}
             style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}
             accessibilityRole="button"
             accessibilityLabel="Descartar video"
@@ -411,7 +472,7 @@ export function IntroVideoEditor({ userId }: Props) {
       ) : recordingAvailable ? (
         <Pressable
           onPress={() => void record()}
-          disabled={busy != null || loading}
+          disabled={busy != null || loading || preparing}
           style={({ pressed }) => [styles.primaryBtn, styles.recordBtn, pressed && styles.pressed]}
           accessibilityRole="button"
           accessibilityLabel="Grabar video de presentación"
@@ -424,22 +485,7 @@ export function IntroVideoEditor({ userId }: Props) {
       <Modal visible={cameraOpen} animationType="slide" onRequestClose={closeCamera}>
         <View style={styles.cameraShell}>
           {cameraOpen ? (
-            <CameraView
-              ref={cameraRef}
-              style={styles.camera}
-              facing="front"
-              mode="video"
-              mute={false}
-              videoQuality={INTRO_VIDEO_RECORD_QUALITY}
-              videoBitrate={INTRO_VIDEO_TARGET_VIDEO_BPS}
-              onCameraReady={() => setCameraReady(true)}
-              onMountError={() => {
-                setCameraOpen(false);
-                toast.error('No se pudo abrir la cámara. Volvé a intentar.', 'Video', {
-                  durationMs: 4200,
-                });
-              }}
-            />
+            <IntroVideoCameraPreview ref={cameraRef} onReady={onCameraReady} onError={onCameraError} />
           ) : null}
           <View style={styles.cameraTopBar}>
             <Text style={styles.timer}>
@@ -458,8 +504,8 @@ export function IntroVideoEditor({ userId }: Props) {
           <View style={styles.cameraBottomBar}>
             <Text style={styles.cameraHint}>
               {Platform.OS === 'ios'
-                ? 'Cámara frontal · 480p · H.264 · se corta a los 30 s'
-                : 'Cámara frontal · 480p · se corta a los 30 s'}
+                ? `Cámara frontal · 480p · H.264 · se corta a los ${INTRO_VIDEO_MAX_SECONDS} s`
+                : `Cámara frontal · 480p · se corta a los ${INTRO_VIDEO_MAX_SECONDS} s`}
             </Text>
             {recording ? (
               <Pressable

@@ -1,31 +1,37 @@
-/** Tope de la tarjeta #18. La grabación también corta en 30 s. */
-export const INTRO_VIDEO_MAX_SECONDS = 30;
+/** Tope de la tarjeta #18. La grabación también corta en 20 s. */
+export const INTRO_VIDEO_MAX_SECONDS = 20;
 
 /**
  * Red de seguridad del bucket `worker_videos` (10 MB).
- * La grabación apunta a 480p y 400 kbps: 30 s quedan en unos 2 MB.
+ * La grabación apunta a 480p y 320 kbps: 20 s quedan en alrededor de 1 MB.
  */
 export const INTRO_VIDEO_MAX_BYTES = 10 * 1024 * 1024;
 
 /**
  * Tope que se le pasa a `recordAsync`, por debajo del bucket.
- * CameraX (Android) puede pasarse un poco de `maxFileSize`. 7 MB dejan margen
+ * CameraX (Android) puede pasarse un poco de `maxFileSize`. 6 MB dejan margen
  * para que el archivo siga entrando en los 10 MB.
- * 30 s a 400 kbps no lo alcanzan (~2 MB). Si el teléfono ignora el bitrate,
+ * 20 s a 320 kbps no lo alcanzan (~1 MB). Si el teléfono ignora el bitrate,
  * corta acá en vez de armar un archivo que después se rechaza.
  */
-export const INTRO_VIDEO_RECORD_MAX_BYTES = 7 * 1024 * 1024;
+export const INTRO_VIDEO_RECORD_MAX_BYTES = 6 * 1024 * 1024;
 
 /** Lado largo máximo: 480p (854×480 en 16:9, 640×480 en el preset VGA de iOS). */
 export const INTRO_VIDEO_MAX_LONG_SIDE = 854;
 
 /**
- * Bits por segundo de video. 400 kbps en las dos plataformas.
+ * Preview de la cámara en Android. Sin esto CameraX usa la resolución más alta
+ * para la vista y la grabación se ve trabada. El video igual sale en `videoQuality`.
+ */
+export const INTRO_VIDEO_PREVIEW_SIZE = '640x480';
+
+/**
+ * Bits por segundo de video. 320 kbps en las dos plataformas.
  * Android: prop `videoBitrate` → CameraX `setTargetVideoEncodingBitRate`.
  * iOS: el mismo prop solo se aplica si `recordAsync` manda `codec: 'avc1'`.
  * Sin codec, iOS graba a bitrate alto y un clip corto se pasa de 10 MB.
  */
-export const INTRO_VIDEO_TARGET_VIDEO_BPS = 400_000;
+export const INTRO_VIDEO_TARGET_VIDEO_BPS = 320_000;
 
 /**
  * Presupuesto de audio AAC. `expo-camera` no deja fijar el bitrate de audio
@@ -66,6 +72,54 @@ export function isIntroVideoTooLong(rawDuration: number | null | undefined): boo
 export function isIntroVideoTooLarge(bytes: number | null | undefined): boolean {
   if (bytes == null || !Number.isFinite(bytes) || bytes <= 0) return false;
   return bytes > INTRO_VIDEO_MAX_BYTES;
+}
+
+/**
+ * Varias APIs del teléfono miden el mismo archivo distinto
+ * (`File.size`, `info().size`, `getInfoAsync`). La UI y el tope usan la mayor:
+ * si una dice 4 MB y otra el tamaño real, no nos quedamos con la chica.
+ */
+export function pickIntroVideoByteSize(
+  readings: readonly (number | null | undefined)[],
+): number | null {
+  let best: number | null = null;
+  for (const raw of readings) {
+    if (raw == null || !Number.isFinite(raw) || raw <= 0) continue;
+    if (best == null || raw > best) best = raw;
+  }
+  return best;
+}
+
+/**
+ * `File.arrayBuffer()` devuelve `bytes.buffer`. Esa memoria puede ser más
+ * grande que el archivo (byteOffset o capacidad de más). Subir el buffer
+ * entero hacía que la pantalla dijera ~4 MB y Storage viera más de 10 MB.
+ * Lo que se valida y se sube es `byteLength` de la vista, nunca el buffer.
+ */
+export function introVideoViewByteLength(view: {
+  byteLength: number;
+  byteOffset?: number;
+  bufferByteLength?: number | null;
+} | null | undefined): number | null {
+  if (!view || !Number.isFinite(view.byteLength) || view.byteLength <= 0) return null;
+  return view.byteLength;
+}
+
+export function introVideoUploadProgress(raw: unknown): { sent: number; total: number } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as { totalBytesSent?: unknown; totalBytesExpectedToSend?: unknown };
+  const total = obj.totalBytesExpectedToSend;
+  const sent = obj.totalBytesSent;
+  if (typeof total !== 'number' || !Number.isFinite(total) || total <= 0) return null;
+  const sentBytes = typeof sent === 'number' && Number.isFinite(sent) && sent >= 0 ? sent : 0;
+  return { sent: sentBytes, total };
+}
+
+/** Si el archivo que va a salir a la red ya pasa el tope, devolver ese peso. */
+export function introVideoUploadProgressTooLarge(raw: unknown): number | null {
+  const progress = introVideoUploadProgress(raw);
+  if (!progress || !isIntroVideoTooLarge(progress.total)) return null;
+  return progress.total;
 }
 
 /** Tamaño esperado del archivo (video + audio) para no depender del encoder del test. */
