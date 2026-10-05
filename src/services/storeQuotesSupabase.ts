@@ -835,7 +835,7 @@ export async function fetchStoreRequestDetail(params: {
   if (!mr) throw new Error('Pedido no encontrado.');
   if (!targetRes.data) throw new Error('Este pedido no está dirigido a tu comercio.');
 
-  // #120: la dirección del cliente llega solo con el pago aprobado de la orden de este comercio.
+  // #102: calle de entrega para cotizar el flete. El RPC no devuelve coordenadas.
   let clientAddress: string | null = null;
   try {
     const addrRes = await sb.rpc('get_store_request_client_address', {

@@ -6,8 +6,8 @@ import { describe, expect, it } from 'vitest';
  * #120: la app no lee directo profiles.apellido, profiles.location ni
  * material_requests.client_address. El servidor les sacó el permiso de lectura:
  * el propio usuario los pide con get_my_profile_identity, el profesional ve el
- * apellido de su cliente con get_peer_display_name y el comercio recibe la
- * dirección con get_store_request_client_address recién con la orden pagada.
+ * apellido de su cliente con get_peer_display_name y el comercio destinatario
+ * recibe la calle con get_store_request_client_address para cotizar el flete.
  */
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];

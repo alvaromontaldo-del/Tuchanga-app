@@ -38,12 +38,13 @@ import {
   groupQuoteItemsByRequest,
   initialSelectedItemIdsByQuote,
   isClientSelectableQuote,
+  clientQuoteOptionLabel,
   isClientSelectableQuoteItem,
   materialGroupHeader,
+  selectedMaterialsAmount,
   pendingFeePayLabel,
   pendingServiceFeeGroups,
   pickBestQuoteId,
-  variantOptionLabel,
   variantSelectionControl,
 } from '../../utils/pickBestQuote';
 import type { ClientQuoteCard } from '../../types/materials';
@@ -710,15 +711,18 @@ const QuoteCard = memo(function QuoteCard({
       card.orderId != null ||
       card.orderIncludeFreight != null ||
       card.contactRevealed);
+  const materialsShown = canSelectItems
+    ? selectedMaterialsAmount(card.items, selectedItemIds)
+    : card.materialsSubtotal;
   const freightDisplay = quoteFreightDisplay({
-    materialsSubtotal: card.materialsSubtotal,
+    materialsSubtotal: materialsShown,
     freightType: card.freightType,
     quotedFreightCost: card.freightCost,
-    orderIncludeFreight: card.orderIncludeFreight,
+    orderIncludeFreight: canSelectItems ? null : card.orderIncludeFreight,
     uiIncludeFreight: includeFreight,
     canChooseFreight: showFreightToggle,
-    selectionLocked,
-    acceptedTotal: card.orderAcceptedTotal,
+    selectionLocked: canSelectItems ? false : selectionLocked,
+    acceptedTotal: canSelectItems ? null : card.orderAcceptedTotal,
   });
 
   return (
@@ -815,7 +819,10 @@ const QuoteCard = memo(function QuoteCard({
       </View>
 
       <View style={styles.totalsBox}>
-        <RowLine label="Materiales" value={formatMoneyAr(card.materialsSubtotal)} />
+        {canSelectItems ? (
+          <Text style={styles.totalsHint}>Se actualiza con los ítems que marques</Text>
+        ) : null}
+        <RowLine label="Materiales" value={formatMoneyAr(materialsShown)} />
         <RowLine
           label={freightDisplay.freightRowLabel}
           value={formatMoneyAr(freightDisplay.freightAmount)}
@@ -873,6 +880,11 @@ const QuoteCard = memo(function QuoteCard({
                 <Text style={styles.detailDesc} numberOfLines={3}>
                   {materialGroupHeader(group)}
                 </Text>
+                {variants.every((it) => !it.inStock) ? (
+                  <Text style={styles.detailAlt}>
+                    Sin stock — no se puede pedir este ítem
+                  </Text>
+                ) : null}
                 {selectedHere && duplicatedRequestItemIds.has(group.requestItemId) ? (
                   <Text style={styles.duplicateHint}>También seleccionado en otro comercio</Text>
                 ) : null}
@@ -881,7 +893,7 @@ const QuoteCard = memo(function QuoteCard({
                   const decided =
                     it.clientDecision === 'accepted' || it.clientDecision === 'rejected';
                   const itemSelectable = canSelectItems && isClientSelectableQuoteItem(it);
-                  const label = variantOptionLabel(it);
+                  const label = clientQuoteOptionLabel(it);
                   return (
                     <Pressable
                       key={it.quoteItemId}
@@ -948,7 +960,11 @@ const QuoteCard = memo(function QuoteCard({
                             it.inStock && styles.detailStockOk,
                           ]}
                         >
-                          {it.inStock ? 'Con stock' : 'Sin stock'}
+                          {it.inStock
+                            ? 'Con stock'
+                            : isClientSelectableQuoteItem(it)
+                              ? 'Reemplazo sugerido'
+                              : 'Sin stock'}
                         </Text>
                         {!it.inStock &&
                         !it.alternativeDescription?.trim() &&
@@ -1260,6 +1276,13 @@ const styles = StyleSheet.create({
     borderRadius: radii.input,
     padding: spacing.md,
     gap: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  totalsHint: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
   },
   rowLine: {
     flexDirection: 'row',

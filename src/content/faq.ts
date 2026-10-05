@@ -83,7 +83,7 @@ export const FAQ_ITEMS: readonly FaqItem[] = [
     id: 'sin-material',
     question: '¿Qué pasa si el comercio no tiene el material?',
     answer:
-      'Al cotizar, el comercio puede marcar «No tengo este material». Si ofrece una alternativa, carga la marca y el precio. Si no tiene alternativa, puede dejar ese ítem sin precio. El cliente decide qué ítems aceptar. No se puede confirmar un pedido que sea solo flete.',
+      'Al cotizar, el comercio puede marcar «No tengo este material». Si ofrece un reemplazo, carga el producto alternativo y el precio. Si no tiene reemplazo, deja ese ítem vacío: el cliente lo ve sin stock y no puede seleccionarlo. Solo puede marcar el alternativo. No se puede confirmar un pedido que sea solo flete.',
   },
   {
     id: 'baja-profesional',
