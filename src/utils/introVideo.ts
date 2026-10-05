@@ -3,26 +3,42 @@ export const INTRO_VIDEO_MAX_SECONDS = 30;
 
 /**
  * Red de seguridad del bucket `worker_videos` (10 MB).
- * La grabación apunta a 480p y 700 kbps: 30 s quedan en unos 2–3 MB.
+ * La grabación apunta a 480p y 400 kbps: 30 s quedan en unos 2 MB.
  */
 export const INTRO_VIDEO_MAX_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Tope que se le pasa a `recordAsync`, por debajo del bucket.
+ * CameraX (Android) puede pasarse un poco de `maxFileSize`. 7 MB dejan margen
+ * para que el archivo siga entrando en los 10 MB.
+ * 30 s a 400 kbps no lo alcanzan (~2 MB). Si el teléfono ignora el bitrate,
+ * corta acá en vez de armar un archivo que después se rechaza.
+ */
+export const INTRO_VIDEO_RECORD_MAX_BYTES = 7 * 1024 * 1024;
 
 /** Lado largo máximo: 480p (854×480 en 16:9, 640×480 en el preset VGA de iOS). */
 export const INTRO_VIDEO_MAX_LONG_SIDE = 854;
 
-/** Bits por segundo de video. Pedido: 500–800 kbps. */
-export const INTRO_VIDEO_TARGET_VIDEO_BPS = 700_000;
-
 /**
- * Presupuesto de audio AAC mono. `expo-camera` no deja fijar el bitrate de audio;
- * el tamaño estimado lo reserva igual para no pasarnos del tope.
+ * Bits por segundo de video. 400 kbps en las dos plataformas.
+ * Android: prop `videoBitrate` → CameraX `setTargetVideoEncodingBitRate`.
+ * iOS: el mismo prop solo se aplica si `recordAsync` manda `codec: 'avc1'`.
+ * Sin codec, iOS graba a bitrate alto y un clip corto se pasa de 10 MB.
  */
-export const INTRO_VIDEO_TARGET_AUDIO_BPS = 64_000;
+export const INTRO_VIDEO_TARGET_VIDEO_BPS = 400_000;
 
 /**
- * `videoQuality` de expo-camera 17.
- * Android: CameraX `Quality.SD` (480p). iOS: `AVCaptureSessionPreset640x480`.
- * No usar `4:3` en iOS: ese case cae en el preset `.high`.
+ * Presupuesto de audio AAC. `expo-camera` no deja fijar el bitrate de audio
+ * (suele quedar en 64–128 kbps). La estimación lo reserva igual.
+ */
+export const INTRO_VIDEO_TARGET_AUDIO_BPS = 128_000;
+
+/**
+ * `videoQuality` de expo-camera 17. Mismo valor en Android y iOS.
+ * Android: CameraX `Quality.SD` (480p). Si el frente no lo tiene, el binario
+ * sube de calidad; el bitrate igual limita el peso.
+ * iOS: preset 640×480. No usar `4:3`: en iOS ese case cae en el preset `.high`.
+ * El fallback de ImagePicker no comprime en Android (esos flags son de iOS).
  */
 export const INTRO_VIDEO_RECORD_QUALITY = '480p' as const;
 
@@ -72,12 +88,27 @@ export function formatVideoMegabytes(bytes: number): string {
   return rounded.endsWith('.0') ? rounded.slice(0, -2) : rounded;
 }
 
-export function introVideoTooLargeMessage(bytes?: number | null): string {
+export function formatIntroVideoSizeLabel(bytes: number | null | undefined): string {
   const maxLabel = formatVideoMegabytes(INTRO_VIDEO_MAX_BYTES);
   if (bytes == null || !Number.isFinite(bytes) || bytes <= 0) {
-    return `El video pesa más de ${maxLabel} MB. Volvé a grabarlo, más corto.`;
+    return `No se pudo medir el peso (máximo ${maxLabel} MB).`;
   }
-  return `El video pesa ${formatVideoMegabytes(bytes)} MB y el máximo es ${maxLabel} MB. Volvé a grabarlo, más corto.`;
+  return `Pesa ${formatVideoMegabytes(bytes)} MB (máximo ${maxLabel} MB).`;
+}
+
+export function introVideoTooLargeMessage(
+  bytes?: number | null,
+  source: 'camera' | 'picker' = 'camera',
+): string {
+  const maxLabel = formatVideoMegabytes(INTRO_VIDEO_MAX_BYTES);
+  const weight =
+    bytes == null || !Number.isFinite(bytes) || bytes <= 0
+      ? `El video pesa más de ${maxLabel} MB`
+      : `El video pesa ${formatVideoMegabytes(bytes)} MB`;
+  if (source === 'picker') {
+    return `${weight} y el máximo es ${maxLabel} MB. La cámara del sistema no lo comprime. Volvé a grabarlo con la cámara de la app, más corto.`;
+  }
+  return `${weight} y el máximo es ${maxLabel} MB. Ya se grabó comprimido. Volvé a grabarlo, más corto.`;
 }
 
 const NETWORK_FAILURE_RE =
@@ -133,7 +164,12 @@ export function introVideoHttpErrorMessage(status: number, body: string): string
   return `No se pudo subir el video (error ${status}).`;
 }
 
-/** Opciones de `CameraView.recordAsync`. En iOS el bitrate solo aplica si hay codec H.264. */
+/**
+ * Opciones de `CameraView.recordAsync`.
+ * iOS: `codec: 'avc1'` es obligatorio para que `videoBitrate` baje el peso.
+ * Android: el codec no existe en la API; el bitrate va en la prop de la cámara.
+ * `maxFileSize` es menor que el bucket para absorber el exceso de CameraX.
+ */
 export function introVideoRecordingOptions(platform: string): {
   maxDuration: number;
   maxFileSize: number;
@@ -141,7 +177,7 @@ export function introVideoRecordingOptions(platform: string): {
 } {
   const base = {
     maxDuration: INTRO_VIDEO_MAX_SECONDS,
-    maxFileSize: INTRO_VIDEO_MAX_BYTES,
+    maxFileSize: INTRO_VIDEO_RECORD_MAX_BYTES,
   };
   if (platform === 'ios') return { ...base, codec: 'avc1' };
   return base;

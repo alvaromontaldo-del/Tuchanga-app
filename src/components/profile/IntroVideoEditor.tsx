@@ -21,10 +21,11 @@ import {
   saveIntroVideoFromUri,
 } from '../../services/introVideoSupabase';
 import {
-  INTRO_VIDEO_MAX_BYTES,
   INTRO_VIDEO_MAX_SECONDS,
+  INTRO_VIDEO_RECORD_MAX_BYTES,
   INTRO_VIDEO_RECORD_QUALITY,
   INTRO_VIDEO_TARGET_VIDEO_BPS,
+  formatIntroVideoSizeLabel,
   introVideoMimeFromAsset,
   introVideoRecordingOptions,
   introVideoTooLargeMessage,
@@ -45,6 +46,7 @@ type Draft = {
   uri: string;
   mime: 'video/mp4' | 'video/quicktime';
   fileSize?: number | null;
+  source: 'camera' | 'picker';
 };
 
 function measuredFileSize(uri: string, fallback?: number | null): number | null {
@@ -52,8 +54,11 @@ function measuredFileSize(uri: string, fallback?: number | null): number | null 
 }
 
 /**
- * Graba con la cámara que ya está en el binario (expo-camera 17):
- * 480p, 700 kbps y tope de 10 MB. Sin ese módulo, cae al picker en calidad baja.
+ * Graba con la cámara que ya está en el binario (expo-camera 17) en Android y iOS:
+ * 480p, 400 kbps y corte a los 7 MB (el bucket acepta 10).
+ * iOS además pide codec H.264 en recordAsync; sin eso el bitrate no aplica.
+ * Sin ExpoCamera, cae al picker: en iOS recomprime a 640×480; en Android el
+ * sistema no comprime y, si el archivo se pasa, se avisa en español.
  * Guardar sube el archivo; descartar no toca el perfil.
  */
 export function IntroVideoEditor({ userId }: Props) {
@@ -92,10 +97,10 @@ export function IntroVideoEditor({ userId }: Props) {
   }, [userId]);
 
   const acceptRecorded = useCallback(
-    (uri: string, fileSize?: number | null) => {
+    (uri: string, fileSize?: number | null, source: 'camera' | 'picker' = 'camera') => {
       const size = measuredFileSize(uri, fileSize);
       if (isIntroVideoTooLarge(size)) {
-        toast.error(introVideoTooLargeMessage(size), 'Video', { durationMs: 4800 });
+        toast.error(introVideoTooLargeMessage(size, source), 'Video', { durationMs: 5200 });
         return;
       }
       const mime = introVideoMimeFromAsset({ uri });
@@ -105,12 +110,12 @@ export function IntroVideoEditor({ userId }: Props) {
         });
         return;
       }
-      setDraft({ uri, mime, fileSize: size });
-      if (size != null && size >= INTRO_VIDEO_MAX_BYTES - 256 * 1024) {
+      setDraft({ uri, mime, fileSize: size, source });
+      if (size != null && size >= INTRO_VIDEO_RECORD_MAX_BYTES - 256 * 1024) {
         toast.warning(
-          'La grabación llegó al tamaño máximo y se cortó. Podés guardarla o volver a grabar.',
+          `La grabación llegó al tamaño máximo y se cortó. ${formatIntroVideoSizeLabel(size)} Podés guardarla o volver a grabar.`,
           'Video',
-          { durationMs: 4800 },
+          { durationMs: 5200 },
         );
       }
     },
@@ -147,11 +152,16 @@ export function IntroVideoEditor({ userId }: Props) {
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ['videos'],
         videoMaxDuration: INTRO_VIDEO_MAX_SECONDS,
-        allowsEditing: Platform.OS === 'ios',
-        quality: 0,
-        videoQuality: ImagePicker.UIImagePickerControllerQualityType.Low,
-        videoExportPreset: ImagePicker.VideoExportPreset.H264_640x480,
         cameraType: ImagePicker.CameraType.front,
+        // iOS recomprime. En Android videoQuality / videoExportPreset no existen:
+        // el archivo sale en la calidad del sistema y se rechaza si no entra.
+        allowsEditing: Platform.OS === 'ios',
+        ...(Platform.OS === 'ios'
+          ? {
+              videoQuality: ImagePicker.UIImagePickerControllerQualityType.Low,
+              videoExportPreset: ImagePicker.VideoExportPreset.H264_640x480,
+            }
+          : { quality: 0 }),
       });
       if (result.canceled) return;
       const asset = result.assets?.[0];
@@ -167,7 +177,7 @@ export function IntroVideoEditor({ userId }: Props) {
         });
         return;
       }
-      acceptRecorded(uri, asset.fileSize);
+      acceptRecorded(uri, asset.fileSize, 'picker');
     } catch (e) {
       toast.error(
         e instanceof Error ? e.message : 'No se pudo abrir la cámara para grabar.',
@@ -246,6 +256,7 @@ export function IntroVideoEditor({ userId }: Props) {
         localUri: draft.uri,
         mime: draft.mime,
         fileSize: draft.fileSize,
+        source: draft.source,
         previousPath: savedPath,
         onProgress: setProgress,
       });
@@ -313,13 +324,16 @@ export function IntroVideoEditor({ userId }: Props) {
     <View style={styles.wrap}>
       <Text style={styles.title}>Video de presentación</Text>
       <Text style={styles.hint}>
-        Opcional. Hasta {INTRO_VIDEO_MAX_SECONDS} segundos con la cámara del teléfono, comprimido a
-        480p. El perfil funciona igual si no cargás uno.
+        Opcional. Hasta {INTRO_VIDEO_MAX_SECONDS} segundos con la cámara del teléfono, comprimido
+        para que entre en el perfil. El perfil funciona igual si no cargás uno.
       </Text>
 
       {loading ? <ActivityIndicator color={colors.primary} style={styles.spinner} /> : null}
 
       {showPlayer && previewUri ? <IntroVideoPlayer uri={previewUri} /> : null}
+      {draft ? (
+        <Text style={styles.sizeLabel}>{formatIntroVideoSizeLabel(draft.fileSize)}</Text>
+      ) : null}
       {draft && !playbackAvailable ? (
         <Text style={styles.hint}>
           El video quedó grabado. En esta versión no hay vista previa dentro de la ficha; igual
@@ -442,7 +456,11 @@ export function IntroVideoEditor({ userId }: Props) {
             </Pressable>
           </View>
           <View style={styles.cameraBottomBar}>
-            <Text style={styles.cameraHint}>Cámara frontal · 480p · se corta a los 30 s</Text>
+            <Text style={styles.cameraHint}>
+              {Platform.OS === 'ios'
+                ? 'Cámara frontal · 480p · H.264 · se corta a los 30 s'
+                : 'Cámara frontal · 480p · se corta a los 30 s'}
+            </Text>
             {recording ? (
               <Pressable
                 onPress={() => cameraRef.current?.stopRecording()}
@@ -478,6 +496,12 @@ const styles = StyleSheet.create({
   wrap: { marginTop: spacing.lg },
   title: { fontSize: 16, fontWeight: '800', color: colors.text },
   hint: { marginTop: spacing.xs, fontSize: 13, lineHeight: 18, color: colors.textSecondary },
+  sizeLabel: {
+    marginTop: spacing.sm,
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.text,
+  },
   spinner: { marginTop: spacing.md },
   progressRow: {
     marginTop: spacing.md,

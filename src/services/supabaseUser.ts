@@ -5,6 +5,10 @@ import { fetchMyProfileIdentity } from './profileIdentitySupabase';
 import type { AuthUser, SignUpPayload } from './auth';
 import { normalizeDisplayAddress } from '../utils/formatAddress';
 import { storageOwnerFolder, userAuthDisplayName } from '../utils/storageOwnerFolder';
+import {
+  professionalDescriptionColumns,
+  resolveAccountBio,
+} from '../utils/professionalDescription';
 import { completedJobsFromPayload } from '../utils/workerReputation';
 
 /**
@@ -344,6 +348,59 @@ function duplicateIdentityMessage(err: PostgrestError): string {
   return 'No se pudo crear la cuenta: este correo o DNI ya está registrado.';
 }
 
+function isMissingRpc(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  const msg = (error.message ?? '').toLowerCase();
+  return (
+    error.code === 'PGRST202' ||
+    error.code === '42883' ||
+    msg.includes('could not find the function') ||
+    msg.includes('does not exist')
+  );
+}
+
+/**
+ * El alta manda la descripción como bio. El RPC full no la guarda, y un UPDATE
+ * directo puede fallar si falta el GRANT de la columna. Se intentan las dos
+ * columnas y, si eso no entra, el RPC `update_professional_description`.
+ * Tira error: antes se tragaba y el texto no aparecía en Editar perfil.
+ */
+async function writeOwnProfessionalDescription(
+  supabase: ReturnType<typeof getSupabaseClient>,
+  userId: string,
+  raw: string,
+): Promise<void> {
+  const fields = professionalDescriptionColumns(raw);
+  if (!fields.bio) return;
+
+  const pair = await supabase.from('profiles').update(fields).eq('id', userId);
+  if (!pair.error) return;
+
+  const descOnly = await supabase
+    .from('profiles')
+    .update({ professional_description: fields.professional_description })
+    .eq('id', userId);
+  const bioOnly = await supabase.from('profiles').update({ bio: fields.bio }).eq('id', userId);
+  if (!descOnly.error || !bioOnly.error) {
+    const missed = descOnly.error?.message ?? bioOnly.error?.message;
+    if (missed) console.warn('[professional-description] quedó una sola columna:', missed);
+    return;
+  }
+
+  const { error: rpcErr } = await supabase.rpc('update_professional_description', {
+    p_description: fields.professional_description,
+  });
+  if (!rpcErr) return;
+  if (!isMissingRpc(rpcErr)) {
+    throw new Error(
+      'No se pudo guardar la descripción profesional. Volvé a intentar en un momento.',
+    );
+  }
+  throw new Error(
+    `No se pudo guardar la descripción profesional (${pair.error.message}).`,
+  );
+}
+
 function shouldRetryInsertProfileWithoutBio(err: PostgrestError): boolean {
   const msg = `${err.message ?? ''} ${(err as { hint?: string }).hint ?? ''}`.toLowerCase();
   const c = err.code ?? '';
@@ -539,15 +596,9 @@ export async function updateProfileRegistrationInSupabase(
     }
   }
 
-  // Bio opcional (solo si usamos full RPC; en legacy ya se mandó si venía).
-  if (!fullMissing && !fullErr && payload.bio !== undefined) {
-    const { error: bioErr } = await supabase
-      .from('profiles')
-      .update({ bio: payload.bio.trim() })
-      .eq('id', user.id);
-    if (bioErr) {
-      console.warn('[updateProfileRegistration] bio omitida:', bioErr.message);
-    }
+  // El RPC full no toca la bio. El alta profesional la manda acá.
+  if (!fullMissing && !fullErr && payload.bio !== undefined && payload.bio.trim()) {
+    await writeOwnProfessionalDescription(supabase, user.id, payload.bio);
   }
 
   try {
@@ -739,11 +790,11 @@ export async function fetchAuthUserFromSupabase(user: User): Promise<AuthUser> {
     trades.find((t) => t.details?.trim())?.details?.trim() ||
     undefined;
 
-  const bioFromProfile =
-    typeof profile === 'object' && profile !== null && 'bio' in profile
-      ? String((profile as { bio: unknown }).bio ?? '').trim()
-      : '';
-  const resolvedBio = bioFromProfile || bioFromTrades || undefined;
+  const resolvedBio = resolveAccountBio({
+    professionalDescription: profile.professional_description,
+    bio: profile.bio,
+    tradeFallback: bioFromTrades,
+  });
 
   const nombre = profile.nombre ?? '';
   const apellido = profile.apellido ?? '';
@@ -826,15 +877,11 @@ export async function persistSignUpToSupabase(
       locationDetails: payload.locationDetails?.trim() ?? '',
     });
 
-    if ((payload.bio ?? '').trim()) {
-      await supabase
-        .from('profiles')
-        .update({ professional_description: (payload.bio ?? '').trim() })
-        .eq('id', userId);
-    }
-
     if (payload.offerServices && payload.trades?.length) {
       await persistSignUpTrades(supabase, folder, userId, payload);
+    }
+    if ((payload.bio ?? '').trim()) {
+      await writeOwnProfessionalDescription(supabase, userId, payload.bio ?? '');
     }
     return;
   }
@@ -870,6 +917,9 @@ export async function persistSignUpToSupabase(
       });
       if (payload.offerServices && payload.trades?.length) {
         await persistSignUpTrades(supabase, folder, userId, payload);
+      }
+      if ((payload.bio ?? '').trim()) {
+        await writeOwnProfessionalDescription(supabase, userId, payload.bio ?? '');
       }
       return;
     }
@@ -912,12 +962,8 @@ export async function persistSignUpToSupabase(
     }
   }
 
-  // Profesional: persistimos descripción profesional separada.
   if ((payload.bio ?? '').trim()) {
-    await supabase
-      .from('profiles')
-      .update({ professional_description: (payload.bio ?? '').trim() })
-      .eq('id', userId);
+    await writeOwnProfessionalDescription(supabase, userId, payload.bio ?? '');
   }
 
   // Fecha / detalles: preferir RPC extras (SECURITY DEFINER).
@@ -1049,11 +1095,7 @@ export async function persistProfessionalDescriptionInSupabase(desc: string): Pr
     error: ue,
   } = await sb.auth.getUser();
   if (ue || !user?.id) throw new Error('No hay sesión activa.');
-  const { error } = await sb
-    .from('profiles')
-    .update({ professional_description: (desc ?? '').trim() })
-    .eq('id', user.id);
-  if (error) throw error;
+  await writeOwnProfessionalDescription(sb, user.id, desc ?? '');
 }
 
 export async function persistWorkerGeoToSupabase(
