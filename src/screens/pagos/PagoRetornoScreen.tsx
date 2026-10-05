@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
-import { COSTO_SERVICIO_ACREDITADO, SALDO_FUERA_DE_APP } from '../../constants/serviceCostCopy';
+import { COSTO_SERVICIO_ACREDITADO } from '../../constants/serviceCostCopy';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { useContratacionPagoRealtime } from '../../hooks/useContratacionPagoRealtime';
 import {
@@ -150,7 +150,7 @@ export function PagoRetornoScreen() {
   const subtitle = done
     ? isMaterial
       ? 'Volviendo a la orden con el código y el PIN…'
-      : `Volviendo al chat con tu PIN. ${SALDO_FUERA_DE_APP}`
+      : 'Volviendo al chat con tu PIN.'
     : syncError
       ? syncError
         : showFailureHint

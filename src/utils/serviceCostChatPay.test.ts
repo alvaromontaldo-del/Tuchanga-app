@@ -22,8 +22,10 @@ describe('pago del costo de servicio desde el chat', () => {
     expect(card).toContain('>Pagar</Text>');
     expect(card).not.toContain('isMercadoPagoEnabled');
     expect(card).toContain('accessibilityLabel="Pagar costo de servicio YaChanga"');
-    expect(card).toContain('puedeIniciarPagoCostoServicio(aceptaSaldoFuera)');
-    expect(card).toContain('<SaldoFueraDeAppNotice');
+    expect(card).toContain('<QuoteMoneySummary');
+    expect(card).not.toContain('SaldoFueraDeAppNotice');
+    expect(card).not.toContain('puedeIniciarPagoCostoServicio');
+    expect(card).not.toContain('comprobante de Mercado Pago');
     expect(card).toContain('sincronizarSeñaSiPendiente(job.id)');
     expect(card).toContain('crearPreferenciaSeña(job.id)');
     expect(card).toContain('openPagoCheckout(');

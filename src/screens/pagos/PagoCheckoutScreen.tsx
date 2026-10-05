@@ -16,7 +16,7 @@ import {
   parseMpWebViewNavigation,
   shouldBlockMpExternalNavigation,
 } from '../../config/mercadoPago';
-import { COSTO_SERVICIO_LABEL, SALDO_FUERA_DE_APP } from '../../constants/serviceCostCopy';
+import { COSTO_SERVICIO_LABEL } from '../../constants/serviceCostCopy';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { isRenderableUri } from '../../utils/safeAsync';
 import { usePagoRetornoDeepLink } from '../../navigation/usePagoRetornoDeepLink';
@@ -34,8 +34,6 @@ export function PagoCheckoutScreen() {
   const sandbox = route.params?.sandbox ?? false;
   const conversationId = route.params?.conversationId;
   const checkoutReady = isRenderableUri(checkoutUrl);
-  const isMaterialServiceFee = Boolean(materialOrderId);
-
   const [closing, setClosing] = useState(false);
   const [webKey, setWebKey] = useState(0);
   const handled = useRef(false);
@@ -173,12 +171,6 @@ export function PagoCheckoutScreen() {
         <View style={styles.backBtn} />
       </View>
 
-      {!isMaterialServiceFee ? (
-        <View style={styles.saldoBanner}>
-          <Text style={styles.saldoText}>{SALDO_FUERA_DE_APP}</Text>
-        </View>
-      ) : null}
-
       {sandbox ? (
         <View style={styles.sandboxBanner}>
           <Text style={styles.sandboxTitle}>Modo de prueba (sandbox)</Text>
@@ -258,17 +250,6 @@ const styles = StyleSheet.create({
   headerSubtitle: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   backBtn: { minWidth: 72 },
   backText: { color: colors.primary, fontWeight: '700' },
-  saldoBanner: {
-    marginHorizontal: spacing.md,
-    marginTop: spacing.sm,
-    marginBottom: spacing.xs,
-    padding: spacing.md,
-    borderRadius: radii.card,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  saldoText: { ...typography.body, color: colors.text },
   sandboxBanner: {
     marginHorizontal: spacing.md,
     marginTop: spacing.sm,

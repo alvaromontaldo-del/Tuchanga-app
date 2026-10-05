@@ -11,13 +11,6 @@ export const COSTO_SERVICIO_PAGADO = 'Costo de servicio YaChanga pagado';
 
 export const COSTO_SERVICIO_ACREDITADO = 'Costo de servicio YaChanga acreditado';
 
-/** El saldo del trabajo no pasa por Mercado Pago. */
-export const SALDO_FUERA_DE_APP =
-  'El saldo restante del trabajo se paga directo al profesional, fuera de la app. No genera comprobante de Mercado Pago.';
-
-export const SALDO_ACEPTACION =
-  'Acepto que el saldo restante se paga al profesional fuera de YaChanga, sin comprobante de Mercado Pago.';
-
 export const SALDO_PAGADO_AL_PROFESIONAL = 'Saldo pagado al profesional';
 
 export const CONFORMIDAD_PREGUNTA = '¿El trabajo quedó bien realizado?';
@@ -56,12 +49,38 @@ export const CONFORMIDAD_POSITIVA: ConformidadResultado = {
 
 export const CONFORMIDAD_NEGATIVA: ConformidadResultado = {
   estado: 'En disputa',
-  paso: 'El trabajo queda en disputa y el chat sigue visible para coordinar con el profesional. El saldo, si corresponde, se arregla directo con el profesional, fuera de la app. No se abre un comprobante de Mercado Pago.',
+  paso: 'El trabajo queda en disputa y el chat sigue visible para coordinar con el profesional.',
 };
 
-/** El cliente tiene que aceptar el saldo fuera de la app antes de pagar el costo. */
-export function puedeIniciarPagoCostoServicio(aceptoSaldoFueraDeApp: boolean): boolean {
-  return aceptoSaldoFueraDeApp;
+/** El costo de servicio se paga en la app. No hace falta aceptar un aviso aparte. */
+export function puedeIniciarPagoCostoServicio(_aceptoSaldoFueraDeApp: boolean): boolean {
+  return true;
+}
+
+const FRASES_COMPROBANTE = [
+  'El saldo restante del trabajo se paga directo al profesional, fuera de la app. No genera comprobante de Mercado Pago.',
+  'Acepto que el saldo restante se paga al profesional fuera de YaChanga, sin comprobante de Mercado Pago.',
+  'No se abre un comprobante de Mercado Pago.',
+  'No se genera un comprobante de Mercado Pago.',
+  'Eso no genera un comprobante de Mercado Pago.',
+  'No hay comprobante de Mercado Pago de ese saldo.',
+  'No genera comprobante de Mercado Pago.',
+  'sin comprobante de Mercado Pago.',
+  'sin comprobante de Mercado Pago',
+];
+
+/** Saca el aviso de comprobante de mensajes que ya quedaron guardados. */
+export function textoSinAvisoComprobante(input: string): string {
+  let text = input;
+  for (const phrase of FRASES_COMPROBANTE) {
+    if (text.includes(phrase)) text = text.split(phrase).join('');
+  }
+  text = text.replace(/[^\n.]*comprobante de Mercado Pago[^.]*\.?/gi, '');
+  return text
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
 }
 
 export function buildMotivoDisputa(motivo: string, descripcion: string): string {
@@ -101,5 +120,5 @@ export function textoVisibleSinSena(input: string): string {
   for (const [from, to] of FRASES_SENA) {
     if (text.includes(from)) text = text.split(from).join(to);
   }
-  return text;
+  return textoSinAvisoComprobante(text);
 }

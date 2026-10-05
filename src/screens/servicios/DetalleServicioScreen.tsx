@@ -19,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExpandableText } from '../../components/common/ExpandableText';
 import { RecotizacionCard } from '../../components/jobs/RecotizacionCard';
 import { ReportarProblemaModal } from '../../components/jobs/ReportarProblemaModal';
-import { SaldoFueraDeAppNotice } from '../../components/jobs/SaldoFueraDeAppNotice';
+import { QuoteMoneySummary } from '../../components/jobs/QuoteMoneySummary';
 import {
   CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE,
   CONFORMIDAD_NEGATIVA,
@@ -27,7 +27,6 @@ import {
   CONFORMIDAD_PREGUNTA,
   CONFORMIDAD_PROBLEMA,
   CONFORMIDAD_SI,
-  COSTO_SERVICIO_LABEL,
   SALDO_PAGADO_AL_PROFESIONAL,
   textoVisibleSinSena,
 } from '../../constants/serviceCostCopy';
@@ -471,27 +470,16 @@ export function DetalleServicioScreen() {
         ) : null}
 
         {myRole === 'trabajador' ? (
-          <Text style={styles.priceLine}>
-            Monto a cobrar: <Text style={styles.strong}>{fmt(row.precio_trabajador)}</Text>
-          </Text>
+          <QuoteMoneySummary variant="worker" amount={fmt(row.precio_trabajador)} />
         ) : (
-          <>
-            <Text style={styles.priceLine}>
-              Precio final:{' '}
-              <Text style={styles.strong}>{formatMoneyCeilAr(row.precio_final)}</Text>
-            </Text>
-            <Text style={styles.priceLine}>
-              {COSTO_SERVICIO_LABEL}:{' '}
-              <Text style={styles.strong}>{formatMoneyCeilAr(row.comision_app)}</Text>
-            </Text>
-            <Text style={styles.priceLine}>
-              Saldo pendiente:{' '}
-              <Text style={styles.strong}>
-                {formatMoneyCeilAr(computeSaldoPendiente(row.precio_final, row.comision_app))}
-              </Text>
-            </Text>
-            <SaldoFueraDeAppNotice />
-          </>
+          <QuoteMoneySummary
+            variant="client"
+            finalAmount={formatMoneyCeilAr(row.precio_final)}
+            serviceFee={formatMoneyCeilAr(row.comision_app)}
+            balance={formatMoneyCeilAr(
+              computeSaldoPendiente(row.precio_final, row.comision_app),
+            )}
+          />
         )}
 
         {row.fecha_trabajo ? (
@@ -803,7 +791,6 @@ export function DetalleServicioScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{CONFORMIDAD_PREGUNTA}</Text>
             <Text style={styles.hint}>{CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE}</Text>
-            <SaldoFueraDeAppNotice />
             <View style={styles.actions}>
               <Pressable
                 style={[styles.btnGhost, busy && styles.btnDisabled]}

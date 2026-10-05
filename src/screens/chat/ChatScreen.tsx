@@ -76,7 +76,7 @@ import {
 import { AgendaOpcionesCliente } from '../../components/servicios/AgendaOpcionesCliente';
 import { RecotizacionCard } from '../../components/jobs/RecotizacionCard';
 import { ReportarProblemaModal } from '../../components/jobs/ReportarProblemaModal';
-import { SaldoFueraDeAppNotice } from '../../components/jobs/SaldoFueraDeAppNotice';
+import { QuoteMoneySummary } from '../../components/jobs/QuoteMoneySummary';
 import {
   CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE,
   CONFORMIDAD_AUTOMATICA_AVISO_TRABAJADOR,
@@ -87,7 +87,6 @@ import {
   CONFORMIDAD_SI,
   COSTO_SERVICIO_LABEL,
   COSTO_SERVICIO_PAGADO,
-  puedeIniciarPagoCostoServicio,
   SALDO_PAGADO_AL_PROFESIONAL,
   textoVisibleSinSena,
 } from '../../constants/serviceCostCopy';
@@ -464,7 +463,6 @@ export function ChatScreen({
   const [agendaOpciones, setAgendaOpciones] = useState<DisponibilidadOpcion[]>([]);
   const [agendaBusy, setAgendaBusy] = useState(false);
   const [saldoBusy, setSaldoBusy] = useState(false);
-  const [aceptaSaldoFuera, setAceptaSaldoFuera] = useState(false);
   const [problemaOpen, setProblemaOpen] = useState(false);
   const [conformidadBusy, setConformidadBusy] = useState(false);
   const [conformidadAviso, setConformidadAviso] = useState<typeof CONFORMIDAD_POSITIVA | null>(
@@ -1113,7 +1111,7 @@ export function ChatScreen({
         const j = await fetchLatestJobByConversation(conversationId);
         if (j) setJob(j);
         await refreshMessages();
-        toast.success('Saldo marcado como pagado al profesional, fuera de la app', 'Pago');
+        toast.success('Saldo marcado como pagado al profesional', 'Pago');
       } catch (e) {
         toast.error(
           textoVisibleSinSena(e instanceof Error ? e.message : 'No se pudo registrar el pago'),
@@ -1134,7 +1132,7 @@ export function ChatScreen({
         const j = await fetchLatestJobByConversation(conversationId);
         if (j) setJob(j);
         await refreshMessages();
-        toast.success('Confirmaste el saldo que te pagó el cliente, fuera de la app', 'Pago');
+        toast.success('Confirmaste el saldo que te pagó el cliente', 'Pago');
       } catch (e) {
         toast.error(
           textoVisibleSinSena(e instanceof Error ? e.message : 'No se pudo confirmar'),
@@ -1785,34 +1783,16 @@ export function ChatScreen({
                   <Text style={styles.quoteLine}>{quoteWarrantyLabel(q.warranty_days)}</Text>
 
                   {myRole === 'trabajador' ? (
-                    <Text style={styles.quoteLine}>
-                      Monto a cobrar:{' '}
-                      <Text style={styles.quoteStrong}>{formatMoney(q.net_amount)}</Text>
-                    </Text>
-                  ) : null}
-
-                  {myRole !== 'trabajador' ? (
-                    <Text style={styles.quoteLine}>
-                      Precio final: <Text style={styles.quoteStrong}>{formatMoney(q.final_amount)}</Text>
-                    </Text>
-                  ) : null}
-
-                  {myRole === 'cliente' ? (
-                    <>
-                      <Text style={styles.quoteLine}>
-                        {COSTO_SERVICIO_LABEL}:{' '}
-                        <Text style={styles.quoteStrong}>
-                          {formatMoney(Math.max(q.final_amount - q.net_amount, 0))}
-                        </Text>
-                      </Text>
-                      <Text style={styles.quoteLine}>
-                        Saldo pendiente:{' '}
-                        <Text style={styles.quoteStrong}>
-                          {formatMoney(computeSaldoPendiente(q.final_amount, q.final_amount - q.net_amount))}
-                        </Text>
-                      </Text>
-                      <SaldoFueraDeAppNotice />
-                    </>
+                    <QuoteMoneySummary variant="worker" amount={formatMoney(q.net_amount)} />
+                  ) : myRole === 'cliente' ? (
+                    <QuoteMoneySummary
+                      variant="client"
+                      finalAmount={formatMoney(q.final_amount)}
+                      serviceFee={formatMoney(Math.max(q.final_amount - q.net_amount, 0))}
+                      balance={formatMoney(
+                        computeSaldoPendiente(q.final_amount, q.final_amount - q.net_amount),
+                      )}
+                    />
                   ) : null}
 
                   {q.status !== 'rejected' ? (
@@ -2060,10 +2040,9 @@ export function ChatScreen({
         {isSupabaseConfigured() && showClientSaldoPagadoBar && job ? (
           <View style={[styles.completeBar, styles.completeBarStacked]}>
             <Text style={styles.paySubtitle}>
-              Pagá el saldo restante ({formatMoney(saldoPendiente)}) directo al profesional, fuera de la
-              app, y confirmá acá cuando lo hayas hecho.
+              Pagá el saldo restante ({formatMoney(saldoPendiente)}) al profesional y confirmá acá cuando
+              lo hayas hecho.
             </Text>
-            <SaldoFueraDeAppNotice />
             <Pressable
               style={({ pressed }) => [
                 styles.payBtn,
@@ -2085,8 +2064,7 @@ export function ChatScreen({
           <View style={styles.completeBar}>
             <View style={styles.payBarText}>
               <Text style={styles.paySubtitle}>
-                Indicaste que pagaste el saldo directo al profesional. Aguardá a que confirme la
-                recepción. Eso no genera un comprobante de Mercado Pago.
+                Indicaste que pagaste el saldo al profesional. Aguardá a que confirme la recepción.
               </Text>
             </View>
           </View>
@@ -2097,8 +2075,7 @@ export function ChatScreen({
             <View style={styles.payBarText}>
               <Text style={styles.payTitle}>Saldo pagado por el cliente</Text>
               <Text style={styles.paySubtitle}>
-                El cliente indicó que te pagó el saldo restante, fuera de la app. Confirmá que lo
-                recibiste. No hay comprobante de Mercado Pago de ese saldo.
+                El cliente indicó que te pagó el saldo. Confirmá que lo recibiste.
               </Text>
             </View>
             <Pressable
@@ -2121,31 +2098,29 @@ export function ChatScreen({
         ) : null}
 
         {isSupabaseConfigured() && showPay && job ? (
-          <View style={styles.payBar}>
+          <View style={[styles.payBar, styles.completeBarStacked]}>
             <View style={styles.payBarText}>
               <Text style={styles.payTitle}>{serviceFeePayBarCopy(job.estado_trabajo).title}</Text>
               <Text style={styles.paySubtitle}>{serviceFeePayBarCopy(job.estado_trabajo).body}</Text>
               {serviceFeePayBarCopy(job.estado_trabajo).showQuotedFee ? (
-                <Text style={[styles.paySubtitle, { marginTop: spacing.xs }]}>
-                  {COSTO_SERVICIO_LABEL} {formatMoney(job.seña)} · Saldo pendiente{' '}
-                  {formatMoney(computeSaldoPendiente(job.amount, job.seña))}
-                </Text>
+                <QuoteMoneySummary
+                  variant="client"
+                  finalAmount={formatMoney(job.amount)}
+                  serviceFee={formatMoney(job.seña)}
+                  balance={formatMoney(computeSaldoPendiente(job.amount, job.seña))}
+                />
               ) : null}
-              <SaldoFueraDeAppNotice
-                accepted={aceptaSaldoFuera}
-                onToggle={() => setAceptaSaldoFuera((value) => !value)}
-              />
             </View>
             <Pressable
               style={({ pressed }) => [
                 styles.payBtn,
-                (!puedeIniciarPagoCostoServicio(aceptaSaldoFuera) || quoteBusy !== 'none') &&
-                  styles.quoteBtnDisabled,
-                pressed && puedeIniciarPagoCostoServicio(aceptaSaldoFuera) && styles.pressed,
+                { alignSelf: 'stretch', marginTop: spacing.sm, alignItems: 'center' },
+                quoteBusy !== 'none' && styles.quoteBtnDisabled,
+                pressed && quoteBusy === 'none' && styles.pressed,
               ]}
-              disabled={!puedeIniciarPagoCostoServicio(aceptaSaldoFuera) || quoteBusy !== 'none'}
+              disabled={quoteBusy !== 'none'}
               onPress={() => {
-                if (!puedeIniciarPagoCostoServicio(aceptaSaldoFuera) || quoteBusy !== 'none') return;
+                if (quoteBusy !== 'none') return;
                 // Checkout del costo de servicio de esta contratación (PagoCheckout / Mercado Pago).
                 // La etiqueta es fija y no depende del flag de Mercado Pago de la OTA.
                 // No es el flujo de materiales ni «Ver servicio». El saldo no se cobra acá.
@@ -2201,7 +2176,6 @@ export function ChatScreen({
                   ? `Tu PIN: ${clientPin} · Compartilo con el profesional al iniciar el trabajo.`
                   : 'Generando tu PIN de verificación…'}
               </Text>
-              <SaldoFueraDeAppNotice />
             </View>
             <Pressable
               style={({ pressed }) => [styles.payBtn, pressed && styles.pressed]}
@@ -2224,8 +2198,7 @@ export function ChatScreen({
             <View style={styles.payBarText}>
               <Text style={styles.payTitle}>{COSTO_SERVICIO_PAGADO}</Text>
               <Text style={styles.paySubtitle}>
-                Al llegar al domicilio, pedile el PIN al cliente para iniciar el trabajo. El saldo
-                restante te lo paga directo, fuera de la app.
+                Al llegar al domicilio, pedile el PIN al cliente para iniciar el trabajo.
               </Text>
             </View>
             <Pressable
@@ -2248,7 +2221,6 @@ export function ChatScreen({
           <View style={[styles.completeBar, styles.completeBarStacked]}>
             <Text style={styles.paySubtitle}>{CONFORMIDAD_PREGUNTA}</Text>
             <Text style={styles.conformidadAutoHint}>{CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE}</Text>
-            <SaldoFueraDeAppNotice />
             <View style={styles.conformidadActions}>
                 <Pressable
                   style={({ pressed }) => [
@@ -2476,7 +2448,6 @@ export function ChatScreen({
       reviewSending,
       saldoBusy,
       saldoPendiente,
-      aceptaSaldoFuera,
       conformidadAviso,
       conformidadBusy,
       handleConformidadSi,

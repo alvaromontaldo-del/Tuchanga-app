@@ -7,7 +7,7 @@ import {
   CONFORMIDAD_AUTOMATICA_HORAS,
   COSTO_SERVICIO_LABEL,
   puedeIniciarPagoCostoServicio,
-  SALDO_FUERA_DE_APP,
+  textoSinAvisoComprobante,
   textoVisibleSinSena,
 } from './serviceCostCopy';
 import { SIGNUP_ROLE_OPTIONS, sessionRoleForSignup } from './sessionRoles';
@@ -16,14 +16,22 @@ describe('copy de costo de servicio', () => {
   it('usa un solo término y no dice seña', () => {
     expect(COSTO_SERVICIO_LABEL).toBe('Costo de servicio YaChanga');
     expect(COSTO_SERVICIO_LABEL.toLowerCase()).not.toContain('seña');
-    expect(SALDO_FUERA_DE_APP).toContain('fuera de la app');
-    expect(SALDO_FUERA_DE_APP).toContain('Mercado Pago');
-    expect(SALDO_FUERA_DE_APP.toLowerCase()).not.toContain('seña');
+    expect(COSTO_SERVICIO_LABEL).not.toContain('comprobante');
   });
 
-  it('no deja pagar el costo sin aceptar el saldo fuera de la app', () => {
-    expect(puedeIniciarPagoCostoServicio(false)).toBe(false);
+  it('pagar el costo de servicio no pide un aviso de comprobante', () => {
+    expect(puedeIniciarPagoCostoServicio(false)).toBe(true);
     expect(puedeIniciarPagoCostoServicio(true)).toBe(true);
+  });
+
+  it('esconde el aviso de comprobante que ya quedó en un mensaje', () => {
+    const raw =
+      'Tu PIN de seguridad fue generado.\n\nEl saldo restante del trabajo se paga directo al profesional, fuera de la app. No genera comprobante de Mercado Pago.';
+    expect(textoSinAvisoComprobante(raw)).toBe('Tu PIN de seguridad fue generado.');
+    expect(textoSinAvisoComprobante(raw)).not.toMatch(/comprobante/i);
+    expect(textoVisibleSinSena('Dejá tu reseña y cambiá la contraseña.')).toBe(
+      'Dejá tu reseña y cambiá la contraseña.',
+    );
   });
 
   it('arma el motivo de disputa y no abre un reclamo de garantía', () => {

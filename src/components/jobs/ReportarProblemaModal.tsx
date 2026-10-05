@@ -107,8 +107,7 @@ export function ReportarProblemaModal({ visible, contratacionId, onClose, onDone
         ) : (
           <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
             <Text style={styles.lead}>
-              Contanos qué pasó. El trabajo pasa a disputa y el chat sigue disponible. No se genera un
-              comprobante de Mercado Pago.
+              Contanos qué pasó. El trabajo pasa a disputa y el chat sigue disponible.
             </Text>
             <Text style={styles.section}>Motivo</Text>
             {PROBLEMA_MOTIVOS.map((item) => {

@@ -58,45 +58,47 @@ describe('cotizar del profesional sin desglose de costo de servicio', () => {
       '<Text style={styles.quoteTitle}>Presupuesto</Text>',
       'Cargando presupuesto',
     );
-    const worker = sliceBetween(card, "myRole === 'trabajador'", "myRole !== 'trabajador'");
-    expect(worker).toContain('Monto a cobrar:');
+    const money = readFileSync('src/components/jobs/QuoteMoneySummary.tsx', 'utf8');
+    const worker = sliceBetween(card, 'variant="worker"', 'variant="client"');
+    expect(worker).toContain('variant="worker"');
     expect(worker).toContain('q.net_amount');
-    expect(worker).not.toContain('Precio final');
-    expect(worker).not.toContain('COSTO_SERVICIO');
-    expect(worker).not.toContain('Neto (lo que cobrás)');
+    expect(worker).not.toContain('q.final_amount');
+    expect(money).toContain('Monto a cobrar');
+    expect(money).toContain('Precio final');
+    expect(money).toContain('Saldo pendiente');
+    expect(money).toContain('COSTO_SERVICIO_LABEL');
+    expect(money).not.toContain('comprobante de Mercado Pago');
 
-    const shownToClient = sliceBetween(
-      card,
-      "myRole !== 'trabajador'",
-      'participants?.myRole === \'cliente\'',
-    );
-    expect(shownToClient).toContain('Precio final:');
+    const shownToClient = sliceBetween(card, 'variant="client"', "q.status !== 'rejected'");
+    expect(shownToClient).toContain('variant="client"');
     expect(shownToClient).toContain('q.final_amount');
-    expect(shownToClient).toContain('COSTO_SERVICIO_LABEL');
-    expect(shownToClient).toContain('Saldo pendiente:');
-    expect(shownToClient).toContain('<SaldoFueraDeAppNotice />');
+    expect(shownToClient).toContain('computeSaldoPendiente');
+    expect(shownToClient).not.toContain('SaldoFueraDeAppNotice');
     expect(shownToClient).not.toContain('Monto a cobrar');
     expect(card).toContain('quoteWarrantyLabel(q.warranty_days)');
     expect(card).toContain('>Ver servicio<');
+    expect(card).toContain("'Rechazar'");
+    expect(card).toContain("'Aceptar'");
+    expect(chat).toContain("label: 'Pendiente'");
   });
 
   it('Ver servicio del profesional no muestra precio final ni costo de servicio', () => {
     const prices = sliceBetween(detail, "myRole === 'trabajador' ? (", 'row.fecha_trabajo');
     const worker = prices.slice(0, prices.indexOf(') : ('));
     const client = prices.slice(prices.indexOf(') : ('));
-    expect(worker).toContain('Monto a cobrar:');
+    expect(worker).toContain('variant="worker"');
     expect(worker).toContain('row.precio_trabajador');
     expect(worker).not.toContain('Precio final');
     expect(worker).not.toContain('precio_final');
     expect(worker).not.toContain('comision_app');
     expect(worker).not.toContain('COSTO_SERVICIO_LABEL');
 
-    expect(client).toContain('Precio final:');
+    expect(client).toContain('variant="client"');
     expect(client).toContain('row.precio_final');
-    expect(client).toContain('COSTO_SERVICIO_LABEL');
     expect(client).toContain('row.comision_app');
-    expect(client).toContain('Saldo pendiente:');
-    expect(client).toContain('<SaldoFueraDeAppNotice />');
+    expect(client).toContain('computeSaldoPendiente');
+    expect(client).not.toContain('SaldoFueraDeAppNotice');
+    expect(detail).not.toContain('comprobante de Mercado Pago');
   });
 
   it('la agenda del profesional muestra el monto a cobrar, no el precio final', () => {
