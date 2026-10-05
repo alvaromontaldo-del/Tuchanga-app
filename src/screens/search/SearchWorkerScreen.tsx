@@ -24,7 +24,6 @@ import type { AuthUser } from '../../services/auth';
 import { fetchSearchWorkerHitsFromSupabase } from '../../services/searchWorkersSupabase';
 import { filterSearchHitsByUrgencias } from '../../utils/urgencias';
 import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
-import { getSupabaseClient } from '../../lib/supabase';
 import { SearchHeaderBar } from '../../components/search/SearchHeaderBar';
 import { fetchActiveTradeNamesFromSupabase } from '../../services/workerTradesSupabase';
 import {
@@ -46,6 +45,13 @@ function summaryMulti(selected: string[], emptyLabel: string): string {
 function formatKm(d: number): string {
   if (d < 1) return `${Math.round(d * 1000)} m`;
   return `${d.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km`;
+}
+
+function searchErrorText(error: unknown): string {
+  const fallback = 'No se pudo cargar la búsqueda.';
+  const message = error instanceof Error ? error.message.trim() : '';
+  if (!message || /supabase|diagnos/i.test(message)) return fallback;
+  return message;
 }
 
 function hasValidBaseLocation(user: AuthUser | null): boolean {
@@ -91,9 +97,6 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
   const [hitsLoading, setHitsLoading] = useState(false);
   const [hitsError, setHitsError] = useState<string | null>(null);
   const [searchRetry, setSearchRetry] = useState(0);
-  const [debugLine, setDebugLine] = useState<string>('');
-  const [diagRunning, setDiagRunning] = useState(false);
-  const [diagResult, setDiagResult] = useState<string>('');
   const listRef = useRef<FlatList<SearchWorkerHit> | null>(null);
   useScrollToTop(listRef);
   // Entradas desde HOME header: hidratamos búsqueda/filtros.
@@ -143,7 +146,6 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
       setHits([]);
       setHitsLoading(false);
       setHitsError(null);
-      setDebugLine('Sin domicilio válido en tu perfil.');
       return;
     }
 
@@ -151,23 +153,18 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
       setHits(searchWorkerHits(SEARCH_WORKERS, query, selectedCategories, effectiveClientPos));
       setHitsLoading(false);
       setHitsError(null);
-      setDebugLine('Modo demo (sin Supabase).');
       return;
     }
 
     if (isRestoring) {
       setHitsLoading(true);
       setHitsError(null);
-      setDebugLine('Restaurando sesión…');
       return;
     }
 
     let cancelled = false;
     setHitsLoading(true);
     setHitsError(null);
-    setDebugLine(
-      `Buscando en Supabase (lat ${clientLat.toFixed(4)}, lng ${clientLng.toFixed(4)})…`,
-    );
     void (async () => {
       try {
         const data = await fetchSearchWorkerHitsFromSupabase({
@@ -179,15 +176,11 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
         });
         if (!cancelled) {
           setHits(data);
-          setDebugLine(
-            `Supabase OK · ${data.length} resultado(s) · excluye: ${user?.id ? 'sí' : 'no'}`,
-          );
         }
       } catch (e) {
         if (!cancelled) {
           setHits([]);
-          setHitsError(e instanceof Error ? e.message : 'No se pudo cargar la búsqueda.');
-          setDebugLine('Error al consultar Supabase.');
+          setHitsError(searchErrorText(e));
         }
       } finally {
         if (!cancelled) setHitsLoading(false);
@@ -222,73 +215,6 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
   function openSettings() {
     if (Platform.OS === 'web') return;
     void Linking.openSettings();
-  }
-
-  async function runDiagnostics() {
-    if (!hasSearchPoint || clientLat == null || clientLng == null) {
-      setDiagResult('No hay domicilio válido en tu perfil.');
-      return;
-    }
-    if (!isSupabaseConfigured()) {
-      setDiagResult('Supabase no está configurado en esta build.');
-      return;
-    }
-    setDiagRunning(true);
-    try {
-      const sb = getSupabaseClient();
-      await sb.auth.getSession();
-
-      // 1) RPC sin excluir (debería devolver "alguien" si existe algún worker visible cerca)
-      const rpcAll = await fetchSearchWorkerHitsFromSupabase({
-        clientLat,
-        clientLng,
-        query: '',
-        categoryNames: [],
-      });
-
-      // 2) Perfil + jobs del usuario actual (si hay sesión)
-      const meId = user?.id ?? null;
-      type MeProfileRow = { coverage_km: number | null };
-      let meProfile: MeProfileRow | null = null;
-      let meJobsCount: number | null = null;
-      if (meId) {
-        // Solo el perfil propio. coverage_km no es PII. El domicilio sale del
-        // usuario de sesión (get_my_profile_private), no de esta fila.
-        const pr = await sb
-          .from('profiles')
-          .select('coverage_km')
-          .eq('id', meId)
-          .maybeSingle();
-        if (!pr.error) meProfile = (pr.data as MeProfileRow | null) ?? null;
-
-        const jr = await sb.from('jobs').select('id', { count: 'exact', head: true }).eq('user_id', meId);
-        if (!jr.error) meJobsCount = jr.count ?? 0;
-      }
-
-      // 3) Conteo global simple (para saber si hay datos en DB)
-      const profilesWithCoverage = await sb
-        .from('profiles')
-        .select('id', { count: 'exact', head: true })
-        .not('coverage_km', 'is', null);
-      const totalJobs = await sb.from('jobs').select('id', { count: 'exact', head: true });
-
-      const ids = rpcAll.slice(0, 3).map((h) => h.worker.id);
-      const lines = [
-        `Punto: lat ${clientLat.toFixed(4)}, lng ${clientLng.toFixed(4)}`,
-        `RPC ⇒ ${rpcAll.length} resultado(s)` + (ids.length ? ` (ej: ${ids.join(', ')})` : ''),
-        `Yo: ${meId ? 'sí' : 'no'} | coverage_km: ${meProfile?.coverage_km ?? 'n/a'} | jobs míos: ${
-          meJobsCount ?? 'n/a'
-        }`,
-        `DB: perfiles con coverage_km: ${profilesWithCoverage.count ?? 'n/a'} | jobs totales: ${
-          totalJobs.count ?? 'n/a'
-        }`,
-      ];
-      setDiagResult(lines.join('\n'));
-    } catch (e) {
-      setDiagResult(`Error RPC: ${e instanceof Error ? e.message : 'desconocido'}`);
-    } finally {
-      setDiagRunning(false);
-    }
   }
 
   function listEmptyMessage(): {
@@ -327,8 +253,8 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
     }
     if (hits.length === 0) {
       return {
-        title: 'Sin resultados cerca',
-        text: 'No hay profesionales que coincidan con tu búsqueda dentro de su radio de cobertura. Probá otra palabra u otro oficio.',
+        title: 'Sin resultados',
+        text: 'No se encontraron profesionales relacionados con tu búsqueda.',
       };
     }
     if (onlyUrgencias && visibleHits.length === 0) {
@@ -384,21 +310,6 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
             )}
             <Text style={styles.emptyTitle}>{empty.title}</Text>
             <Text style={styles.emptyText}>{empty.text}</Text>
-            {debugLine ? <Text style={styles.debug}>{debugLine}</Text> : null}
-            <Pressable
-              style={({ pressed }) => [
-                styles.retryBtn,
-                styles.retryBtnSecondary,
-                pressed && styles.pressed,
-              ]}
-              onPress={() => void runDiagnostics()}
-              disabled={diagRunning}
-            >
-              <Text style={styles.retryBtnText}>
-                {diagRunning ? 'Diagnosticando…' : 'Diagnosticar búsqueda'}
-              </Text>
-            </Pressable>
-            {diagResult ? <Text style={styles.debug}>{diagResult}</Text> : null}
             {empty.showRetrySearch ? (
               <Pressable
                 style={({ pressed }) => [styles.retryBtn, pressed && styles.pressed]}
@@ -540,13 +451,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     lineHeight: 22,
   },
-  debug: {
-    marginTop: spacing.sm,
-    fontSize: 12,
-    lineHeight: 16,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
   retryBtn: {
     marginTop: spacing.lg,
     backgroundColor: colors.primary,
@@ -555,10 +459,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   retryBtnText: { color: '#fff', fontWeight: '800' },
-  retryBtnSecondary: {
-    backgroundColor: colors.text,
-    marginTop: spacing.sm,
-  },
   settingsBtn: {
     marginTop: spacing.md,
     paddingVertical: 12,
