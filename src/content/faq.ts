@@ -17,7 +17,7 @@ export const FAQ_ITEMS: readonly FaqItem[] = [
     id: 'pago-app-vs-profesional',
     question: '¿Qué pago en la app y qué le pago al profesional?',
     answer:
-      'En la app el cliente paga el costo de servicio YaChanga con Mercado Pago. El precio final del presupuesto incluye ese costo y el importe del profesional. El saldo restante se paga directo al profesional, fuera de la app, y no genera comprobante de Mercado Pago: el cliente lo marca en el chat cuando se lo dio y el profesional confirma que lo recibió. En Mis trabajos, el profesional ve su neto, sin el costo de servicio.',
+      'En la app el cliente paga el costo de servicio YaChanga con Mercado Pago. El precio final del presupuesto incluye ese costo y el importe del profesional. El saldo se le paga al profesional: el cliente lo marca en el chat cuando se lo dio y el profesional confirma que lo recibió. En Mis trabajos, el profesional ve su neto, sin el costo de servicio.',
   },
   {
     id: 'costo-cubierto',

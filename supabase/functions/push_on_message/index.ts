@@ -199,7 +199,7 @@ Deno.serve(async (req) => {
   } else if (event === "seña_pagada_cliente") {
     body = meta?.tipo_pago === "diferencia_seña"
       ? "Pagaste la diferencia del costo de servicio YaChanga. El trabajo sigue en curso."
-      : "Tu costo de servicio YaChanga fue acreditado. El saldo del trabajo se paga directo al profesional, fuera de la app.";
+      : "Tu costo de servicio YaChanga fue acreditado.";
   } else if (event === "saldo_pagado_trabajador") {
     body =
       "El cliente indicó que pagó el saldo. Confirmá la recepción del pago en el chat.";

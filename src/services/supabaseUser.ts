@@ -5,6 +5,7 @@ import { fetchMyProfileIdentity } from './profileIdentitySupabase';
 import type { AuthUser, SignUpPayload } from './auth';
 import { normalizeDisplayAddress } from '../utils/formatAddress';
 import { storageOwnerFolder, userAuthDisplayName } from '../utils/storageOwnerFolder';
+import { resolveProfessionalDescription } from '../utils/professionalDescription';
 import { completedJobsFromPayload } from '../utils/workerReputation';
 
 /**
@@ -17,7 +18,8 @@ import { completedJobsFromPayload } from '../utils/workerReputation';
  * baseLocation.lat/lng → p_lat / p_lng → location (POINT, SRID 4326; eje X = lng, eje Y = lat)
  * avatarUri (subida a bucket avatars) → p_avatar_url → avatar_url
  * offerServices + coverageKm → p_coverage_km → coverage_km
- * bio → p_bio → bio (si la migración y la función en BD lo incluyen)
+ * professionalDescription → p_bio del RPC → professional_description
+ * (el argumento del RPC se sigue llamando p_bio; la columna bio ya no existe)
  */
 
 /**
@@ -26,7 +28,6 @@ import { completedJobsFromPayload } from '../utils/workerReputation';
  */
 const PROFILE_PUBLIC_CORE =
   'id,nombre,avatar_url,coverage_km,created_at,rating_average,review_count,total_jobs_done,professional_description' as const;
-const PROFILE_PUBLIC_FULL = `${PROFILE_PUBLIC_CORE},bio` as const;
 
 export type MyProfilePrivate = {
   dni: string | null;
@@ -86,7 +87,6 @@ type ProfileRow = {
   avatar_url?: string | null;
   coverage_km?: number | null;
   created_at?: string | null;
-  bio?: string | null;
   rating_average?: number | null;
   review_count?: number | null;
   total_jobs_done?: number | null;
@@ -97,11 +97,7 @@ type ProfileRow = {
 async function fetchProfileRowForUser(userId: string): Promise<ProfileRow | null> {
   const supabase = getSupabaseClient();
 
-  let res = await supabase.from('profiles').select(PROFILE_PUBLIC_FULL).eq('id', userId).maybeSingle();
-
-  if (res.error) {
-    res = await supabase.from('profiles').select(PROFILE_PUBLIC_CORE).eq('id', userId).maybeSingle();
-  }
+  const res = await supabase.from('profiles').select(PROFILE_PUBLIC_CORE).eq('id', userId).maybeSingle();
 
   if (res.error) {
     console.warn('[fetchAuthUserFromSupabase] profiles:', res.error.message);
@@ -344,6 +340,55 @@ function duplicateIdentityMessage(err: PostgrestError): string {
   return 'No se pudo crear la cuenta: este correo o DNI ya está registrado.';
 }
 
+function isMissingRpc(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  const msg = (error.message ?? '').toLowerCase();
+  return (
+    error.code === 'PGRST202' ||
+    error.code === '42883' ||
+    msg.includes('could not find the function') ||
+    msg.includes('does not exist')
+  );
+}
+
+/**
+ * `update_profile_registration_full` no escribe la descripción. El RPC
+ * `update_professional_description` (SECURITY DEFINER) guarda
+ * professional_description. El editor lee esa columna, no un borrador local.
+ */
+async function writeOwnProfessionalDescription(
+  supabase: ReturnType<typeof getSupabaseClient>,
+  userId: string,
+  raw: string,
+): Promise<void> {
+  const text = raw.trim();
+  if (!text) return;
+
+  const { error: rpcErr } = await supabase.rpc('update_professional_description', {
+    p_description: text,
+  });
+  if (!rpcErr) return;
+  if (/professional_description_too_long/i.test(rpcErr.message ?? '')) {
+    throw new Error('La descripción profesional no puede superar los 500 caracteres.');
+  }
+
+  const direct = await supabase
+    .from('profiles')
+    .update({ professional_description: text })
+    .eq('id', userId)
+    .select('id');
+  if (!direct.error && (direct.data?.length ?? 0) > 0) return;
+
+  if (!isMissingRpc(rpcErr)) {
+    throw new Error(
+      'No se pudo guardar la descripción profesional. Volvé a intentar en un momento.',
+    );
+  }
+  throw new Error(
+    `No se pudo guardar la descripción profesional (${direct.error?.message ?? rpcErr.message}).`,
+  );
+}
+
 function shouldRetryInsertProfileWithoutBio(err: PostgrestError): boolean {
   const msg = `${err.message ?? ''} ${(err as { hint?: string }).hint ?? ''}`.toLowerCase();
   const c = err.code ?? '';
@@ -362,10 +407,10 @@ function shouldRetryInsertProfileWithoutBio(err: PostgrestError): boolean {
 async function insertProfileWithLocationRpc(
   supabase: ReturnType<typeof getSupabaseClient>,
   base: InsertProfileRpcBase,
-  bioTrimmed: string,
+  descriptionTrimmed: string,
 ): Promise<void> {
-  const withBio = { ...base, p_bio: bioTrimmed };
-  let { error } = await supabase.rpc('insert_profile_with_location', withBio);
+  const withDescription = { ...base, p_bio: descriptionTrimmed };
+  let { error } = await supabase.rpc('insert_profile_with_location', withDescription);
   if (!error) return;
   if (isProfileDuplicateError(error)) {
     throw new Error(duplicateIdentityMessage(error));
@@ -399,8 +444,8 @@ export type ProfileRegistrationUpdatePayload = {
   phone: string;
   baseLocation: { address: string; lat: number; lng: number };
   avatarUri: string;
-  /** Si se omite, no se envía cambio de bio (usá cadena vacía solo si querés borrarla). */
-  bio?: string;
+  /** Si se omite, no se modifica la descripción profesional. */
+  professionalDescription?: string;
   /** YYYY-MM-DD; si se omite, no modifica birth_date. Usá '' para limpiar. */
   birthDate?: string;
   /** Referencias opcionales para ubicar el domicilio. Usá '' para limpiar. */
@@ -410,10 +455,10 @@ export type ProfileRegistrationUpdatePayload = {
 async function updateProfileRegistrationRpc(
   supabase: ReturnType<typeof getSupabaseClient>,
   base: UpdateProfileRpcBase,
-  bioTrimmed: string,
+  descriptionTrimmed: string,
 ): Promise<void> {
-  const withBio = { ...base, p_bio: bioTrimmed };
-  let { error } = await supabase.rpc('update_profile_registration', withBio);
+  const withDescription = { ...base, p_bio: descriptionTrimmed };
+  let { error } = await supabase.rpc('update_profile_registration', withDescription);
   if (!error) return;
   if (!shouldRetryInsertProfileWithoutBio(error)) {
     throw error;
@@ -422,7 +467,7 @@ async function updateProfileRegistrationRpc(
   if (error) throw error;
 }
 
-/** Persiste cambios de la ficha de registro (nombre, DNI, teléfono, ubicación, avatar). Si `bio` viene definido, actualiza la bio; si no, no la modifica. */
+/** Persiste cambios de la ficha de registro (nombre, DNI, teléfono, ubicación, avatar). Si viene la descripción, la guarda en professional_description. */
 export async function updateProfileRegistrationInSupabase(
   payload: ProfileRegistrationUpdatePayload,
 ): Promise<string> {
@@ -510,11 +555,11 @@ export async function updateProfileRegistrationInSupabase(
       p_avatar_url: avatarUrl,
     };
 
-    const bioToStore =
-      payload.bio !== undefined ? payload.bio.trim() : undefined;
+    const descriptionToStore =
+      payload.professionalDescription !== undefined ? payload.professionalDescription.trim() : undefined;
     try {
-      if (bioToStore !== undefined) {
-        await updateProfileRegistrationRpc(supabase, base, bioToStore);
+      if (descriptionToStore !== undefined) {
+        await updateProfileRegistrationRpc(supabase, base, descriptionToStore);
       } else {
         const { error } = await supabase.rpc('update_profile_registration_no_bio', base);
         if (error) throw error;
@@ -539,15 +584,9 @@ export async function updateProfileRegistrationInSupabase(
     }
   }
 
-  // Bio opcional (solo si usamos full RPC; en legacy ya se mandó si venía).
-  if (!fullMissing && !fullErr && payload.bio !== undefined) {
-    const { error: bioErr } = await supabase
-      .from('profiles')
-      .update({ bio: payload.bio.trim() })
-      .eq('id', user.id);
-    if (bioErr) {
-      console.warn('[updateProfileRegistration] bio omitida:', bioErr.message);
-    }
+  // El RPC full no toca la descripción. El alta profesional la manda acá.
+  if (!fullMissing && !fullErr && payload.professionalDescription !== undefined && payload.professionalDescription.trim()) {
+    await writeOwnProfessionalDescription(supabase, user.id, payload.professionalDescription);
   }
 
   try {
@@ -734,16 +773,15 @@ export async function fetchAuthUserFromSupabase(user: User): Promise<AuthUser> {
         }
       : undefined;
 
-  const bioFromTrades =
+  const tradeFallback =
     primary?.details?.trim() ||
     trades.find((t) => t.details?.trim())?.details?.trim() ||
     undefined;
 
-  const bioFromProfile =
-    typeof profile === 'object' && profile !== null && 'bio' in profile
-      ? String((profile as { bio: unknown }).bio ?? '').trim()
-      : '';
-  const resolvedBio = bioFromProfile || bioFromTrades || undefined;
+  const professionalDescription = resolveProfessionalDescription({
+    professionalDescription: profile.professional_description,
+    tradeFallback,
+  });
 
   const nombre = profile.nombre ?? '';
   const apellido = profile.apellido ?? '';
@@ -769,7 +807,7 @@ export async function fetchAuthUserFromSupabase(user: User): Promise<AuthUser> {
         : undefined,
     profileCreatedAt:
       typeof profile.created_at === 'string' ? profile.created_at : undefined,
-    bio: resolvedBio,
+    professionalDescription,
     worker,
     ratingAverage:
       typeof profile.rating_average === 'number'
@@ -821,20 +859,16 @@ export async function persistSignUpToSupabase(
       phone: payload.phone,
       baseLocation: payload.baseLocation,
       avatarUri: payload.avatarUri,
-      bio: payload.bio,
+      professionalDescription: payload.professionalDescription,
       birthDate: payload.birthDate?.trim() ?? '',
       locationDetails: payload.locationDetails?.trim() ?? '',
     });
 
-    if ((payload.bio ?? '').trim()) {
-      await supabase
-        .from('profiles')
-        .update({ professional_description: (payload.bio ?? '').trim() })
-        .eq('id', userId);
-    }
-
     if (payload.offerServices && payload.trades?.length) {
       await persistSignUpTrades(supabase, folder, userId, payload);
+    }
+    if ((payload.professionalDescription ?? '').trim()) {
+      await writeOwnProfessionalDescription(supabase, userId, payload.professionalDescription ?? '');
     }
     return;
   }
@@ -853,7 +887,7 @@ export async function persistSignUpToSupabase(
   };
 
   try {
-    await insertProfileWithLocationRpc(supabase, rpcBase, (payload.bio ?? '').trim());
+    await insertProfileWithLocationRpc(supabase, rpcBase, (payload.professionalDescription ?? '').trim());
   } catch (e) {
     // Carrera con trigger: el perfil apareció entre el SELECT y el INSERT.
     if (await fetchProfileRowForUser(userId)) {
@@ -864,12 +898,15 @@ export async function persistSignUpToSupabase(
         phone: payload.phone,
         baseLocation: payload.baseLocation,
         avatarUri: payload.avatarUri,
-        bio: payload.bio,
+        professionalDescription: payload.professionalDescription,
         birthDate: payload.birthDate?.trim() ?? '',
         locationDetails: payload.locationDetails?.trim() ?? '',
       });
       if (payload.offerServices && payload.trades?.length) {
         await persistSignUpTrades(supabase, folder, userId, payload);
+      }
+      if ((payload.professionalDescription ?? '').trim()) {
+        await writeOwnProfessionalDescription(supabase, userId, payload.professionalDescription ?? '');
       }
       return;
     }
@@ -912,12 +949,8 @@ export async function persistSignUpToSupabase(
     }
   }
 
-  // Profesional: persistimos descripción profesional separada.
-  if ((payload.bio ?? '').trim()) {
-    await supabase
-      .from('profiles')
-      .update({ professional_description: (payload.bio ?? '').trim() })
-      .eq('id', userId);
+  if ((payload.professionalDescription ?? '').trim()) {
+    await writeOwnProfessionalDescription(supabase, userId, payload.professionalDescription ?? '');
   }
 
   // Fecha / detalles: preferir RPC extras (SECURITY DEFINER).
@@ -1016,7 +1049,8 @@ async function persistSignUpTrades(
     });
   }
 
-  // Intento moderno (photo_urls). Si el schema no lo tiene aún, caemos a legacy.
+  // El INSERT dispara trg_jobs_professional_pending. Con el mail ya validado
+  // el perfil queda pending. No se aprueba solo: lo aprueba o lo rechaza el admin.
   const { error: je } = await supabase.from('jobs').insert(rows);
   if (!je) return;
 
@@ -1049,11 +1083,7 @@ export async function persistProfessionalDescriptionInSupabase(desc: string): Pr
     error: ue,
   } = await sb.auth.getUser();
   if (ue || !user?.id) throw new Error('No hay sesión activa.');
-  const { error } = await sb
-    .from('profiles')
-    .update({ professional_description: (desc ?? '').trim() })
-    .eq('id', user.id);
-  if (error) throw error;
+  await writeOwnProfessionalDescription(sb, user.id, desc ?? '');
 }
 
 export async function persistWorkerGeoToSupabase(

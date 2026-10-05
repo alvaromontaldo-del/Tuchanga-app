@@ -180,12 +180,13 @@ export async function saveIntroVideoFromUri(params: {
   localUri: string;
   mime: 'video/mp4' | 'video/quicktime';
   fileSize?: number | null;
+  source?: 'camera' | 'picker';
   previousPath?: string | null;
   onProgress?: UploadProgress;
 }): Promise<{ path: string; playbackUrl: string }> {
   const knownSize = measureLocalVideoFile(params.localUri) ?? positiveSize(params.fileSize);
   if (isIntroVideoTooLarge(knownSize)) {
-    throw new Error(introVideoTooLargeMessage(knownSize));
+    throw new Error(introVideoTooLargeMessage(knownSize, params.source));
   }
 
   const path = buildIntroVideoObjectPath(params.userId, introVideoExtension(params.mime));
@@ -198,7 +199,7 @@ export async function saveIntroVideoFromUri(params: {
   params.onProgress?.(0);
   const bytes = await readLocalVideoBytes(params.localUri);
   if (isIntroVideoTooLarge(bytes.byteLength)) {
-    throw new Error(introVideoTooLargeMessage(bytes.byteLength));
+    throw new Error(introVideoTooLargeMessage(bytes.byteLength, params.source));
   }
 
   const uploaded = await uploadBytesWithXhr({

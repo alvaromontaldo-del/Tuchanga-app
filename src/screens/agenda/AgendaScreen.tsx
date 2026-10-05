@@ -33,6 +33,7 @@ import {
   isHistorialContratacion,
   localDateIso,
 } from '../../utils/contratacionStatus';
+import { sortHistorialReciente } from '../../utils/agendaHistorialSort';
 import { formatPostDate } from '../../utils/formatDate';
 import { professionalPayoutAmount } from '../../utils/contractedWorkDisplay';
 import type { AgendaStackScreenProps } from '../../navigation/mainTypes';
@@ -157,10 +158,9 @@ function applyWorkerContratacionPatch(
 
   if (isHistorialContratacion(row)) {
     const i = historial.findIndex((x) => x.id === row.id);
-    const nextHistorial =
-      i >= 0
-        ? historial.map((x, idx) => (idx === i ? row : x))
-        : [row, ...historial].slice(0, 15);
+    const nextHistorial = sortHistorialReciente(
+      i >= 0 ? historial.map((x, idx) => (idx === i ? row : x)) : [row, ...historial],
+    ).slice(0, 15);
     return { programadas: nextProgramadas, historial: nextHistorial };
   }
 
@@ -203,7 +203,10 @@ export function AgendaScreen(_props: Props) {
       fetchContratacionesAgendaWorkerProgramadas(user.id, todayIso),
       fetchContratacionesByUser({ role: 'trabajador', limit: 40 }),
     ]);
-    const historialRows = allRows.filter(isHistorialContratacion).slice(0, 15);
+    const historialRows = sortHistorialReciente(allRows.filter(isHistorialContratacion)).slice(
+      0,
+      15,
+    );
     const clienteInfo = await fetchAgendaClienteInfoByIds(
       [...agendaRows, ...historialRows].map((row) => ({
         id: row.id,

@@ -261,11 +261,22 @@ export function WorkerABMScreen({ navigation }: Props) {
   useEffect(() => {
     if (!workerProfile) return;
     setCoverageKm(String(workerProfile.coverageKm));
-    setProfessionalDescription(workerProfile.professionalDescription);
+    if (workerProfile.professionalDescription.trim()) {
+      setProfessionalDescription(workerProfile.professionalDescription);
+    }
     setTrades(
       workerProfile.trades.length > 0 ? workerProfile.trades : [newTrade({ isPrimary: true })],
     );
   }, [workerProfile]);
+
+  // El alta guarda la descripción en el servidor, no en el almacenamiento local.
+  // Si el borrador local está vacío, mostrar lo que quedó en la cuenta.
+  useEffect(() => {
+    if (workerProfile?.professionalDescription.trim()) return;
+    const fromAccount = (user?.professionalDescription ?? '').trim();
+    if (!fromAccount) return;
+    setProfessionalDescription(fromAccount);
+  }, [workerProfile?.professionalDescription, user?.professionalDescription]);
 
   // Si todavía no hay perfil trabajador local, usar oficios/radio del servidor.
   useEffect(() => {

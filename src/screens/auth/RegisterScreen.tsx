@@ -185,7 +185,7 @@ export function RegisterScreen({ navigation, route }: Props) {
   const [phoneCountryPickerOpen, setPhoneCountryPickerOpen] = useState(false);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  /** Obligatorio solo si ofrece servicios; se guarda como bio en el perfil. */
+  /** Obligatorio solo si ofrece servicios. Se guarda en professional_description. */
   const [professionalDescription, setProfessionalDescription] = useState('');
 
   // Alta comercio (solo asCommerce). La dirección del local no es la del titular.
@@ -823,7 +823,7 @@ export function RegisterScreen({ navigation, route }: Props) {
         email: email.trim(),
         phone,
         password,
-        bio: wantWorker ? professionalDescription.trim() : undefined,
+        professionalDescription: wantWorker ? professionalDescription.trim() : undefined,
         baseLocation,
         locationDetails: locationDetails.trim() || undefined,
         offerServices: wantWorker,

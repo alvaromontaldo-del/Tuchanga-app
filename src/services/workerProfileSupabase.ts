@@ -82,7 +82,7 @@ export async function fetchWorkerPublicProfileFromSupabase(
   const { data: profile, error: pe } = await sb
     .from('profiles')
     .select(
-      'id,nombre,avatar_url,bio,professional_description,rating_average,review_count,total_jobs_done',
+      'id,nombre,avatar_url,professional_description,rating_average,review_count,total_jobs_done',
     )
     .eq('id', workerUserId)
     .maybeSingle();
@@ -137,11 +137,6 @@ export async function fetchWorkerPublicProfileFromSupabase(
     typeof profile === 'object' && profile !== null && 'professional_description' in profile
       ? String((profile as { professional_description: unknown }).professional_description ?? '').trim()
       : '';
-  const bioFromProfile =
-    typeof profile === 'object' && profile !== null && 'bio' in profile
-      ? String((profile as { bio: unknown }).bio ?? '').trim()
-      : '';
-  const bioBase = bioFromProfile;
   let birthDate = '';
   const {
     data: { user: sessionUser },
@@ -162,9 +157,8 @@ export async function fetchWorkerPublicProfileFromSupabase(
     avatarUrl:
       profile.avatar_url?.trim() ||
       `${DEFAULT_AVATAR}&id=${encodeURIComponent(profile.id)}`,
-    bio:
+    professionalDescription:
       professionalDesc ||
-      bioBase ||
       trades.map((t) => `${t.title}: ${t.description}`).join(' ').slice(0, 280) ||
       'Profesional registrado en YaChanga.',
     birthDate: birthDate || undefined,

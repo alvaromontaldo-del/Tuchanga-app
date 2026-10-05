@@ -281,7 +281,7 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
         optimisticData: {
           id: favId,
           firstName: workerFirst,
-          summary: w.bio || `${primaryTradeLabel}`,
+          summary: w.professionalDescription || `${primaryTradeLabel}`,
           avatarUrl: w.avatarUrl,
           ratingAverage: w.ratingAverage,
           reviewCount: w.reviewCount,
@@ -504,8 +504,8 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
         ) : null}
 
         <Text style={styles.sectionTitle}>Sobre {workerFirst}</Text>
-        {worker.bio?.trim() ? (
-          <ExpandableText text={worker.bio.trim()} textStyle={styles.bio} />
+        {worker.professionalDescription?.trim() ? (
+          <ExpandableText text={worker.professionalDescription.trim()} textStyle={styles.description} />
         ) : null}
 
         <Text style={styles.sectionTitle}>Oficios</Text>
@@ -652,7 +652,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
     marginBottom: spacing.xs,
   },
-  bio: {
+  description: {
     ...typography.subtitle,
     lineHeight: 24,
     color: colors.textSecondary,

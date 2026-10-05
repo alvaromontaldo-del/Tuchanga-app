@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   INTRO_VIDEO_MAX_BYTES,
   INTRO_VIDEO_MAX_LONG_SIDE,
+  INTRO_VIDEO_RECORD_MAX_BYTES,
   INTRO_VIDEO_RECORD_QUALITY,
   INTRO_VIDEO_TARGET_VIDEO_BPS,
+  formatIntroVideoSizeLabel,
   buildIntroVideoObjectPath,
   estimateIntroVideoBytes,
   introVideoDurationSeconds,
@@ -66,26 +68,31 @@ describe('video de presentación', () => {
     expect(isIntroVideoTooLarge(INTRO_VIDEO_MAX_BYTES + 1)).toBe(true);
     expect(introVideoTooLargeMessage(12 * 1024 * 1024)).toMatch(/12 MB/);
     expect(introVideoTooLargeMessage(12 * 1024 * 1024)).toMatch(/10 MB/);
+    expect(introVideoTooLargeMessage(12 * 1024 * 1024)).toMatch(/comprimido/);
+    expect(introVideoTooLargeMessage(12 * 1024 * 1024, 'picker')).toMatch(/cámara del sistema/);
+    expect(formatIntroVideoSizeLabel(2.4 * 1024 * 1024)).toBe('Pesa 2.4 MB (máximo 10 MB).');
+    expect(formatIntroVideoSizeLabel(null)).toMatch(/No se pudo medir/);
   });
 
-  it('estima 30 s a 480p / 700 kbps por debajo de 3 MB y del tope', () => {
+  it('estima 30 s a 480p / 400 kbps por debajo de 3 MB y del tope de grabación', () => {
     expect(INTRO_VIDEO_RECORD_QUALITY).toBe('480p');
     expect(INTRO_VIDEO_MAX_LONG_SIDE).toBe(854);
-    expect(INTRO_VIDEO_TARGET_VIDEO_BPS).toBeGreaterThanOrEqual(500_000);
-    expect(INTRO_VIDEO_TARGET_VIDEO_BPS).toBeLessThanOrEqual(800_000);
+    expect(INTRO_VIDEO_TARGET_VIDEO_BPS).toBe(400_000);
     const bytes = estimateIntroVideoBytes(30);
     expect(bytes).toBeLessThan(3 * 1024 * 1024);
-    expect(bytes).toBeLessThan(INTRO_VIDEO_MAX_BYTES);
+    expect(bytes).toBeLessThan(INTRO_VIDEO_RECORD_MAX_BYTES);
+    expect(INTRO_VIDEO_RECORD_MAX_BYTES).toBeLessThan(INTRO_VIDEO_MAX_BYTES);
     expect(estimateIntroVideoBytes(0)).toBe(0);
     expect(introVideoRecordingOptions('ios')).toEqual({
       maxDuration: 30,
-      maxFileSize: INTRO_VIDEO_MAX_BYTES,
+      maxFileSize: INTRO_VIDEO_RECORD_MAX_BYTES,
       codec: 'avc1',
     });
     expect(introVideoRecordingOptions('android')).toEqual({
       maxDuration: 30,
-      maxFileSize: INTRO_VIDEO_MAX_BYTES,
+      maxFileSize: INTRO_VIDEO_RECORD_MAX_BYTES,
     });
+    expect(introVideoRecordingOptions('android').codec).toBeUndefined();
   });
 
   it('al reemplazar borra los intro viejos y deja el archivo nuevo', () => {

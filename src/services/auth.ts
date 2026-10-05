@@ -259,8 +259,8 @@ export type AuthUser = {
 
   /** ISO 8601 desde `profiles.created_at` (Supabase). */
   profileCreatedAt?: string;
-  /** Texto corto para mostrar en perfil (oficio principal u opcional en el futuro). */
-  bio?: string;
+  /** Descripción profesional (profiles.professional_description). */
+  professionalDescription?: string;
 
   /** Rating acumulado (para mostrar estrellas en Mi Perfil). */
   ratingAverage?: number;
@@ -309,8 +309,8 @@ export type SignUpPayload = {
   coverageKm?: number;
   trades?: WorkerTradeDraft[];
   primaryTradeId?: string;
-  /** Descripción profesional (obligatorio si ofrecés servicios), máx. 500 caracteres. Se persiste como bio en perfil. */
-  bio?: string;
+  /** Descripción profesional (obligatorio si ofrecés servicios), máx. 500 caracteres. */
+  professionalDescription?: string;
   /**
    * Datos del local cuando el alta es de comercio.
    * Si Supabase pide confirmar el email, se guardan con el signup pendiente
@@ -364,13 +364,13 @@ function validateSignUpPayload(payload: SignUpPayload): string | null {
     return 'La contraseña es demasiado corta.';
   }
 
-  const bio = (payload.bio ?? '').trim();
-  if (bio.length > 500) {
+  const professionalDescription = (payload.professionalDescription ?? '').trim();
+  if (professionalDescription.length > 500) {
     return 'La descripción profesional no puede superar los 500 caracteres.';
   }
 
   if (payload.offerServices) {
-    if (bio.length < 20) {
+    if (professionalDescription.length < 20) {
       return 'La descripción profesional es obligatoria (mínimo 20 caracteres).';
     }
     const km = Math.floor(Number(payload.coverageKm) || 0);
@@ -422,7 +422,7 @@ function buildAuthUserFromSignUpPayload(
           };
         })()
       : undefined;
-  const bio = (persistPayload.bio ?? '').trim() || undefined;
+  const professionalDescription = (persistPayload.professionalDescription ?? '').trim() || undefined;
   return {
     id: authUser.id,
     email,
@@ -437,7 +437,7 @@ function buildAuthUserFromSignUpPayload(
       lat: persistPayload.baseLocation.lat,
       lng: persistPayload.baseLocation.lng,
     },
-    bio,
+    professionalDescription,
     worker,
   };
 }
@@ -723,7 +723,7 @@ export async function signUp(payload: SignUpPayload): Promise<AuthResult> {
         })()
       : undefined;
 
-  const bioMock = (payload.bio ?? '').trim() || undefined;
+  const descriptionMock = (payload.professionalDescription ?? '').trim() || undefined;
 
   return {
     ok: true,
@@ -743,7 +743,7 @@ export async function signUp(payload: SignUpPayload): Promise<AuthResult> {
       },
       worker,
       location: address,
-      bio: bioMock,
+      professionalDescription: descriptionMock,
     },
   };
 }

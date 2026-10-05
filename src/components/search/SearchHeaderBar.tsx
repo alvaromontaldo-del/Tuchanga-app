@@ -7,10 +7,18 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  type LayoutChangeEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandLogoHorizontal } from '../brand/BrandMark';
 import { colors, spacing } from '../../constants/theme';
+import {
+  SEARCH_PLACEHOLDER,
+  SEARCH_PLACEHOLDER_MIN_FONT,
+  SEARCH_PLACEHOLDER_MAX_FONT,
+  searchHeaderLayout,
+  searchPlaceholderFontSize,
+} from '../../utils/searchPlaceholder';
 import { ATIENDE_URGENCIAS_FILTER } from '../../utils/urgencias';
 
 type Props = {
@@ -35,7 +43,7 @@ type Props = {
 export function SearchHeaderBar({
   value,
   onChangeText,
-  placeholder = 'Buscar profesionales u oficios…',
+  placeholder = SEARCH_PLACEHOLDER,
   onPressFilters,
   filtersLabel = 'Filtros',
   autoFocus,
@@ -51,6 +59,15 @@ export function SearchHeaderBar({
   const insets = useSafeAreaInsets();
   const inputRef = useRef<TextInput | null>(null);
   const [focused, setFocused] = useState(false);
+  const [slotWidth, setSlotWidth] = useState(0);
+  const hasQuery = mode === 'input' ? value.length > 0 : Boolean(value.trim());
+  const placeholderFontSize = searchPlaceholderFontSize(slotWidth, placeholder);
+  const placeholderScale = SEARCH_PLACEHOLDER_MIN_FONT / SEARCH_PLACEHOLDER_MAX_FONT;
+
+  const onQuerySlotLayout = (e: LayoutChangeEvent) => {
+    const next = e.nativeEvent.layout.width;
+    setSlotWidth((prev) => (Math.abs(prev - next) < 1 ? prev : next));
+  };
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -72,43 +89,76 @@ export function SearchHeaderBar({
       ) : null}
 
       <View style={[styles.searchShell, focused && styles.searchShellFocused]}>
-        <Ionicons name="search-outline" size={18} color={colors.textSecondary} />
-        {mode === 'input' ? (
-          <TextInput
-            ref={(r) => {
-              inputRef.current = r;
-            }}
-            value={value}
-            onChangeText={onChangeText}
-            placeholder={placeholder}
-            placeholderTextColor={colors.textSecondary}
-            style={styles.searchInput}
-            returnKeyType="search"
-            onFocus={() => {
-              setFocused(true);
-              onFocusRequest?.();
-            }}
-            onBlur={() => setFocused(false)}
-            onSubmitEditing={() => {
-              Keyboard.dismiss();
-              onSubmit?.();
-            }}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-        ) : (
-          <TouchableOpacity
-            onPress={onPressLauncher}
-            activeOpacity={0.75}
-            style={styles.launcherTap}
-            accessibilityRole="button"
-            accessibilityLabel="Abrir búsqueda"
-          >
-            <Text style={styles.launcherText} numberOfLines={1}>
-              {value?.trim() ? value : placeholder}
-            </Text>
-          </TouchableOpacity>
-        )}
+        <Ionicons
+          name="search-outline"
+          size={searchHeaderLayout.searchIcon}
+          color={colors.textSecondary}
+        />
+        <View style={styles.querySlot} onLayout={onQuerySlotLayout}>
+          {mode === 'input' ? (
+            <>
+              {hasQuery ? null : (
+                <View pointerEvents="none" style={styles.placeholderLayer}>
+                  <Text
+                    accessible={false}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={placeholderScale}
+                    style={[
+                      styles.placeholderText,
+                      { fontSize: placeholderFontSize, width: slotWidth || '100%' },
+                    ]}
+                  >
+                    {placeholder}
+                  </Text>
+                </View>
+              )}
+              <TextInput
+                ref={(r) => {
+                  inputRef.current = r;
+                }}
+                value={value}
+                onChangeText={onChangeText}
+                placeholder=""
+                accessibilityLabel={placeholder}
+                placeholderTextColor={colors.textSecondary}
+                style={styles.searchInput}
+                returnKeyType="search"
+                onFocus={() => {
+                  setFocused(true);
+                  onFocusRequest?.();
+                }}
+                onBlur={() => setFocused(false)}
+                onSubmitEditing={() => {
+                  Keyboard.dismiss();
+                  onSubmit?.();
+                }}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </>
+          ) : (
+            <TouchableOpacity
+              onPress={onPressLauncher}
+              activeOpacity={0.75}
+              style={styles.launcherTap}
+              accessibilityRole="button"
+              accessibilityLabel="Abrir búsqueda"
+            >
+              <Text
+                style={[
+                  styles.launcherText,
+                  !hasQuery && { fontSize: placeholderFontSize, width: slotWidth || '100%' },
+                ]}
+                numberOfLines={1}
+                adjustsFontSizeToFit={!hasQuery}
+                minimumFontScale={placeholderScale}
+              >
+                {hasQuery ? value : placeholder}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         <TouchableOpacity
           onPress={onPressFilters}
@@ -117,7 +167,7 @@ export function SearchHeaderBar({
           accessibilityRole="button"
           accessibilityLabel="Abrir filtros"
         >
-          <Ionicons name="options-outline" size={18} color={colors.text} />
+          <Ionicons name="options-outline" size={searchHeaderLayout.filterIcon} color={colors.text} />
           <Text style={styles.filterText}>{filtersLabel}</Text>
         </TouchableOpacity>
       </View>
@@ -169,7 +219,7 @@ export function SearchHeaderBar({
 const styles = StyleSheet.create({
   shell: {
     backgroundColor: colors.background,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: searchHeaderLayout.shellPaddingH,
     paddingBottom: spacing.sm,
   },
   logoRow: {
@@ -180,10 +230,10 @@ const styles = StyleSheet.create({
     width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: searchHeaderLayout.searchGap,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    paddingHorizontal: 12,
+    paddingHorizontal: searchHeaderLayout.searchPaddingH,
     paddingVertical: 12,
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.06)',
@@ -198,20 +248,35 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.14,
     elevation: 4,
   },
+  querySlot: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+  },
+  placeholderLayer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+  },
+  placeholderText: {
+    color: colors.textSecondary,
+    includeFontPadding: false,
+  },
   searchInput: {
     flex: 1,
+    minWidth: 0,
     fontSize: 16,
     color: '#111827',
     paddingVertical: 0,
   },
-  launcherTap: { flex: 1, paddingVertical: 2 },
-  launcherText: { fontSize: 16, color: '#111827', fontWeight: '600' },
+  launcherTap: { flex: 1, minWidth: 0, paddingVertical: 2, justifyContent: 'center' },
+  launcherText: { fontSize: 16, color: '#111827', fontWeight: '600', includeFontPadding: false },
   filterBtn: {
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: searchHeaderLayout.filterGap,
     paddingVertical: 8,
-    paddingHorizontal: 10,
+    paddingHorizontal: searchHeaderLayout.filterPadH,
     borderRadius: 10,
     backgroundColor: 'rgba(17,24,39,0.04)',
   },
