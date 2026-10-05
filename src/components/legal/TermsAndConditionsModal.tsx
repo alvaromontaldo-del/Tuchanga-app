@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -25,13 +26,19 @@ function formatTodayEs(): string {
 
 export function TermsAndConditionsModal({ visible, onClose, onAccept }: Props) {
   const [checked, setChecked] = useState(false);
+  const { height: windowHeight } = useWindowDimensions();
+  // Altura fija: con solo maxHeight el ScrollView crece con el texto y el modal lo recorta.
+  const sheetHeight = Math.round(windowHeight * 0.92);
 
   const today = useMemo(() => formatTodayEs(), []);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.backdrop}>
-        <SafeAreaView style={styles.sheetSafe} edges={['bottom', 'left', 'right']}>
+        <SafeAreaView
+          style={[styles.sheetSafe, { height: sheetHeight }]}
+          edges={['bottom', 'left', 'right']}
+        >
           <View style={styles.sheet}>
             <View style={styles.header}>
               <View style={styles.headerLeft}>
@@ -52,7 +59,9 @@ export function TermsAndConditionsModal({ visible, onClose, onAccept }: Props) {
             <ScrollView
               style={styles.body}
               contentContainerStyle={styles.bodyContent}
-              showsVerticalScrollIndicator={false}
+              showsVerticalScrollIndicator
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
             >
               <Text style={styles.p}>
                 Este documento (los “Términos”) regula el acceso y uso de la aplicación YaChanga (la
@@ -202,7 +211,7 @@ const styles = StyleSheet.create({
   },
   sheetSafe: { width: '100%' },
   sheet: {
-    maxHeight: '92%',
+    flex: 1,
     backgroundColor: colors.background,
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
@@ -211,6 +220,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   header: {
+    flexShrink: 0,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
     paddingBottom: spacing.md,
@@ -234,7 +244,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   iconBtnPressed: { opacity: 0.8 },
-  body: { paddingHorizontal: spacing.lg },
+  body: { flex: 1, minHeight: 0, paddingHorizontal: spacing.lg },
   bodyContent: { paddingBottom: spacing.md },
   h: { marginTop: spacing.md, fontSize: 13, fontWeight: '900', color: colors.text, lineHeight: 18 },
   p: {
@@ -247,6 +257,7 @@ const styles = StyleSheet.create({
   bullets: { marginTop: spacing.sm, gap: 8 },
   bullet: { fontSize: 13, color: colors.textSecondary, lineHeight: 19, fontWeight: '600' },
   footer: {
+    flexShrink: 0,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.lg,
