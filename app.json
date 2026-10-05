@@ -21,13 +21,16 @@
         "NSLocationWhenInUseUsageDescription": "YaChanga usa tu ubicación para mostrarte profesionales cuyo radio de cobertura te alcanza.",
         "NSCameraUsageDescription": "YaChanga necesita acceso a la cámara para sacar fotos de perfil, oficios y publicaciones.",
         "NSPhotoLibraryUsageDescription": "YaChanga necesita acceso a tus fotos para elegir imágenes de perfil, oficios y publicaciones.",
-        "NSPhotoLibraryAddUsageDescription": "YaChanga necesita permiso para guardar fotos recortadas si elegís esa opción."
+        "NSPhotoLibraryAddUsageDescription": "YaChanga necesita permiso para guardar fotos recortadas si elegís esa opción.",
+        "NSFaceIDUsageDescription": "YaChanga usa Face ID para ingresar a tu cuenta."
       }
     },
     "android": {
       "package": "com.cuervolinkedout.tuchanga",
       "permissions": [
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/brand/adaptive-icon-foreground.png",
@@ -77,6 +80,12 @@
           "color": "#9A0F12",
           "defaultChannel": "default",
           "sounds": []
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "YaChanga usa Face ID para ingresar a tu cuenta."
         }
       ]
     ]
