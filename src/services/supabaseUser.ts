@@ -1075,7 +1075,8 @@ async function persistSignUpTrades(
     });
   }
 
-  // Intento moderno (photo_urls). Si el schema no lo tiene aún, caemos a legacy.
+  // El INSERT dispara trg_jobs_professional_pending. Con el mail ya validado
+  // el perfil queda pending. No se aprueba solo: lo aprueba o lo rechaza el admin.
   const { error: je } = await supabase.from('jobs').insert(rows);
   if (!je) return;
 
