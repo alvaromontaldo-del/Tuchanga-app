@@ -18,6 +18,35 @@ describe('PIN visible para el profesional que retira', () => {
     expect(detail).toContain('r.storeAddress');
   });
 
+  it('el reveal toma stores.opening_hours y no arma un horario fijo', () => {
+    const src = readFileSync('src/services/clientQuotesSupabase.ts', 'utf8');
+    const start = src.indexOf('export async function fetchMaterialOrderReveal');
+    const end = src.indexOf('\nexport async function', start + 20);
+    const body = src.slice(start, end === -1 ? undefined : end);
+    const helperStart = src.indexOf('async function fetchOrderStoreOpeningHours');
+    const helper = src.slice(helperStart, start);
+    expect(body).toContain('store_opening_hours');
+    expect(body).toContain('materialRevealOpeningHoursLabel');
+    expect(body).toContain('fetchOrderStoreOpeningHours');
+    expect(body).toContain('openingHoursRaw == null');
+    expect(helper).toContain("select('quotes(stores(opening_hours))')");
+    expect(body).not.toMatch(/\d{2}:\d{2}/);
+    expect(helper).not.toMatch(/\bphone\b/);
+    expect(helper).not.toMatch(/\baddress\b/);
+  });
+
+  it('tras pagar, el detalle muestra el horario del comercio junto a dirección y teléfono', () => {
+    const detail = readFileSync('src/screens/client/MaterialOrderDetailScreen.tsx', 'utf8');
+    const paid = detail.slice(detail.indexOf('reveals.map'));
+    expect(paid).toContain('Dir:');
+    expect(paid).toContain('Tel:');
+    expect(paid).toContain('Horarios:');
+    expect(paid).toContain('r.openingHoursLabel');
+    expect(paid).toContain('No especificado');
+    const unpaid = detail.slice(0, detail.indexOf('reveals.map'));
+    expect(unpaid).not.toContain('Horarios:');
+  });
+
   it('Mis pedidos arma la tarjeta con el PIN y el teléfono del RPC', () => {
     const pickups = readFileSync('src/screens/client/ClientMaterialPickupsScreen.tsx', 'utf8');
     const mapper = readFileSync('src/utils/clientMaterialPickups.ts', 'utf8');

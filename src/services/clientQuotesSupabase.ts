@@ -10,7 +10,10 @@ import type {
   FreightType,
   MaterialRequestStatus,
 } from '../types/materials';
-import { formatPickupOpeningHours } from '../utils/clientMaterialPickups';
+import {
+  formatPickupOpeningHours,
+  materialRevealOpeningHoursLabel,
+} from '../utils/clientMaterialPickups';
 import { normalizeOrderCodeInput, normalizePinInput } from '../utils/orderCode';
 import {
   buildMaterialCheckoutPayload,
@@ -1087,7 +1090,34 @@ export type MaterialOrderReveal = {
   storePhone: string | null;
   storeAddress: string | null;
   contactRevealed: boolean;
+  /** Horario de `stores.opening_hours`, ya formateado. null si no hay dato o aún no se pagó. */
+  openingHoursLabel: string | null;
 };
+
+type OrderStoreHoursEmbed = {
+  quotes?:
+    | { stores?: { opening_hours?: unknown } | { opening_hours?: unknown }[] | null }
+    | { stores?: { opening_hours?: unknown } | { opening_hours?: unknown }[] | null }[]
+    | null;
+};
+
+/**
+ * `stores.opening_hours` de la orden. La columna ya es legible para authenticated
+ * (no es teléfono ni dirección). Sirve si el RPC de reveal todavía no devuelve
+ * `store_opening_hours`.
+ */
+async function fetchOrderStoreOpeningHours(orderId: string): Promise<unknown> {
+  const sb = getSupabaseClient();
+  const { data, error } = await sb
+    .from('orders')
+    .select('quotes(stores(opening_hours))')
+    .eq('id', orderId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const quote = one((data as OrderStoreHoursEmbed).quotes);
+  const store = one(quote?.stores ?? null);
+  return store?.opening_hours ?? null;
+}
 
 function mapMaterialOrderRevealError(error: { message?: string }): Error {
   const msg = String(error.message ?? '');
@@ -1126,6 +1156,12 @@ export async function fetchMaterialOrderReveal(orderId: string): Promise<Materia
   const storeAddress = row.store_address != null ? String(row.store_address) : null;
   const orderCode = row.order_code != null ? String(row.order_code) : null;
   const verificationPin = row.verification_pin != null ? String(row.verification_pin) : null;
+  let openingHoursRaw: unknown = (row as { store_opening_hours?: unknown }).store_opening_hours;
+  if (contactRevealed && openingHoursRaw == null) {
+    openingHoursRaw = await fetchOrderStoreOpeningHours(String(row.order_id ?? orderId)).catch(
+      () => null,
+    );
+  }
 
   return {
     orderId: String(row.order_id),
@@ -1144,6 +1180,7 @@ export async function fetchMaterialOrderReveal(orderId: string): Promise<Materia
     storePhone: contactRevealed ? storePhone : null,
     storeAddress: contactRevealed ? formatClientStoreAddress(storeAddress) : null,
     contactRevealed,
+    openingHoursLabel: materialRevealOpeningHoursLabel(openingHoursRaw, contactRevealed),
   };
 }
 
