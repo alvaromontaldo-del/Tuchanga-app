@@ -230,6 +230,19 @@ function scheduleRows(raw: unknown): { day: number; slots: StoreHoursSlot[] }[] 
   return rows.length > 0 ? rows : null;
 }
 
+/**
+ * Horario del comercio revelado tras pagar el costo de servicio.
+ * null si todavía no se reveló el contacto o si el comercio no cargó horario.
+ * No completa huecos: solo formatea `stores.opening_hours`.
+ */
+export function materialRevealOpeningHoursLabel(
+  raw: unknown,
+  contactRevealed: boolean,
+): string | null {
+  if (!contactRevealed) return null;
+  return formatPickupOpeningHours(raw);
+}
+
 /** Horario del comercio. Acepta franjas simples o la grilla semanal (Lun a Vie · Dom: cerrado). */
 export function formatPickupOpeningHours(raw: unknown): string | null {
   const schedule = scheduleRows(raw);

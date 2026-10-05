@@ -3,6 +3,7 @@ import {
   buildClientPickupCardContent,
   formatPickupOpeningHours,
   mapClientPickupOrders,
+  materialRevealOpeningHoursLabel,
   mergeStoreQuoteDetails,
   type ClientPickupOrderRow,
 } from './clientMaterialPickups';
@@ -151,6 +152,26 @@ describe('mapClientPickupOrders', () => {
     expect(content.fields.find((field) => field.label === 'Modalidad de entrega')?.value).toBe(
       'Flete a domicilio',
     );
+  });
+
+  it('el reveal post-pago formatea el horario guardado y no lo inventa', () => {
+    const saved = {
+      schedule: [
+        { day: 1, slots: [{ open: '09:00', close: '15:00' }] },
+        { day: 2, slots: [{ open: '09:00', close: '15:00' }] },
+        { day: 3, slots: [{ open: '09:00', close: '15:00' }] },
+        { day: 4, slots: [{ open: '09:00', close: '15:00' }] },
+        { day: 5, slots: [{ open: '09:00', close: '15:00' }] },
+        { day: 6, slots: [{ open: '09:00', close: '13:00' }] },
+        { day: 7, slots: [] },
+      ],
+    };
+    expect(materialRevealOpeningHoursLabel(saved, true)).toBe(
+      'Lun a Vie: 09:00 a 15:00 · Sáb: 09:00 a 13:00 · Dom: cerrado',
+    );
+    expect(materialRevealOpeningHoursLabel(saved, false)).toBeNull();
+    expect(materialRevealOpeningHoursLabel([], true)).toBeNull();
+    expect(materialRevealOpeningHoursLabel(null, true)).toBeNull();
   });
 
   it('formatea el horario semanal del comercio', () => {

@@ -14,6 +14,7 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 
 const DB = 'material_pin_requester_test';
 const SQL = resolve(process.cwd(), 'supabase/20261001_card_63_pin_requester.sql');
+const HOURS_SQL = resolve(process.cwd(), 'supabase/20261005_card_48_reveal_opening_hours.sql');
 
 const CLIENT = '11111111-1111-4111-8111-111111111111';
 const PRO = '22222222-2222-4222-8222-222222222222';
@@ -79,6 +80,16 @@ function errorText(sql: string): string {
     const err = error as { stderr?: string; stdout?: string };
     return `${err.stderr ?? ''}\n${err.stdout ?? ''}`;
   }
+}
+
+function revealHours(uid: string | null, orderId: string): string {
+  return lastLine(
+    asUser(
+      uid,
+      `SELECT coalesce(store_opening_hours #>> '{schedule,0,slots,0,open}', 'null')
+       FROM public.get_material_order_reveal('${orderId}');`,
+    ),
+  );
 }
 
 function reveal(uid: string | null, orderId: string): string {
@@ -387,10 +398,16 @@ $$;
 `;
 
 const seedSql = `
-INSERT INTO public.stores (id, user_id, name, phone, address)
+INSERT INTO public.stores (id, user_id, name, phone, address, opening_hours)
 VALUES
-  ('${STORE_A}', '${OWNER}', 'Corralón Norte', '1144440000', 'Calle Falsa 123'),
-  ('${STORE_B}', '${SELF}', 'Mi comercio', '1155550000', 'Av Autocompra 9');
+  (
+    '${STORE_A}', '${OWNER}', 'Corralón Norte', '1144440000', 'Calle Falsa 123',
+    '{"schedule":[{"day":1,"slots":[{"open":"09:00","close":"18:00"}]}]}'::jsonb
+  ),
+  (
+    '${STORE_B}', '${SELF}', 'Mi comercio', '1155550000', 'Av Autocompra 9',
+    '{"schedule":[{"day":2,"slots":[{"open":"10:00","close":"14:00"}]}]}'::jsonb
+  );
 
 INSERT INTO public.material_requests (id, professional_id, client_id, title, status)
 VALUES
@@ -422,6 +439,7 @@ INSERT INTO public.orders (
 
 describe('contrato SQL del PIN para el creador', () => {
   const sql = readFileSync(SQL, 'utf8');
+  const hoursSql = readFileSync(HOURS_SQL, 'utf8');
 
   it('conserva los guards y no abre el PIN al dueño del comercio', () => {
     for (const guard of [
@@ -437,6 +455,11 @@ describe('contrato SQL del PIN para el creador', () => {
     expect(sql).toContain('v_req.professional_id = v_uid');
     expect(sql).toContain('public.is_store_owner');
     expect(sql).not.toContain('FUNCTION public.completar_orden_material_con_pin');
+    expect(hoursSql).toContain('store_opening_hours jsonb');
+    expect(hoursSql).toContain('WHEN v_revealed THEN v_store.opening_hours');
+    expect(hoursSql).toContain('not_order_client');
+    expect(hoursSql).toContain('public.is_store_owner');
+    expect(hoursSql).not.toContain('FUNCTION public.completar_orden_material_con_pin');
   });
 });
 
@@ -445,6 +468,7 @@ describe.skipIf(!postgresAvailable())('PIN de materiales para cliente y creador'
     psqlAdmin(`DROP DATABASE IF EXISTS ${DB}; CREATE DATABASE ${DB};`);
     psql(setupSql);
     psql(readFileSync(SQL, 'utf8'));
+    psql(readFileSync(HOURS_SQL, 'utf8'));
     psql(seedSql);
   });
 
@@ -483,6 +507,8 @@ describe.skipIf(!postgresAvailable())('PIN de materiales para cliente y creador'
   it('antes de pagar, cliente y profesional no ven PIN, teléfono ni dirección', () => {
     expect(reveal(CLIENT, ORDER_UNPAID)).toBe('null|null|null|null|false');
     expect(reveal(PRO, ORDER_UNPAID)).toBe('null|null|null|null|false');
+    expect(revealHours(CLIENT, ORDER_UNPAID)).toBe('null');
+    expect(revealHours(PRO, ORDER_UNPAID)).toBe('null');
     expect(quoteReveal(CLIENT, REQ_1, ORDER_UNPAID)).toBe('null|null|null|null');
     expect(quoteReveal(PRO, REQ_1, ORDER_UNPAID)).toBe('null|null|null|null');
     expect(myOrder(CLIENT, ORDER_UNPAID)).toBe('missing');
@@ -493,6 +519,8 @@ describe.skipIf(!postgresAvailable())('PIN de materiales para cliente y creador'
   it('después de pagar, el cliente y el profesional ven PIN, teléfono y dirección', () => {
     expect(reveal(CLIENT, ORDER_PAID)).toBe('4242|1144440000|Calle Falsa 123|1001|true');
     expect(reveal(PRO, ORDER_PAID)).toBe('4242|1144440000|Calle Falsa 123|1001|true');
+    expect(revealHours(CLIENT, ORDER_PAID)).toBe('09:00');
+    expect(revealHours(PRO, ORDER_PAID)).toBe('09:00');
     expect(quoteReveal(CLIENT, REQ_1, ORDER_PAID)).toBe('4242|1144440000|Calle Falsa 123|1001');
     expect(quoteReveal(PRO, REQ_1, ORDER_PAID)).toBe('4242|1144440000|Calle Falsa 123|1001');
     expect(myOrder(CLIENT, ORDER_PAID)).toBe('4242|1144440000|Calle Falsa 123');
@@ -507,8 +535,10 @@ describe.skipIf(!postgresAvailable())('PIN de materiales para cliente y creador'
     expect(myOrder(OWNER, ORDER_PAID)).toBe('missing');
     expect(quoteReveal(SELF, REQ_2, ORDER_SELF)).toBe('null|null|null|2002');
     expect(reveal(SELF, ORDER_SELF)).toBe('null|null|null|2002|true');
+    expect(revealHours(SELF, ORDER_SELF)).toBe('10:00');
     expect(myOrder(SELF, ORDER_SELF)).toBe('null|null|null');
     expect(reveal(CLIENT, ORDER_SELF)).toBe('5757|1155550000|Av Autocompra 9|2002|true');
+    expect(revealHours(CLIENT, ORDER_SELF)).toBe('10:00');
     expect(myOrder(CLIENT, ORDER_SELF)).toBe('5757|1155550000|Av Autocompra 9');
     expect(quoteReveal(CLIENT, REQ_2, ORDER_SELF)).toBe('5757|1155550000|Av Autocompra 9|2002');
   });
