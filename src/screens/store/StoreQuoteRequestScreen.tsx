@@ -29,6 +29,7 @@ import {
 } from '../../hooks/useSubmitStoreQuote';
 import type { CommerceStackParamList } from '../../navigation/mainTypes';
 import { formatMoneyAr } from '../../services/clientQuotesSupabase';
+import { normalizeDisplayAddress } from '../../utils/formatAddress';
 import { listKey } from '../../utils/safeAsync';
 import { sanitizePriceText } from '../../services/storeQuotesSupabase';
 import type {
@@ -247,13 +248,17 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
                 <Text style={styles.meta}>
                   {detail.items.length} ítem{detail.items.length === 1 ? '' : 's'}
                 </Text>
-                {detail.clientAddress ? (
-                  <Text style={styles.address}>Entrega: {detail.clientAddress}</Text>
-                ) : detail.clientLat != null && detail.clientLng != null ? (
+                <View style={styles.addressCard}>
+                  <Text style={styles.addressLabel}>Dirección de entrega</Text>
                   <Text style={styles.address}>
-                    Entrega (coords): {detail.clientLat.toFixed(4)}, {detail.clientLng.toFixed(4)}
+                    {detail.clientAddress
+                      ? normalizeDisplayAddress(detail.clientAddress)
+                      : 'El cliente no tiene una calle cargada.'}
                   </Text>
-                ) : null}
+                  <Text style={styles.addressHint}>
+                    Usala para cotizar el flete. No se muestran coordenadas.
+                  </Text>
+                </View>
                 {locked ? (
                   <Text style={styles.lockedBanner}>
                     {detail.existingQuote?.status === 'accepted'
@@ -264,8 +269,9 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
                   </Text>
                 ) : (
                   <Text style={styles.lead}>
-                    Indicá la marca y el precio unitario de cada ítem. Podés agregar hasta 3 marcas.
-                    Si no lo tenés, marcá “No tengo este material”.
+                    Si lo tenés, cargá hasta 3 marcas y el precio. Si no, marcá «No tengo este
+                    material» y, si querés, sugerí un reemplazo. El cliente no puede elegir el ítem
+                    sin stock.
                   </Text>
                 )}
               </View>
@@ -406,14 +412,33 @@ const QuoteItemRow = memo(function QuoteItemRow({
               {inStock ? 'Con stock' : 'Sin stock'}
             </Text>
           </View>
-          {variants.map((v, i) => (
-            <View key={`ro-v-${i}`} style={styles.roMetaBlock}>
-              <Text style={styles.roMetaLabel}>
-                {v.label.trim() || (variants.length > 1 ? `Opción ${i + 1}` : 'Precio')}
-              </Text>
-              <Text style={styles.roMetaValue}>{formatDraftPrice(v.priceText)}</Text>
-            </View>
-          ))}
+          {!inStock ? (
+            <Text style={styles.altHint}>
+              {variants.some((v) => v.label.trim())
+                ? 'El cliente solo puede elegir el reemplazo, no el pedido original.'
+                : 'El cliente no puede seleccionar este pedido.'}
+            </Text>
+          ) : null}
+          {(inStock ? variants : variants.filter((v) => v.label.trim() || v.priceText.trim())).map(
+            (v, i) => (
+              <View key={`ro-v-${i}`} style={styles.roMetaBlock}>
+                <Text style={styles.roMetaLabel}>
+                  {!inStock
+                    ? v.label.trim()
+                      ? 'Alternativa'
+                      : 'Sin alternativa'
+                    : v.label.trim() || (variants.length > 1 ? `Opción ${i + 1}` : 'Precio')}
+                </Text>
+                {!inStock && v.label.trim() ? (
+                  <Text style={styles.roAltText}>{v.label.trim()}</Text>
+                ) : null}
+                <Text style={styles.roMetaValue}>{formatDraftPrice(v.priceText)}</Text>
+              </View>
+            ),
+          )}
+          {!inStock && variants.every((v) => !v.label.trim() && !v.priceText.trim()) ? (
+            <Text style={styles.altHint}>Sin alternativa.</Text>
+          ) : null}
           {itemNote ? (
             <View style={styles.roMetaBlock}>
               <Text style={styles.roMetaLabel}>Nota</Text>
@@ -435,7 +460,13 @@ const QuoteItemRow = memo(function QuoteItemRow({
       </View>
 
       <Pressable
-        onPress={() => onPatch({ inStock: !inStock })}
+        onPress={() =>
+          onPatch({
+            inStock: !inStock,
+            // Al marcar sin stock se vacía la marca: el reemplazo hay que escribirlo a propósito.
+            variants: inStock ? [{ label: '', priceText: '' }] : variants,
+          })
+        }
         disabled={!editable}
         style={styles.stockCheckRow}
         accessibilityRole="checkbox"
@@ -452,12 +483,49 @@ const QuoteItemRow = memo(function QuoteItemRow({
         </Text>
       </Pressable>
       {!inStock ? (
-        <Text style={styles.altHint}>
-          Si cargás una marca alternativa, el precio es obligatorio. Sin alternativa podés dejarlo vacío.
-        </Text>
+        <View style={styles.altBlock}>
+          <Text style={styles.altTitle}>Sugerir un producto alternativo</Text>
+          <Text style={styles.altHint}>
+            El cliente ve el pedido como sin stock y no puede marcarlo. Si cargás un reemplazo,
+            ese es lo único que puede elegir. Si no tenés otro, dejá los campos vacíos.
+          </Text>
+          <Text style={styles.fieldLabel}>Producto alternativo</Text>
+          <TextInput
+            value={variants[0]?.label ?? ''}
+            editable={editable}
+            onChangeText={(t) => updateVariant(0, { label: t })}
+            placeholder="Ej. Caño PVC 1/2 de otra medida"
+            placeholderTextColor={colors.textSecondary}
+            style={styles.altInput}
+            maxLength={120}
+            accessibilityLabel="Producto alternativo"
+          />
+          <View style={styles.unitPriceField}>
+            <Text style={styles.fieldLabel}>Precio del alternativo $</Text>
+            <TextInput
+              value={variants[0]?.priceText ?? ''}
+              editable={editable}
+              onChangeText={(raw) =>
+                updateVariant(0, { priceText: sanitizePriceText(raw) })
+              }
+              keyboardType="decimal-pad"
+              placeholder="0"
+              placeholderTextColor={colors.textSecondary}
+              style={styles.priceInput}
+              maxLength={12}
+              accessibilityLabel="Precio del alternativo"
+            />
+            <Text style={styles.pricePreview}>
+              {formatDraftPrice(variants[0]?.priceText ?? '') === '—'
+                ? '\u00a0'
+                : formatDraftPrice(variants[0]?.priceText ?? '')}
+            </Text>
+          </View>
+        </View>
       ) : null}
 
-      {variants.map((v, index) => {
+      {inStock
+        ? variants.map((v, index) => {
         const preview = formatDraftPrice(v.priceText);
         return (
           <View key={`var-${index}`} style={styles.variantBlock}>
@@ -506,9 +574,10 @@ const QuoteItemRow = memo(function QuoteItemRow({
             ) : null}
           </View>
         );
-      })}
+      })
+        : null}
 
-      {variants.length < 3 ? (
+      {inStock && variants.length < 3 ? (
         <Pressable
           onPress={addVariant}
           style={styles.addVariantBtn}
@@ -689,11 +758,32 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textSecondary,
   },
+  addressCard: {
+    marginTop: 4,
+    padding: spacing.sm,
+    borderRadius: radii.input,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: 2,
+  },
+  addressLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.textSecondary,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
   address: {
-    fontSize: 13,
+    fontSize: 15,
     color: colors.text,
-    fontWeight: '600',
-    lineHeight: 18,
+    fontWeight: '700',
+    lineHeight: 20,
+  },
+  addressHint: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 16,
   },
   lead: {
     fontSize: 14,
