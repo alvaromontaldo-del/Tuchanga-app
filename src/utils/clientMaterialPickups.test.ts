@@ -5,6 +5,8 @@ import {
   mapClientPickupOrders,
   materialRevealOpeningHoursLabel,
   mergeStoreQuoteDetails,
+  PICKUP_TOTAL_DUE_LABEL,
+  PICKUP_TOTAL_PAID_LABEL,
   type ClientPickupOrderRow,
 } from './clientMaterialPickups';
 
@@ -114,6 +116,7 @@ describe('mapClientPickupOrders', () => {
     ]);
     expect(content.pinDisplay).toBe('0 0 0 7');
     expect(content.pinHint).toBe('Mostralo en el comercio al retirar.');
+    expect(content.totalLabel).toBe(PICKUP_TOTAL_DUE_LABEL);
     const withFreight = mapClientPickupOrders([
       { ...cement, id: 'order-flete', include_freight: true },
     ]);
@@ -140,6 +143,7 @@ describe('mapClientPickupOrders', () => {
         status: 'completed',
         completed_at: '2026-09-20T12:00:00.000Z',
         include_freight: true,
+        store_phone: '11 4444-0000',
       },
     ]);
     const content = buildClientPickupCardContent(card);
@@ -147,8 +151,19 @@ describe('mapClientPickupOrders', () => {
     expect(labels).toContain('Retirado');
     expect(labels).not.toContain('Disponible desde');
     expect(labels).not.toContain('Fecha de disponibilidad');
-    expect(content.pinUsed).toBe(true);
+    expect(labels).not.toContain('Dirección del comercio');
+    expect(labels).not.toContain('Teléfono del comercio');
+    expect(labels).not.toContain('Horario de atención');
+    expect(content.pin).toBeNull();
+    expect(content.pinDisplay).toBeNull();
+    expect(content.pinUsed).toBe(false);
     expect(content.pinHint).toBeNull();
+    expect(content.totalLabel).toBe(PICKUP_TOTAL_PAID_LABEL);
+    expect(JSON.stringify(content)).not.toContain('Siempre Viva');
+    expect(JSON.stringify(content)).not.toContain('11 4444-0000');
+    expect(JSON.stringify(content)).not.toContain('09:00');
+    expect(JSON.stringify(content)).not.toContain('0007');
+    expect(JSON.stringify(content)).not.toContain('0 0 0 7');
     expect(content.fields.find((field) => field.label === 'Modalidad de entrega')?.value).toBe(
       'Flete a domicilio',
     );
@@ -345,6 +360,10 @@ describe('mapClientPickupOrders', () => {
     expect(content.materials.map((item) => item.line)).toEqual(['Tarugos (10 mm) · 10 u']);
     expect(content.fields.map((field) => field.label)).toContain('Retirado');
     expect(content.fields.map((field) => field.label)).not.toContain('Disponible desde');
+    expect(content.fields.map((field) => field.label)).not.toContain('Dirección del comercio');
+    expect(content.fields.map((field) => field.label)).not.toContain('Horario de atención');
+    expect(content.pinDisplay).toBeNull();
+    expect(content.totalLabel).toBe(PICKUP_TOTAL_PAID_LABEL);
   });
 
   it('muestra teléfono y PIN si el RPC los devuelve, y oculta el PIN si viene null', () => {

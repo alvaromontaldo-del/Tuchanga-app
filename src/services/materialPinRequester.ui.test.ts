@@ -51,8 +51,12 @@ describe('PIN visible para el profesional que retira', () => {
     const pickups = readFileSync('src/screens/client/ClientMaterialPickupsScreen.tsx', 'utf8');
     const mapper = readFileSync('src/utils/clientMaterialPickups.ts', 'utf8');
     expect(pickups).toContain('content.pinDisplay');
+    expect(pickups).toContain('content.totalLabel');
+    expect(pickups).not.toContain('Total a abonar en el comercio');
     expect(mapper).toContain('formatPin(row.verification_pin)');
     expect(mapper).toContain('row.store_phone');
     expect(mapper).toContain('Teléfono del comercio');
+    expect(mapper).toContain('Total abonado al comercio');
+    expect(mapper).toContain("card.section === 'historial'");
   });
 });
