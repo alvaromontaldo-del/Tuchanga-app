@@ -1,4 +1,4 @@
-import { ALL_RUBRO_NOMBRES, findRubroByNombre } from './rubrosCatalog';
+import { ALL_RUBRO_NOMBRES, RUBROS_CATALOG, findRubroByNombre } from './rubrosCatalog';
 import { foldAccents } from '../utils/normalizeSearch';
 import { haversineDistanceKm } from '../utils/geoDistance';
 import { rubroBlobMatchesQuery } from '../utils/rubroSearch';
@@ -18,7 +18,7 @@ export type SearchableWorker = {
   /** Trabajos finalizados. Los mocks con reseñas quedan en ≥ 2 para seguir mostrando estrellas. */
   totalJobsDone?: number;
   avatarUrl: string;
-  /** Rubros canónicos (nombres del catálogo `rubros.json`) */
+  /** Rubros del modo demo (nombres del catálogo embebido, no del admin). */
   categories: string[];
   /**
    * Punto grueso para un pin (~1 km). No es el domicilio exacto.
@@ -128,7 +128,7 @@ export const SEARCH_WORKERS: SearchableWorker[] = [
 function workerSearchBlob(worker: SearchableWorker): string {
   const parts: string[] = [worker.firstName, worker.summary, ...worker.categories];
   for (const cat of worker.categories) {
-    const hit = findRubroByNombre(cat);
+    const hit = findRubroByNombre(cat, RUBROS_CATALOG);
     if (hit) {
       parts.push(hit.categoria.nombre, ...hit.servicio.keywords);
     }

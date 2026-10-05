@@ -14,10 +14,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radii, spacing } from '../../constants/theme';
 import { listKey } from '../../utils/safeAsync';
-import {
-  getCategoriasSortedByPopularidad,
-  type RubroServicio,
-} from '../../data/rubrosCatalog';
+import { getCategoriasSortedByPopularidad, type RubroServicio } from '../../data/rubrosCatalog';
+import { useTradeCatalog } from '../../hooks/useTradeCatalog';
 import { filterCategoriasForQuery } from '../../utils/rubroSearch';
 
 type Props = {
@@ -42,6 +40,7 @@ export function RubroMultiSelectModal({
   singleSelect,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const { catalog, loading } = useTradeCatalog();
   const [query, setQuery] = useState('');
   const [draft, setDraft] = useState<string[]>([]);
 
@@ -53,7 +52,8 @@ export function RubroMultiSelectModal({
   }, [visible, initialSelected]);
 
   const sections = useMemo(() => {
-    const cats = getCategoriasSortedByPopularidad();
+    if (!catalog) return [];
+    const cats = getCategoriasSortedByPopularidad(catalog);
     const filtered = filterCategoriasForQuery(cats, query);
     if (!allowedNames || allowedNames.length === 0) return filtered;
     const allow = new Set(allowedNames.map((x) => x.trim()).filter(Boolean));
@@ -63,7 +63,7 @@ export function RubroMultiSelectModal({
         data: sec.data.filter((it) => allow.has(it.nombre)),
       }))
       .filter((sec) => sec.data.length > 0);
-  }, [allowedNames, query]);
+  }, [allowedNames, catalog, query]);
 
   function toggle(nombre: string) {
     setDraft((prev) => {
@@ -112,7 +112,7 @@ export function RubroMultiSelectModal({
             style={styles.searchInput}
             value={query}
             onChangeText={setQuery}
-            placeholder="Buscar oficio o palabra clave…"
+            placeholder="Buscar oficio…"
             placeholderTextColor={colors.textSecondary}
             autoCapitalize="none"
             autoCorrect={false}
@@ -170,7 +170,7 @@ export function RubroMultiSelectModal({
           ListEmptyComponent={
             <View style={styles.empty}>
               <Text style={styles.emptyText}>
-                No hay resultados. Probá con otros oficios.
+                {loading ? 'Cargando oficios…' : 'No hay resultados. Probá con otros oficios.'}
               </Text>
             </View>
           }

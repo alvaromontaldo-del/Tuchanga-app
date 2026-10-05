@@ -51,6 +51,7 @@ import {
   phoneCountryLabel,
 } from '../../data/phoneCountries';
 import { getDefaultRubroNombre } from '../../data/rubrosCatalog';
+import { useTradeCatalog } from '../../hooks/useTradeCatalog';
 import type { AuthStackScreenProps } from '../../navigation/types';
 import { signUp, type WorkerTradeDraft, MSG_IDENTITY_FIELD, checkIdentityConflicts } from '../../services/auth';
 import {
@@ -233,6 +234,10 @@ export function RegisterScreen({ navigation, route }: Props) {
   const [trades, setTrades] = useState<WorkerTradeDraft[]>([]);
   const [primaryTradeId, setPrimaryTradeId] = useState<string | null>(null);
   const [tradePickerOpenForId, setTradePickerOpenForId] = useState<string | null>(null);
+  const { catalog: tradeCatalog, loading: tradeCatalogLoading } = useTradeCatalog();
+  const defaultTradeName = tradeCatalog
+    ? getDefaultRubroNombre(tradeCatalog) || 'Albañilería'
+    : 'Albañilería';
 
   useEffect(() => {
     if (!asCommerce) return;
@@ -245,15 +250,15 @@ export function RegisterScreen({ navigation, route }: Props) {
   }, [asCommerce, enterCommerceIntent]);
 
   useEffect(() => {
-    if (!asProfessional) return;
+    if (!asProfessional || tradeCatalogLoading) return;
     setOfferServices(true);
     setTrades((prev) => {
       if (prev.length > 0) return prev;
       const id = `trade-prof-${Date.now()}`;
       setPrimaryTradeId(id);
-      return [{ id, name: getDefaultRubroNombre() || 'Albañilería', details: '' }];
+      return [{ id, name: defaultTradeName, details: '' }];
     });
-  }, [asProfessional]);
+  }, [asProfessional, defaultTradeName, tradeCatalogLoading]);
 
   useEffect(() => {
     if (!asCommerce) return;
@@ -518,7 +523,7 @@ export function RegisterScreen({ navigation, route }: Props) {
     const id = `trade-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const next: WorkerTradeDraft = {
       id,
-      name: getDefaultRubroNombre() || 'Albañilería',
+      name: defaultTradeName,
       details: '',
     };
     setTrades((prev) => {
