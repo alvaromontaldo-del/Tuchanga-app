@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   Platform,
   Pressable,
@@ -26,6 +27,9 @@ import { ImagePickerComponent } from '../../components/common/ImagePickerCompone
 import { colors, radii, spacing } from '../../constants/theme';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { useAuth } from '../../context/AuthContext';
+import { useCommerceShell } from '../../context/CommerceShellContext';
+import { useUserMode } from '../../context/UserModeContext';
+import { useWorkerProfile } from '../../context/WorkerProfileContext';
 import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/nominatim';
 import {
   activeStreetQuery,
@@ -46,9 +50,11 @@ import {
 import type { AccountStackScreenProps } from '../../navigation/accountTypes';
 import type { AuthUser } from '../../services/auth';
 import {
+  deleteCurrentUserAccountInSupabase,
   fetchCurrentUserProfileFromSupabase,
   updateProfileRegistrationInSupabase,
 } from '../../services/supabaseUser';
+import { showDeleteClientAccountButton } from '../../utils/deleteClientAccountVisibility';
 import { getHighAccuracyPosition } from '../../utils/deviceGeolocation';
 import { mergeAuthUserProfile } from '../../utils/mergeAuthUserProfile';
 import {
@@ -85,8 +91,16 @@ function clampInt(n: number, min: number, max: number) {
 export function EditRegistrationScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const contentWidth = Math.min(width - spacing.lg * 2, 520);
-  const { user, replaceOrMergeUser } = useAuth();
+  const { user, replaceOrMergeUser, signOut } = useAuth();
+  const { sessionRole, isCommerceShell, clearSessionRole, clearCommerceIntent } = useCommerceShell();
+  const { isWorker } = useUserMode();
+  const { deleteWorkerProfile } = useWorkerProfile();
   const toast = useAppToast();
+  const canDeleteClientAccount = showDeleteClientAccountButton({
+    sessionRole,
+    isWorker,
+    isCommerceShell,
+  });
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -109,6 +123,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
 
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [errors, setErrors] = useState<DraftErrors>({});
 
   const [firstName, setFirstName] = useState('');
@@ -444,6 +459,53 @@ export function EditRegistrationScreen({ navigation }: Props) {
     }
   }
 
+  function confirmDeleteClientAccount() {
+    if (saving || deletingAccount) return;
+    Alert.alert(
+      'Eliminar cuenta',
+      'Se va a eliminar definitivamente tu cuenta de cliente. No vas a poder volver a entrar con este correo. Esta acción no se puede deshacer.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar cuenta',
+          style: 'destructive',
+          onPress: () => {
+            void runDeleteClientAccount();
+          },
+        },
+      ],
+    );
+  }
+
+  async function runDeleteClientAccount() {
+    if (!isSupabaseConfigured()) {
+      toast.error('No se puede eliminar la cuenta sin conexión al servidor.', 'Error');
+      return;
+    }
+    setDeletingAccount(true);
+    try {
+      await deleteCurrentUserAccountInSupabase();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo eliminar la cuenta.', 'Error', {
+        durationMs: 4200,
+      });
+      setDeletingAccount(false);
+      return;
+    }
+    try {
+      await deleteWorkerProfile();
+    } catch {
+      /* el perfil local no debe impedir el cierre de sesión */
+    }
+    try {
+      await clearSessionRole();
+      await clearCommerceIntent();
+    } catch {
+      /* la cuenta ya no existe: igual hay que salir */
+    }
+    await signOut();
+  }
+
   if (loadingProfile) {
     return (
       <SafeAreaView style={styles.centered} edges={['bottom']}>
@@ -762,8 +824,29 @@ export function EditRegistrationScreen({ navigation }: Props) {
               title="Guardar cambios"
               onPress={() => void handleSave()}
               loading={saving}
+              disabled={deletingAccount}
               style={styles.submitButton}
             />
+
+            {canDeleteClientAccount ? (
+              <Pressable
+                onPress={confirmDeleteClientAccount}
+                disabled={saving || deletingAccount}
+                style={({ pressed }) => [
+                  styles.deleteAccountBtn,
+                  (saving || deletingAccount) && styles.deleteAccountBtnDisabled,
+                  pressed && !(saving || deletingAccount) && styles.pressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Eliminar cuenta de cliente"
+              >
+                {deletingAccount ? (
+                  <ActivityIndicator color={colors.error} size="small" />
+                ) : (
+                  <Text style={styles.deleteAccountText}>Eliminar cuenta</Text>
+                )}
+              </Pressable>
+            ) : null}
           </View>
         </ScrollView>
 
@@ -1091,6 +1174,21 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   submitButton: { marginTop: spacing.xl },
+  deleteAccountBtn: {
+    alignSelf: 'center',
+    marginTop: spacing.md,
+    minHeight: 36,
+    paddingVertical: 8,
+    paddingHorizontal: spacing.md,
+    justifyContent: 'center',
+  },
+  deleteAccountBtnDisabled: { opacity: 0.55 },
+  deleteAccountText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.error,
+    textAlign: 'center',
+  },
   birthWrap: {
     marginBottom: spacing.md,
     width: '100%',
