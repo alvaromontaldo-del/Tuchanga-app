@@ -146,7 +146,7 @@ describe('vistas de cliente sin apellido ni inicial', () => {
     const profile = read('src/services/workerProfileSupabase.ts');
     expect(profile).not.toMatch(/select\(\s*'[^']*apellido/);
     expect(profile).toContain(
-      "'id,nombre,avatar_url,bio,professional_description,rating_average,review_count,total_jobs_done'",
+      "'id,nombre,avatar_url,professional_description,rating_average,review_count,total_jobs_done'",
     );
 
     const posts = read('src/services/supabasePosts.ts');

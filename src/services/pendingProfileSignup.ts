@@ -30,11 +30,23 @@ export async function clearPendingProfileSignup(): Promise<void> {
   await AsyncStorage.removeItem(KEY);
 }
 
+/** Altas guardadas antes de sacar `bio` traen la descripción en esa clave. */
+function normalizeStoredProfile(profile: StoredProfile): StoredProfile {
+  const raw = profile as StoredProfile & { bio?: string };
+  const professionalDescription =
+    raw.professionalDescription?.trim() || raw.bio?.trim() || undefined;
+  const next: StoredProfile & { bio?: string } = { ...raw, professionalDescription };
+  delete next.bio;
+  return next;
+}
+
 async function loadPending(): Promise<Stored | null> {
   const raw = await AsyncStorage.getItem(KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as Stored;
+    const parsed = JSON.parse(raw) as Stored;
+    if (!parsed?.profile) return null;
+    return { ...parsed, profile: normalizeStoredProfile(parsed.profile) };
   } catch {
     return null;
   }

@@ -5,10 +5,7 @@ import { fetchMyProfileIdentity } from './profileIdentitySupabase';
 import type { AuthUser, SignUpPayload } from './auth';
 import { normalizeDisplayAddress } from '../utils/formatAddress';
 import { storageOwnerFolder, userAuthDisplayName } from '../utils/storageOwnerFolder';
-import {
-  professionalDescriptionColumns,
-  resolveAccountBio,
-} from '../utils/professionalDescription';
+import { resolveProfessionalDescription } from '../utils/professionalDescription';
 import { completedJobsFromPayload } from '../utils/workerReputation';
 
 /**
@@ -21,7 +18,8 @@ import { completedJobsFromPayload } from '../utils/workerReputation';
  * baseLocation.lat/lng → p_lat / p_lng → location (POINT, SRID 4326; eje X = lng, eje Y = lat)
  * avatarUri (subida a bucket avatars) → p_avatar_url → avatar_url
  * offerServices + coverageKm → p_coverage_km → coverage_km
- * bio → p_bio → bio (si la migración y la función en BD lo incluyen)
+ * professionalDescription → p_bio del RPC → professional_description
+ * (el argumento del RPC se sigue llamando p_bio; la columna bio ya no existe)
  */
 
 /**
@@ -30,7 +28,6 @@ import { completedJobsFromPayload } from '../utils/workerReputation';
  */
 const PROFILE_PUBLIC_CORE =
   'id,nombre,avatar_url,coverage_km,created_at,rating_average,review_count,total_jobs_done,professional_description' as const;
-const PROFILE_PUBLIC_FULL = `${PROFILE_PUBLIC_CORE},bio` as const;
 
 export type MyProfilePrivate = {
   dni: string | null;
@@ -90,7 +87,6 @@ type ProfileRow = {
   avatar_url?: string | null;
   coverage_km?: number | null;
   created_at?: string | null;
-  bio?: string | null;
   rating_average?: number | null;
   review_count?: number | null;
   total_jobs_done?: number | null;
@@ -101,11 +97,7 @@ type ProfileRow = {
 async function fetchProfileRowForUser(userId: string): Promise<ProfileRow | null> {
   const supabase = getSupabaseClient();
 
-  let res = await supabase.from('profiles').select(PROFILE_PUBLIC_FULL).eq('id', userId).maybeSingle();
-
-  if (res.error) {
-    res = await supabase.from('profiles').select(PROFILE_PUBLIC_CORE).eq('id', userId).maybeSingle();
-  }
+  const res = await supabase.from('profiles').select(PROFILE_PUBLIC_CORE).eq('id', userId).maybeSingle();
 
   if (res.error) {
     console.warn('[fetchAuthUserFromSupabase] profiles:', res.error.message);
@@ -360,49 +352,32 @@ function isMissingRpc(error: { message?: string; code?: string } | null): boolea
 }
 
 /**
- * El alta manda la descripción como bio. `update_profile_registration_full` no
- * la escribe. El RPC `update_professional_description` (SECURITY DEFINER) guarda
- * bio y professional_description de la fila propia, aunque el UPDATE directo
- * no tenga GRANT de columna. El editor lee esas columnas, no el borrador local.
+ * `update_profile_registration_full` no escribe la descripción. El RPC
+ * `update_professional_description` (SECURITY DEFINER) guarda
+ * professional_description. El editor lee esa columna, no un borrador local.
  */
 async function writeOwnProfessionalDescription(
   supabase: ReturnType<typeof getSupabaseClient>,
   userId: string,
   raw: string,
 ): Promise<void> {
-  const fields = professionalDescriptionColumns(raw);
-  if (!fields.bio) return;
+  const text = raw.trim();
+  if (!text) return;
 
   const { error: rpcErr } = await supabase.rpc('update_professional_description', {
-    p_description: fields.professional_description,
+    p_description: text,
   });
   if (!rpcErr) return;
   if (/professional_description_too_long/i.test(rpcErr.message ?? '')) {
     throw new Error('La descripción profesional no puede superar los 500 caracteres.');
   }
 
-  const pair = await supabase
+  const direct = await supabase
     .from('profiles')
-    .update(fields)
+    .update({ professional_description: text })
     .eq('id', userId)
     .select('id');
-  if (!pair.error && (pair.data?.length ?? 0) > 0) return;
-
-  const descOnly = await supabase
-    .from('profiles')
-    .update({ professional_description: fields.professional_description })
-    .eq('id', userId)
-    .select('id');
-  const bioOnly = await supabase
-    .from('profiles')
-    .update({ bio: fields.bio })
-    .eq('id', userId)
-    .select('id');
-  if ((descOnly.data?.length ?? 0) > 0 || (bioOnly.data?.length ?? 0) > 0) {
-    const missed = descOnly.error?.message ?? bioOnly.error?.message;
-    if (missed) console.warn('[professional-description] quedó una sola columna:', missed);
-    return;
-  }
+  if (!direct.error && (direct.data?.length ?? 0) > 0) return;
 
   if (!isMissingRpc(rpcErr)) {
     throw new Error(
@@ -410,7 +385,7 @@ async function writeOwnProfessionalDescription(
     );
   }
   throw new Error(
-    `No se pudo guardar la descripción profesional (${pair.error?.message ?? rpcErr.message}).`,
+    `No se pudo guardar la descripción profesional (${direct.error?.message ?? rpcErr.message}).`,
   );
 }
 
@@ -432,10 +407,10 @@ function shouldRetryInsertProfileWithoutBio(err: PostgrestError): boolean {
 async function insertProfileWithLocationRpc(
   supabase: ReturnType<typeof getSupabaseClient>,
   base: InsertProfileRpcBase,
-  bioTrimmed: string,
+  descriptionTrimmed: string,
 ): Promise<void> {
-  const withBio = { ...base, p_bio: bioTrimmed };
-  let { error } = await supabase.rpc('insert_profile_with_location', withBio);
+  const withDescription = { ...base, p_bio: descriptionTrimmed };
+  let { error } = await supabase.rpc('insert_profile_with_location', withDescription);
   if (!error) return;
   if (isProfileDuplicateError(error)) {
     throw new Error(duplicateIdentityMessage(error));
@@ -469,8 +444,8 @@ export type ProfileRegistrationUpdatePayload = {
   phone: string;
   baseLocation: { address: string; lat: number; lng: number };
   avatarUri: string;
-  /** Si se omite, no se envía cambio de bio (usá cadena vacía solo si querés borrarla). */
-  bio?: string;
+  /** Si se omite, no se modifica la descripción profesional. */
+  professionalDescription?: string;
   /** YYYY-MM-DD; si se omite, no modifica birth_date. Usá '' para limpiar. */
   birthDate?: string;
   /** Referencias opcionales para ubicar el domicilio. Usá '' para limpiar. */
@@ -480,10 +455,10 @@ export type ProfileRegistrationUpdatePayload = {
 async function updateProfileRegistrationRpc(
   supabase: ReturnType<typeof getSupabaseClient>,
   base: UpdateProfileRpcBase,
-  bioTrimmed: string,
+  descriptionTrimmed: string,
 ): Promise<void> {
-  const withBio = { ...base, p_bio: bioTrimmed };
-  let { error } = await supabase.rpc('update_profile_registration', withBio);
+  const withDescription = { ...base, p_bio: descriptionTrimmed };
+  let { error } = await supabase.rpc('update_profile_registration', withDescription);
   if (!error) return;
   if (!shouldRetryInsertProfileWithoutBio(error)) {
     throw error;
@@ -492,7 +467,7 @@ async function updateProfileRegistrationRpc(
   if (error) throw error;
 }
 
-/** Persiste cambios de la ficha de registro (nombre, DNI, teléfono, ubicación, avatar). Si `bio` viene definido, actualiza la bio; si no, no la modifica. */
+/** Persiste cambios de la ficha de registro (nombre, DNI, teléfono, ubicación, avatar). Si viene la descripción, la guarda en professional_description. */
 export async function updateProfileRegistrationInSupabase(
   payload: ProfileRegistrationUpdatePayload,
 ): Promise<string> {
@@ -580,11 +555,11 @@ export async function updateProfileRegistrationInSupabase(
       p_avatar_url: avatarUrl,
     };
 
-    const bioToStore =
-      payload.bio !== undefined ? payload.bio.trim() : undefined;
+    const descriptionToStore =
+      payload.professionalDescription !== undefined ? payload.professionalDescription.trim() : undefined;
     try {
-      if (bioToStore !== undefined) {
-        await updateProfileRegistrationRpc(supabase, base, bioToStore);
+      if (descriptionToStore !== undefined) {
+        await updateProfileRegistrationRpc(supabase, base, descriptionToStore);
       } else {
         const { error } = await supabase.rpc('update_profile_registration_no_bio', base);
         if (error) throw error;
@@ -609,9 +584,9 @@ export async function updateProfileRegistrationInSupabase(
     }
   }
 
-  // El RPC full no toca la bio. El alta profesional la manda acá.
-  if (!fullMissing && !fullErr && payload.bio !== undefined && payload.bio.trim()) {
-    await writeOwnProfessionalDescription(supabase, user.id, payload.bio);
+  // El RPC full no toca la descripción. El alta profesional la manda acá.
+  if (!fullMissing && !fullErr && payload.professionalDescription !== undefined && payload.professionalDescription.trim()) {
+    await writeOwnProfessionalDescription(supabase, user.id, payload.professionalDescription);
   }
 
   try {
@@ -798,15 +773,14 @@ export async function fetchAuthUserFromSupabase(user: User): Promise<AuthUser> {
         }
       : undefined;
 
-  const bioFromTrades =
+  const tradeFallback =
     primary?.details?.trim() ||
     trades.find((t) => t.details?.trim())?.details?.trim() ||
     undefined;
 
-  const resolvedBio = resolveAccountBio({
+  const professionalDescription = resolveProfessionalDescription({
     professionalDescription: profile.professional_description,
-    bio: profile.bio,
-    tradeFallback: bioFromTrades,
+    tradeFallback,
   });
 
   const nombre = profile.nombre ?? '';
@@ -833,7 +807,7 @@ export async function fetchAuthUserFromSupabase(user: User): Promise<AuthUser> {
         : undefined,
     profileCreatedAt:
       typeof profile.created_at === 'string' ? profile.created_at : undefined,
-    bio: resolvedBio,
+    professionalDescription,
     worker,
     ratingAverage:
       typeof profile.rating_average === 'number'
@@ -885,7 +859,7 @@ export async function persistSignUpToSupabase(
       phone: payload.phone,
       baseLocation: payload.baseLocation,
       avatarUri: payload.avatarUri,
-      bio: payload.bio,
+      professionalDescription: payload.professionalDescription,
       birthDate: payload.birthDate?.trim() ?? '',
       locationDetails: payload.locationDetails?.trim() ?? '',
     });
@@ -893,8 +867,8 @@ export async function persistSignUpToSupabase(
     if (payload.offerServices && payload.trades?.length) {
       await persistSignUpTrades(supabase, folder, userId, payload);
     }
-    if ((payload.bio ?? '').trim()) {
-      await writeOwnProfessionalDescription(supabase, userId, payload.bio ?? '');
+    if ((payload.professionalDescription ?? '').trim()) {
+      await writeOwnProfessionalDescription(supabase, userId, payload.professionalDescription ?? '');
     }
     return;
   }
@@ -913,7 +887,7 @@ export async function persistSignUpToSupabase(
   };
 
   try {
-    await insertProfileWithLocationRpc(supabase, rpcBase, (payload.bio ?? '').trim());
+    await insertProfileWithLocationRpc(supabase, rpcBase, (payload.professionalDescription ?? '').trim());
   } catch (e) {
     // Carrera con trigger: el perfil apareció entre el SELECT y el INSERT.
     if (await fetchProfileRowForUser(userId)) {
@@ -924,15 +898,15 @@ export async function persistSignUpToSupabase(
         phone: payload.phone,
         baseLocation: payload.baseLocation,
         avatarUri: payload.avatarUri,
-        bio: payload.bio,
+        professionalDescription: payload.professionalDescription,
         birthDate: payload.birthDate?.trim() ?? '',
         locationDetails: payload.locationDetails?.trim() ?? '',
       });
       if (payload.offerServices && payload.trades?.length) {
         await persistSignUpTrades(supabase, folder, userId, payload);
       }
-      if ((payload.bio ?? '').trim()) {
-        await writeOwnProfessionalDescription(supabase, userId, payload.bio ?? '');
+      if ((payload.professionalDescription ?? '').trim()) {
+        await writeOwnProfessionalDescription(supabase, userId, payload.professionalDescription ?? '');
       }
       return;
     }
@@ -975,8 +949,8 @@ export async function persistSignUpToSupabase(
     }
   }
 
-  if ((payload.bio ?? '').trim()) {
-    await writeOwnProfessionalDescription(supabase, userId, payload.bio ?? '');
+  if ((payload.professionalDescription ?? '').trim()) {
+    await writeOwnProfessionalDescription(supabase, userId, payload.professionalDescription ?? '');
   }
 
   // Fecha / detalles: preferir RPC extras (SECURITY DEFINER).

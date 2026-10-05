@@ -273,10 +273,10 @@ export function WorkerABMScreen({ navigation }: Props) {
   // Si el borrador local está vacío, mostrar lo que quedó en la cuenta.
   useEffect(() => {
     if (workerProfile?.professionalDescription.trim()) return;
-    const fromAccount = (user?.bio ?? '').trim();
+    const fromAccount = (user?.professionalDescription ?? '').trim();
     if (!fromAccount) return;
     setProfessionalDescription(fromAccount);
-  }, [workerProfile?.professionalDescription, user?.bio]);
+  }, [workerProfile?.professionalDescription, user?.professionalDescription]);
 
   // Si todavía no hay perfil trabajador local, usar oficios/radio del servidor.
   useEffect(() => {

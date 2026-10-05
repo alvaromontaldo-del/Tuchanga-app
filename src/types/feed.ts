@@ -59,7 +59,8 @@ export type WorkerPublicProfile = {
   /** Rubro principal (resumen / feed) */
   trade: string;
   avatarUrl: string;
-  bio: string;
+  /** Descripción profesional (profiles.professional_description). */
+  professionalDescription: string;
   /** YYYY-MM-DD (opcional) */
   birthDate?: string;
   /** Promedio de calificación entre 1 y 5 */
