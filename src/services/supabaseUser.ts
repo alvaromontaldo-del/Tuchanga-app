@@ -360,10 +360,10 @@ function isMissingRpc(error: { message?: string; code?: string } | null): boolea
 }
 
 /**
- * El alta manda la descripción como bio. El RPC full no la guarda, y un UPDATE
- * directo puede fallar si falta el GRANT de la columna. Se intentan las dos
- * columnas y, si eso no entra, el RPC `update_professional_description`.
- * Tira error: antes se tragaba y el texto no aparecía en Editar perfil.
+ * El alta manda la descripción como bio. `update_profile_registration_full` no
+ * la escribe. El RPC `update_professional_description` (SECURITY DEFINER) guarda
+ * bio y professional_description de la fila propia, aunque el UPDATE directo
+ * no tenga GRANT de columna. El editor lee esas columnas, no el borrador local.
  */
 async function writeOwnProfessionalDescription(
   supabase: ReturnType<typeof getSupabaseClient>,
@@ -373,31 +373,44 @@ async function writeOwnProfessionalDescription(
   const fields = professionalDescriptionColumns(raw);
   if (!fields.bio) return;
 
-  const pair = await supabase.from('profiles').update(fields).eq('id', userId);
-  if (!pair.error) return;
+  const { error: rpcErr } = await supabase.rpc('update_professional_description', {
+    p_description: fields.professional_description,
+  });
+  if (!rpcErr) return;
+  if (/professional_description_too_long/i.test(rpcErr.message ?? '')) {
+    throw new Error('La descripción profesional no puede superar los 500 caracteres.');
+  }
+
+  const pair = await supabase
+    .from('profiles')
+    .update(fields)
+    .eq('id', userId)
+    .select('id');
+  if (!pair.error && (pair.data?.length ?? 0) > 0) return;
 
   const descOnly = await supabase
     .from('profiles')
     .update({ professional_description: fields.professional_description })
-    .eq('id', userId);
-  const bioOnly = await supabase.from('profiles').update({ bio: fields.bio }).eq('id', userId);
-  if (!descOnly.error || !bioOnly.error) {
+    .eq('id', userId)
+    .select('id');
+  const bioOnly = await supabase
+    .from('profiles')
+    .update({ bio: fields.bio })
+    .eq('id', userId)
+    .select('id');
+  if ((descOnly.data?.length ?? 0) > 0 || (bioOnly.data?.length ?? 0) > 0) {
     const missed = descOnly.error?.message ?? bioOnly.error?.message;
     if (missed) console.warn('[professional-description] quedó una sola columna:', missed);
     return;
   }
 
-  const { error: rpcErr } = await supabase.rpc('update_professional_description', {
-    p_description: fields.professional_description,
-  });
-  if (!rpcErr) return;
   if (!isMissingRpc(rpcErr)) {
     throw new Error(
       'No se pudo guardar la descripción profesional. Volvé a intentar en un momento.',
     );
   }
   throw new Error(
-    `No se pudo guardar la descripción profesional (${pair.error.message}).`,
+    `No se pudo guardar la descripción profesional (${pair.error?.message ?? rpcErr.message}).`,
   );
 }
 
