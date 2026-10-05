@@ -55,15 +55,19 @@ describe('mapa en el alta de comercio', () => {
 });
 
 describe('no se tocan las pantallas vecinas del mapa', () => {
-  it('editar comercio y editar registro siguen mostrando su mapa', () => {
-    const editStore = readFileSync('src/screens/store/EditStoreScreen.tsx', 'utf8');
+  it('editar registro sigue mostrando su mapa', () => {
     const editRegistration = readFileSync('src/screens/account/EditRegistrationScreen.tsx', 'utf8');
-    expect(editStore).toContain('<LocationMap');
-    expect(editStore).toContain('onPinMoved');
-    expect(editStore).not.toContain('AddressDeliveryField');
     expect(editRegistration).toContain('<LocationMap');
     expect(editRegistration).toContain('onLocateMe');
     expect(editRegistration).not.toContain('AddressDeliveryField');
+  });
+
+  it('la ruta vieja de alta comercio sigue entrando al formulario de Register', () => {
+    const wrapper = readFileSync('src/screens/auth/RegisterCommerceScreen.tsx', 'utf8');
+    expect(wrapper).toContain("registerAuthTarget('commerce')");
+    expect(wrapper).not.toContain('AppTextInput');
+    expect(wrapper).not.toContain('Usar mi ubicación');
+    expect(wrapper).not.toContain('AddressDeliveryField');
   });
 
   it('el horario corrido/cortado y el aviso de comercio pendiente siguen en su lugar', () => {

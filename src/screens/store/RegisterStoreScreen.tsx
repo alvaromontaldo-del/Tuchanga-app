@@ -12,7 +12,7 @@ import { AppButton } from '../../components/common/AppButton';
 import { StoreOpeningHoursEditor } from '../../components/store/StoreOpeningHoursEditor';
 import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
 import { AppTextInput } from '../../components/common/AppTextInput';
-import { LocationMap } from '../../components/location/LocationMap';
+import { AddressDeliveryField } from '../../components/location/AddressDeliveryField';
 import { useAppToast } from '../../components/toast/toast';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { colors, radii, spacing } from '../../constants/theme';
@@ -30,7 +30,6 @@ import {
   defaultStoreWeekSchedule,
   type StoreDaySchedule,
 } from '../../utils/storeOpeningHours';
-import { getHighAccuracyPosition } from '../../utils/deviceGeolocation';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 type Props = NativeStackScreenProps<CommerceStackParamList, 'RegisterStore'>;
@@ -52,7 +51,6 @@ export function RegisterStoreScreen({ navigation }: Props) {
   const [selectedRubros, setSelectedRubros] = useState<string[]>([]);
   const [openingHours, setOpeningHours] = useState<StoreDaySchedule[]>(defaultStoreWeekSchedule());
   const [rubrosLoading, setRubrosLoading] = useState(true);
-  const [locating, setLocating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -90,30 +88,9 @@ export function RegisterStoreScreen({ navigation }: Props) {
     );
   }, []);
 
-  const locateMe = useCallback(async () => {
-    setLocating(true);
-    try {
-      const result = await getHighAccuracyPosition();
-      if (!result.ok) {
-        toast.warning(
-          result.reason === 'denied'
-            ? 'Necesitamos permiso de ubicación.'
-            : 'No se pudo obtener el GPS.',
-          'Ubicación',
-        );
-        return;
-      }
-      setLat(result.position.lat);
-      setLng(result.position.lng);
-      toast.success('Ubicación del local actualizada.', 'GPS');
-    } finally {
-      setLocating(false);
-    }
-  }, [toast]);
-
   const handleSubmit = useCallback(async () => {
     if (lat == null || lng == null) {
-      toast.warning('Marcá la ubicación del local (GPS o mapa).', 'Ubicación');
+      toast.warning('Elegí una dirección de las sugerencias para ubicar el local.', 'Ubicación');
       return;
     }
     if (selectedRubros.length === 0) {
@@ -189,49 +166,30 @@ export function RegisterStoreScreen({ navigation }: Props) {
           keyboardType="phone-pad"
           maxLength={40}
         />
-        <AppTextInput
+        <Text style={styles.hint}>
+          Buscá la calle y elegí una sugerencia para ver el mapa. Si no queda exacto, mové el pin.
+        </Text>
+        <AddressDeliveryField
           label="Dirección *"
+          showUseCurrentLocation={false}
+          showMap
           value={address}
           onChangeText={setAddress}
+          geo={lat != null && lng != null ? { address, lat, lng } : null}
+          onGeoChange={(point) => {
+            if (!point) {
+              setLat(null);
+              setLng(null);
+              return;
+            }
+            setAddress(point.address);
+            setLat(point.lat);
+            setLng(point.lng);
+          }}
           placeholder="Calle, número, localidad"
-          maxLength={200}
         />
 
         <StoreOpeningHoursEditor days={openingHours} onChange={setOpeningHours} />
-
-        <View style={styles.locationCard}>
-          <View style={styles.locationHeader}>
-            <Ionicons name="location-outline" size={20} color={colors.primary} />
-            <Text style={styles.locationTitle}>Ubicación del local *</Text>
-          </View>
-          <Text style={styles.locationHint}>
-            {lat != null && lng != null
-              ? `${lat.toFixed(5)}, ${lng.toFixed(5)}`
-              : 'Todavía sin coordenadas'}
-          </Text>
-          <AppButton
-            title={locating ? 'Obteniendo GPS…' : 'Usar mi ubicación (GPS)'}
-            onPress={() => void locateMe()}
-            loading={locating}
-            variant="secondary"
-            style={styles.gpsBtn}
-          />
-          {lat != null && lng != null ? (
-            <View style={styles.mapWrap}>
-              <LocationMap
-                geo={{ lat, lng }}
-                coverageMeters={0}
-                showCoverage={false}
-                locating={locating}
-                onLocateMe={() => void locateMe()}
-                onPinMoved={(nextLat, nextLng) => {
-                  setLat(nextLat);
-                  setLng(nextLng);
-                }}
-              />
-            </View>
-          ) : null}
-        </View>
 
         <Text style={styles.sectionLabel}>Rubros * (podés elegir varios)</Text>
         {rubrosLoading ? (
@@ -287,44 +245,18 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: spacing.md,
   },
+  hint: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    marginBottom: spacing.sm,
+  },
   sectionLabel: {
     fontSize: 14,
     fontWeight: '700',
     color: colors.text,
     marginBottom: spacing.sm,
     marginTop: spacing.sm,
-  },
-  locationCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.card,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  locationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
-  },
-  locationTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  locationHint: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginBottom: spacing.sm,
-    fontVariant: ['tabular-nums'],
-  },
-  gpsBtn: { marginBottom: spacing.sm },
-  mapWrap: {
-    height: 220,
-    borderRadius: radii.input,
-    overflow: 'hidden',
-    marginTop: spacing.xs,
   },
   rubrosBox: {
     backgroundColor: colors.surface,
