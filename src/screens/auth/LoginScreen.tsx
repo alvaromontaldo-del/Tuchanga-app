@@ -23,7 +23,14 @@ import {
   closeAuthModalAndRedirect,
 } from '../../navigation/openAuthModal';
 import type { AuthStackScreenProps } from '../../navigation/types';
-import { signIn } from '../../services/auth';
+import { signIn, type AuthUser } from '../../services/auth';
+import { shouldDropRememberedBiometricLogin } from '../../services/biometricLogin';
+import {
+  forgetBiometricLogin,
+  loadBiometricLoginOffer,
+  rememberBiometricLogin,
+  unlockBiometricCredentials,
+} from '../../services/biometricLoginDevice';
 import { isValidEmail } from '../../utils/validation';
 
 type Props = AuthStackScreenProps<'Login'>;
@@ -48,6 +55,8 @@ export function LoginScreen({ navigation, route }: Props) {
   const [deactivationNotice, setDeactivationNotice] = useState<string | null>(null);
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [biometricLoading, setBiometricLoading] = useState(false);
+  const [biometricLabel, setBiometricLabel] = useState<string | null>(null);
 
   useEffect(() => {
     if (!flashMessage) return;
@@ -61,6 +70,16 @@ export function LoginScreen({ navigation, route }: Props) {
     setSubmitError(deactivationMessage);
     clearDeactivationMessage();
   }, [deactivationMessage, clearDeactivationMessage]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadBiometricLoginOffer().then((label) => {
+      if (!cancelled) setBiometricLabel(label);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function validate(): boolean {
     let ok = true;
@@ -83,13 +102,74 @@ export function LoginScreen({ navigation, route }: Props) {
     return ok;
   }
 
+  async function enterAfterSignIn(user: AuthUser) {
+    await setSession(user, true);
+    const stores = await refreshCommerce();
+    const hasStore = stores.some((s) => COMMERCE_SHELL_STATUSES.has(s.status));
+    const hasPendingOnly =
+      !hasStore && stores.some((s) => s.status === 'pending_approval');
+    // Comercio habilitado gana sobre profesional y cliente.
+    const role = defaultSessionRoleAfterLogin({
+      hasEnabledCommerce: hasStore,
+      isWorker: isWorkerAuthUser(user),
+    });
+
+    if (hasPendingOnly) showPendingCommerceNoticeOnce(user.id);
+    await chooseSessionRole(role);
+
+    const redirectTo = route.params?.redirectTo;
+    const dismiss = loginAuthDismiss({ role, redirectTo });
+    // Comercio: closeAuthModal() y el shell abre la ruta raíz `Commerce`.
+    if (dismiss === 'close') closeAuthModal();
+    else if (dismiss === 'redirect') closeAuthModalAndRedirect(redirectTo);
+    else closeAuthModalAndGoToInicio();
+  }
+
   async function handleSubmit() {
+    if (loading || biometricLoading) return;
     if (!validate()) return;
     setSubmitError('');
     setLoading(true);
     try {
       const result = await signIn(email, password);
       if (!result.ok) {
+        if (result.reason === 'account_deactivated') {
+          await forgetBiometricLogin();
+          setBiometricLabel(null);
+          setDeactivationNotice(result.message);
+        }
+        setSubmitError(result.message);
+        return;
+      }
+
+      await rememberBiometricLogin(email, password);
+      await enterAfterSignIn(result.user);
+    } catch (e) {
+      setSubmitError(
+        e instanceof Error ? e.message : 'No se pudo completar el inicio de sesión.',
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleBiometric() {
+    if (loading || biometricLoading) return;
+    setSubmitError('');
+    setBiometricLoading(true);
+    try {
+      const unlocked = await unlockBiometricCredentials();
+      if (!unlocked.ok) {
+        if (unlocked.message) setSubmitError(unlocked.message);
+        return;
+      }
+
+      const result = await signIn(unlocked.email, unlocked.password);
+      if (!result.ok) {
+        if (shouldDropRememberedBiometricLogin(result)) {
+          await forgetBiometricLogin();
+          setBiometricLabel(null);
+        }
         setSubmitError(result.message);
         if (result.reason === 'account_deactivated') {
           setDeactivationNotice(result.message);
@@ -97,32 +177,13 @@ export function LoginScreen({ navigation, route }: Props) {
         return;
       }
 
-      await setSession(result.user, true);
-      const stores = await refreshCommerce();
-      const hasStore = stores.some((s) => COMMERCE_SHELL_STATUSES.has(s.status));
-      const hasPendingOnly =
-        !hasStore && stores.some((s) => s.status === 'pending_approval');
-      // Comercio habilitado gana sobre profesional y cliente.
-      const role = defaultSessionRoleAfterLogin({
-        hasEnabledCommerce: hasStore,
-        isWorker: isWorkerAuthUser(result.user),
-      });
-
-      if (hasPendingOnly) showPendingCommerceNoticeOnce(result.user.id);
-      await chooseSessionRole(role);
-
-      const redirectTo = route.params?.redirectTo;
-      const dismiss = loginAuthDismiss({ role, redirectTo });
-      // Comercio: closeAuthModal() y el shell abre la ruta raíz `Commerce`.
-      if (dismiss === 'close') closeAuthModal();
-      else if (dismiss === 'redirect') closeAuthModalAndRedirect(redirectTo);
-      else closeAuthModalAndGoToInicio();
+      await enterAfterSignIn(result.user);
     } catch (e) {
       setSubmitError(
         e instanceof Error ? e.message : 'No se pudo completar el inicio de sesión.',
       );
     } finally {
-      setLoading(false);
+      setBiometricLoading(false);
     }
   }
 
@@ -178,7 +239,23 @@ export function LoginScreen({ navigation, route }: Props) {
               ¿Olvidaste tu contraseña?
             </TextLink>
 
-            <AppButton title="Ingresar" onPress={() => void handleSubmit()} loading={loading} />
+            <AppButton
+              title="Ingresar"
+              onPress={() => void handleSubmit()}
+              loading={loading}
+              disabled={biometricLoading}
+            />
+
+            {biometricLabel ? (
+              <AppButton
+                title={biometricLabel}
+                variant="secondary"
+                onPress={() => void handleBiometric()}
+                loading={biometricLoading}
+                disabled={loading}
+                style={styles.biometricButton}
+              />
+            ) : null}
 
             {submitError ? (
               <Text style={styles.submitError} accessibilityLiveRegion="polite">
@@ -235,6 +312,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.textSecondary,
     marginBottom: spacing.md,
+  },
+  biometricButton: {
+    marginTop: spacing.sm,
   },
   footer: {
     marginTop: spacing.md,
