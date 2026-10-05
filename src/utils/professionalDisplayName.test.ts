@@ -144,10 +144,12 @@ describe('vistas de cliente sin apellido ni inicial', () => {
     expect(favorites).not.toMatch(/apellido/);
 
     const profile = read('src/services/workerProfileSupabase.ts');
+    expect(profile).toContain("rpc('get_public_worker_profile'");
+    expect(profile).toContain('professionalDisplayNameForClient');
+    expect(profile).not.toMatch(/\.from\(\s*'profiles'\s*\)/);
     expect(profile).not.toMatch(/select\(\s*'[^']*apellido/);
-    expect(profile).toContain(
-      "'id,nombre,avatar_url,professional_description,rating_average,review_count,total_jobs_done'",
-    );
+    expect(profile).not.toMatch(/select\(\s*'[^']*\bbio\b/);
+    expect(profile).toContain('professionalDescription');
 
     const posts = read('src/services/supabasePosts.ts');
     expect(posts).not.toMatch(/profiles\([^)]*apellido/);

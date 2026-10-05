@@ -1,5 +1,5 @@
 import { getSupabaseClient } from '../lib/supabase';
-import type { WorkerPublicProfile } from '../types/feed';
+import type { WorkerPublicProfile, WorkerTradeEntry } from '../types/feed';
 import { MAX_WORKER_TRADES } from '../types/feed';
 import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
 import { completedJobsFromPayload } from '../utils/workerReputation';
@@ -59,119 +59,176 @@ function normalizePhotoUrls(raw: unknown, fotoUrl?: string | null): string[] {
   return out.slice(0, 5);
 }
 
-type TradeRow = {
-  nombre_oficio: string;
-  descripcion: string | null;
-  es_principal: boolean | null;
-  years_experience?: number | null;
+type TradePhotoRow = {
+  nombre_oficio?: string | null;
   foto_url?: string | null;
   photo_urls?: unknown;
 };
 
-/**
- * Perfil público para un UUID de `auth.users` / `profiles` con oficios en `jobs`.
- */
-export async function fetchWorkerPublicProfileFromSupabase(
-  workerUserId: string,
-): Promise<WorkerPublicProfile | null> {
-  const sb = getSupabaseClient();
-
-  const introPathPromise = fetchIntroVideoPath(workerUserId);
-  const urgenciasPromise = fetchWorkerAtiendeUrgencias(workerUserId);
-
-  const { data: profile, error: pe } = await sb
-    .from('profiles')
-    .select(
-      'id,nombre,avatar_url,professional_description,rating_average,review_count,total_jobs_done',
-    )
-    .eq('id', workerUserId)
-    .maybeSingle();
-
-  if (pe || !profile) return null;
-
-  let jobs: TradeRow[] = [];
-
-  // Preferir RPC SECURITY DEFINER (incluye fotos aunque RLS/select falle).
-  const rpc = await sb.rpc('fetch_worker_trades', { p_worker_id: workerUserId });
-  if (!rpc.error) {
-    jobs = ((rpc.data ?? []) as TradeRow[]) ?? [];
-  } else {
-    const modern = await sb
-      .from('jobs')
-      .select('nombre_oficio,descripcion,es_principal,years_experience,foto_url,photo_urls')
-      .eq('user_id', workerUserId)
-      .order('es_principal', { ascending: false });
-    if (!modern.error) {
-      jobs = (modern.data as TradeRow[] | null) ?? [];
-    } else {
-      const msg = (modern.error.message ?? '').toLowerCase();
-      if (!msg.includes('photo_urls') || !msg.includes('column')) return null;
-      const legacy = await sb
-        .from('jobs')
-        .select('nombre_oficio,descripcion,es_principal,years_experience,foto_url')
-        .eq('user_id', workerUserId)
-        .order('es_principal', { ascending: false });
-      if (legacy.error) return null;
-      jobs = (legacy.data as TradeRow[] | null) ?? [];
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value === 'string') {
+    const t = value.trim();
+    if (!t) return null;
+    try {
+      return asRecord(JSON.parse(t) as unknown);
+    } catch {
+      return null;
     }
   }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
 
-  if (jobs.length === 0) return null;
+function yearsOf(raw: unknown): number {
+  const n = Math.floor(Number(raw));
+  if (!Number.isFinite(n)) return 1;
+  return Math.max(1, Math.min(60, n));
+}
 
-  const trades = jobs.slice(0, MAX_WORKER_TRADES).map((j) => {
-    const photos = normalizePhotoUrls(j.photo_urls, j.foto_url);
-    return {
-      title: j.nombre_oficio,
-      description: j.descripcion?.trim() || 'Servicios a medida.',
-      yearsExperience: Math.max(
-        1,
-        Math.min(60, Math.floor(Number(j.years_experience) || 1)),
-      ),
-      photoUrls: photos.length ? photos : undefined,
-    };
-  });
+function clampRating(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(5, n));
+}
 
-  const primary = jobs.find((j) => j.es_principal) ?? jobs[0];
-  const firstName = professionalDisplayNameForClient(profile.nombre);
-  const professionalDesc =
-    typeof profile === 'object' && profile !== null && 'professional_description' in profile
-      ? String((profile as { professional_description: unknown }).professional_description ?? '').trim()
-      : '';
-  let birthDate = '';
-  const {
-    data: { user: sessionUser },
-  } = await sb.auth.getUser();
-  if (sessionUser?.id === workerUserId) {
-    const priv = await fetchMyProfilePrivate();
-    birthDate = priv?.birth_date ?? '';
+function mapTrades(raw: unknown): WorkerTradeEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const out: WorkerTradeEntry[] = [];
+  for (const item of raw) {
+    const row = asRecord(item);
+    if (!row) continue;
+    const title = String(row.nombre ?? '').trim();
+    if (!title) continue;
+    const description = String(row.descripcion ?? '').trim() || 'Servicios a medida.';
+    out.push({
+      title,
+      description,
+      yearsExperience: yearsOf(row.anos_experiencia),
+    });
   }
+  return out.slice(0, MAX_WORKER_TRADES);
+}
 
-  const [introPath, atiendeUrgencias] = await Promise.all([introPathPromise, urgenciasPromise]);
-  const introVideoUrl = playbackUrlForPath(introPath);
+/**
+ * Arma el perfil público desde `get_public_worker_profile`.
+ * El RPC ya devuelve solo el nombre de pila. No lee ni copia el apellido.
+ * Sin oficios (mismo criterio que la búsqueda) devuelve null.
+ */
+export function mapPublicWorkerRpcPayload(raw: unknown): WorkerPublicProfile | null {
+  const root = asRecord(raw);
+  if (!root) return null;
+  const profile = asRecord(root.profile);
+  if (!profile) return null;
+
+  const id = String(profile.id ?? '').trim();
+  if (!id) return null;
+
+  const trades = mapTrades(root.habilidades);
+  if (trades.length === 0) return null;
+
+  const primaryTitle =
+    String(profile.oficio ?? '').trim() || trades[0]?.title || 'Servicios';
+  const professionalDesc = String(profile.descripcion ?? '').trim();
+  const firstName = professionalDisplayNameForClient(String(profile.nombre ?? ''));
+  const avatar = String(profile.avatar ?? '').trim();
 
   return {
-    id: profile.id,
+    id,
     firstName,
-    trade: primary.nombre_oficio,
-    introVideoUrl,
-    avatarUrl:
-      profile.avatar_url?.trim() ||
-      `${DEFAULT_AVATAR}&id=${encodeURIComponent(profile.id)}`,
+    trade: primaryTitle,
+    avatarUrl: avatar || `${DEFAULT_AVATAR}&id=${encodeURIComponent(id)}`,
     professionalDescription:
       professionalDesc ||
       trades.map((t) => `${t.title}: ${t.description}`).join(' ').slice(0, 280) ||
       'Profesional registrado en YaChanga.',
-    birthDate: birthDate || undefined,
-    ratingAverage: Math.max(
-      0,
-      Math.min(5, Number((profile as { rating_average?: unknown }).rating_average) || 0),
-    ),
-    reviewCount: Math.max(
-      0,
-      Math.floor(Number((profile as { review_count?: unknown }).review_count) || 0),
-    ),
+    ratingAverage: clampRating(profile.rating),
+    reviewCount: Math.max(0, Math.floor(Number(profile.resenas_count) || 0)),
     totalJobsDone: completedJobsFromPayload(profile, 'total_jobs_done') ?? 0,
     trades,
+  };
+}
+
+function mergeTradePhotos(trades: WorkerTradeEntry[], rows: TradePhotoRow[]): WorkerTradeEntry[] {
+  const byTitle = new Map<string, string[]>();
+  for (const row of rows) {
+    const title = String(row.nombre_oficio ?? '').trim().toLowerCase();
+    const photos = normalizePhotoUrls(row.photo_urls, row.foto_url);
+    if (title && photos.length) byTitle.set(title, photos);
+  }
+  if (byTitle.size === 0) return trades;
+  return trades.map((trade) => {
+    const photos = byTitle.get(trade.title.trim().toLowerCase());
+    return photos?.length ? { ...trade, photoUrls: photos } : trade;
+  });
+}
+
+async function settle<T>(work: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await work();
+  } catch {
+    return fallback;
+  }
+}
+
+async function fetchTradePhotoRows(workerUserId: string): Promise<TradePhotoRow[]> {
+  return settle(async () => {
+    const sb = getSupabaseClient();
+    const rpc = await sb.rpc('fetch_worker_trades', { p_worker_id: workerUserId });
+    if (rpc.error || !Array.isArray(rpc.data)) return [];
+    return rpc.data as TradePhotoRow[];
+  }, []);
+}
+
+/**
+ * Perfil público de un profesional aceptado.
+ * Usa `get_public_worker_profile` (SECURITY DEFINER): misma puerta que la búsqueda
+ * (aceptado, cobertura y oficios) y solo el nombre de pila.
+ * El video, las urgencias, las fotos y la fecha de nacimiento no anulan el perfil.
+ */
+export async function fetchWorkerPublicProfileFromSupabase(
+  workerUserId: string,
+): Promise<WorkerPublicProfile | null> {
+  const id = workerUserId.trim();
+  if (!id) return null;
+
+  const sb = getSupabaseClient();
+  const rpc = await sb.rpc('get_public_worker_profile', { p_worker_id: id });
+  if (rpc.error || rpc.data == null) return null;
+
+  const mapped = mapPublicWorkerRpcPayload(rpc.data);
+  if (!mapped) return null;
+
+  // Canales aparte: un fallo acá no puede anular el perfil ya armado.
+  const [introPath, atiendeUrgencias, photoRows] = await Promise.all([
+    settle(() => fetchIntroVideoPath(id), null),
+    settle(() => fetchWorkerAtiendeUrgencias(id), false),
+    fetchTradePhotoRows(id),
+  ]);
+
+  let birthDate = '';
+  let introVideoUrl: string | null = null;
+  try {
+    const {
+      data: { user: sessionUser },
+    } = await sb.auth.getUser();
+    if (sessionUser?.id === id) {
+      const priv = await fetchMyProfilePrivate();
+      birthDate = priv?.birth_date ?? '';
+    }
+  } catch {
+    birthDate = '';
+  }
+  try {
+    introVideoUrl = playbackUrlForPath(introPath);
+  } catch {
+    introVideoUrl = null;
+  }
+
+  return {
+    ...mapped,
+    trades: mergeTradePhotos(mapped.trades, photoRows),
+    introVideoUrl,
+    birthDate: birthDate || undefined,
     atiendeUrgencias,
   };
 }
