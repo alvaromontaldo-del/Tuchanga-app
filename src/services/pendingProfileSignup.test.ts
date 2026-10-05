@@ -36,6 +36,10 @@ vi.mock('./storeQuotesSupabase', () => ({
   updateMyStoreAvatarFromUri: (...args: unknown[]) => updateMyStoreAvatarFromUri(...args),
 }));
 
+vi.mock('./termsAcceptance', () => ({
+  acceptCurrentTerms: vi.fn(async () => 'saved'),
+}));
+
 import { savePendingProfileSignup, tryApplyPendingProfileSignup } from './pendingProfileSignup';
 
 function payload(): SignUpPayload {
