@@ -52,12 +52,17 @@ export type ClientPickupCardContent = {
   title: string;
   orderCode: string | null;
   fields: ClientPickupField[];
+  /** «Para retirar» sigue pendiente de pago en el local. El historial ya se abonó. */
+  totalLabel: string;
   pin: string | null;
   pinDisplay: string | null;
   pinHint: string | null;
   pinUsed: boolean;
   materials: { id: string; line: string }[];
 };
+
+export const PICKUP_TOTAL_DUE_LABEL = 'Total a abonar en el comercio';
+export const PICKUP_TOTAL_PAID_LABEL = 'Total abonado al comercio';
 
 type RequestItemRow = {
   id?: string | null;
@@ -576,34 +581,41 @@ function dateLabel(iso: string | null | undefined): string | null {
 /**
  * Textos de la tarjeta de Para retirar / Historial.
  * No incluye “Disponible desde” ni el N° de solicitud.
+ * El historial no repite datos de retiro: dirección, teléfono, horario ni PIN.
  */
 export function buildClientPickupCardContent(card: ClientPickupCardModel): ClientPickupCardContent {
+  const history = card.section === 'historial';
   const fields: ClientPickupField[] = [];
-  fields.push({
-    label: 'Dirección del comercio',
-    value: card.address || 'Dirección no informada',
-  });
-  if (card.phone) fields.push({ label: 'Teléfono del comercio', value: card.phone });
+  if (!history) {
+    fields.push({
+      label: 'Dirección del comercio',
+      value: card.address || 'Dirección no informada',
+    });
+    if (card.phone) fields.push({ label: 'Teléfono del comercio', value: card.phone });
+  }
   if (card.section === 'para_retirar') {
     const available = dateLabel(card.availableAt);
     if (available) fields.push({ label: 'Fecha de disponibilidad', value: available });
   }
-  fields.push({
-    label: 'Horario de atención',
-    value: card.openingHoursLabel || 'Horario no informado',
-  });
+  if (!history) {
+    fields.push({
+      label: 'Horario de atención',
+      value: card.openingHoursLabel || 'Horario no informado',
+    });
+  }
   if (card.deliveryMode) fields.push({ label: 'Modalidad de entrega', value: card.deliveryMode });
-  if (card.section === 'historial') {
+  if (history) {
     const pickedUp = dateLabel(card.pickedUpAt);
     if (pickedUp) fields.push({ label: 'Retirado', value: pickedUp });
   }
 
-  const showPin = Boolean(card.pin);
+  const showPin = !history && Boolean(card.pin);
   return {
     storeName: card.storeName,
     title: card.title,
     orderCode: card.orderCode,
     fields,
+    totalLabel: history ? PICKUP_TOTAL_PAID_LABEL : PICKUP_TOTAL_DUE_LABEL,
     pin: showPin ? card.pin : null,
     pinDisplay: showPin ? formatPinForCard(card.pin) : null,
     pinHint:
@@ -612,7 +624,7 @@ export function buildClientPickupCardContent(card: ClientPickupCardModel): Clien
           ? 'Mostralo al comercio al recibir el pedido.'
           : 'Mostralo en el comercio al retirar.'
         : null,
-    pinUsed: card.section === 'historial' && showPin,
+    pinUsed: history && showPin,
     materials: card.materials.map((item) => ({
       id: item.id,
       line: materialLineText(item),

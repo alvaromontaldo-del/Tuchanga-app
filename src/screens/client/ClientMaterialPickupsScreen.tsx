@@ -46,6 +46,7 @@ const EMPTY_COPY: Record<ClientPickupSection, { title: string; body: string }> =
 /**
  * Solicitudes de materiales del cliente: listas para retirar e historial.
  * La tarjeta no muestra “Disponible desde” ni el N° de solicitud.
+ * El historial oculta dirección, teléfono, horario y PIN, y dice total abonado.
  * El resumen de materiales va en un desplegable.
  */
 export function ClientMaterialPickupsScreen() {
@@ -214,7 +215,7 @@ function PickupCard({
       ) : null}
 
       <View style={styles.totalRow}>
-        <Text style={styles.totalLabel}>Total a abonar en el comercio</Text>
+        <Text style={styles.totalLabel}>{content.totalLabel}</Text>
         <Text style={styles.totalValue}>{formatMoneyAr(card.amountDue)}</Text>
       </View>
 

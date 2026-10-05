@@ -133,8 +133,10 @@ async function scopeRpcRowsToStore(
 }
 
 /**
- * Pedidos de materiales del cliente ya pagos: listos para retirar o ya retirados.
- * Prefiere la RPC existente. Cada tarjeta queda con los materiales aceptados
+ * Pedidos de materiales ya pagos en los que el usuario es el cliente:
+ * listos para retirar o ya retirados. No incluye los que armó como profesional
+ * para un cliente (`list_my_material_solicitudes`).
+ * Prefiere la RPC. Cada tarjeta queda con los materiales aceptados
  * de esa cotización. Si no está, lee ítems de `request_items` / `quote_items`.
  * No usa el id de la solicitud en la tarjeta.
  */
