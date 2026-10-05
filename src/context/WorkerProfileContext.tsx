@@ -6,7 +6,7 @@ import { useAuth } from './AuthContext';
 export type WorkerTrade = {
   id: string;
   name: string;
-  /** Slug del catálogo `rubros.json` (opcional si es texto heredado). */
+  /** Slug del catálogo vivo (`professional_trades`; respaldo `rubros.json`). */
   rubroSlug?: string;
   isPrimary: boolean;
   yearsExperience: number | null;

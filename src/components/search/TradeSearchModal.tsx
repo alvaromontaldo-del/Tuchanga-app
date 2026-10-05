@@ -13,11 +13,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radii, spacing } from '../../constants/theme';
 import { listKey } from '../../utils/safeAsync';
-import {
-  findRubroByNombre,
-  getCategoriasSortedByPopularidad,
-  type RubroServicio,
-} from '../../data/rubrosCatalog';
+import { findRubroByNombre, getCategoriasSortedByPopularidad, type RubroServicio } from '../../data/rubrosCatalog';
+import { useTradeCatalog } from '../../hooks/useTradeCatalog';
 import { filterCategoriasForQuery } from '../../utils/rubroSearch';
 
 /** slug presente = rubro del catálogo; sin slug = texto libre heredado. */
@@ -44,18 +41,19 @@ export function TradeSearchModal({
   onApply,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const { catalog, loading } = useTradeCatalog();
   const [query, setQuery] = useState('');
   const [draft, setDraft] = useState<TradePickResult | null>(null);
 
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || !catalog) return;
     setQuery('');
     const trimmed = initialNombre?.trim() ?? '';
     if (!trimmed) {
       setDraft(null);
       return;
     }
-    const found = findRubroByNombre(trimmed);
+    const found = findRubroByNombre(trimmed, catalog);
     if (found) {
       setDraft({
         nombre: found.servicio.nombre,
@@ -65,12 +63,13 @@ export function TradeSearchModal({
     } else {
       setDraft({ nombre: trimmed });
     }
-  }, [visible, initialNombre]);
+  }, [visible, initialNombre, catalog]);
 
   const sections = useMemo(() => {
-    const cats = getCategoriasSortedByPopularidad();
+    if (!catalog) return [];
+    const cats = getCategoriasSortedByPopularidad(catalog);
     return filterCategoriasForQuery(cats, query);
-  }, [query]);
+  }, [catalog, query]);
 
   function selectServicio(s: RubroServicio, categoriaNombre: string) {
     setDraft({
@@ -119,7 +118,7 @@ export function TradeSearchModal({
             style={styles.searchInput}
             value={query}
             onChangeText={setQuery}
-            placeholder="Buscar rubro o palabra clave…"
+            placeholder="Buscar oficio…"
             placeholderTextColor={colors.textSecondary}
             autoCapitalize="none"
             autoCorrect={false}
@@ -177,7 +176,9 @@ export function TradeSearchModal({
           }}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text style={styles.emptyText}>No hay rubros que coincidan.</Text>
+              <Text style={styles.emptyText}>
+                {loading ? 'Cargando oficios…' : 'No hay rubros que coincidan.'}
+              </Text>
             </View>
           }
         />
