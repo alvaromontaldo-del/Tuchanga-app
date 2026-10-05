@@ -1042,6 +1042,21 @@ export async function deactivateProfessionalProfileInSupabase(): Promise<void> {
   if (error) throw error;
 }
 
+/**
+ * Borra la cuenta autenticada con la RPC existente `delete_user_account`
+ * (perfil, datos ligados y auth.users). La función también pide limpiar storage.
+ */
+export async function deleteCurrentUserAccountInSupabase(): Promise<void> {
+  const sb = getSupabaseClient();
+  const { error } = await sb.rpc('delete_user_account');
+  if (!error) return;
+  const msg = (error.message ?? '').toLowerCase();
+  if (msg.includes('not_authenticated')) {
+    throw new Error('No hay una sesión activa para eliminar la cuenta.');
+  }
+  throw error;
+}
+
 export async function persistProfessionalDescriptionInSupabase(desc: string): Promise<void> {
   const sb = getSupabaseClient();
   const {
