@@ -16,9 +16,12 @@ import {
   introVideoPlaybackUrl,
   introVideoRecordingOptions,
   introVideoTooLargeMessage,
+  introVideoUploadProgressTooLarge,
+  introVideoViewByteLength,
   isIntroVideoTooLarge,
   isIntroVideoTooLong,
   isSafeIntroVideoPath,
+  pickIntroVideoByteSize,
 } from './introVideo';
 
 const UID = '11111111-1111-4111-8111-111111111111';
@@ -47,11 +50,11 @@ describe('video de presentación', () => {
     expect(introVideoPlaybackUrl(BASE, null)).toBe(null);
   });
 
-  it('mide la duración en ms o en segundos y corta arriba de 31 s', () => {
-    expect(introVideoDurationSeconds(30_000)).toBe(30);
-    expect(introVideoDurationSeconds(30)).toBe(30);
-    expect(isIntroVideoTooLong(30_000)).toBe(false);
-    expect(isIntroVideoTooLong(31_500)).toBe(true);
+  it('mide la duración en ms o en segundos y corta arriba de 21 s', () => {
+    expect(introVideoDurationSeconds(20_000)).toBe(20);
+    expect(introVideoDurationSeconds(20)).toBe(20);
+    expect(isIntroVideoTooLong(20_000)).toBe(false);
+    expect(isIntroVideoTooLong(21_500)).toBe(true);
     expect(isIntroVideoTooLong(45)).toBe(true);
     expect(isIntroVideoTooLong(null)).toBe(false);
   });
@@ -74,25 +77,57 @@ describe('video de presentación', () => {
     expect(formatIntroVideoSizeLabel(null)).toMatch(/No se pudo medir/);
   });
 
-  it('estima 30 s a 480p / 400 kbps por debajo de 3 MB y del tope de grabación', () => {
+  it('estima 20 s a 480p / 320 kbps por debajo de 3 MB y del tope de grabación', () => {
     expect(INTRO_VIDEO_RECORD_QUALITY).toBe('480p');
     expect(INTRO_VIDEO_MAX_LONG_SIDE).toBe(854);
-    expect(INTRO_VIDEO_TARGET_VIDEO_BPS).toBe(400_000);
-    const bytes = estimateIntroVideoBytes(30);
+    expect(INTRO_VIDEO_TARGET_VIDEO_BPS).toBe(320_000);
+    const bytes = estimateIntroVideoBytes(20);
     expect(bytes).toBeLessThan(3 * 1024 * 1024);
+    expect(bytes).toBeGreaterThan(0.5 * 1024 * 1024);
     expect(bytes).toBeLessThan(INTRO_VIDEO_RECORD_MAX_BYTES);
+    expect(INTRO_VIDEO_RECORD_MAX_BYTES).toBe(6 * 1024 * 1024);
     expect(INTRO_VIDEO_RECORD_MAX_BYTES).toBeLessThan(INTRO_VIDEO_MAX_BYTES);
     expect(estimateIntroVideoBytes(0)).toBe(0);
     expect(introVideoRecordingOptions('ios')).toEqual({
-      maxDuration: 30,
+      maxDuration: 20,
       maxFileSize: INTRO_VIDEO_RECORD_MAX_BYTES,
       codec: 'avc1',
     });
     expect(introVideoRecordingOptions('android')).toEqual({
-      maxDuration: 30,
+      maxDuration: 20,
       maxFileSize: INTRO_VIDEO_RECORD_MAX_BYTES,
     });
     expect(introVideoRecordingOptions('android').codec).toBeUndefined();
+  });
+
+  it('el peso que se muestra y el que se sube son el mismo archivo', () => {
+    const shownByInfo = 4.2 * 1024 * 1024;
+    const realFile = 12 * 1024 * 1024;
+    expect(pickIntroVideoByteSize([shownByInfo, null, 0, realFile])).toBe(realFile);
+    expect(isIntroVideoTooLarge(pickIntroVideoByteSize([shownByInfo, realFile]))).toBe(true);
+    expect(pickIntroVideoByteSize([shownByInfo, null])).toBe(shownByInfo);
+    expect(pickIntroVideoByteSize([null, 0, undefined])).toBeNull();
+
+    const backingBuffer = 14 * 1024 * 1024;
+    expect(
+      introVideoViewByteLength({
+        byteLength: shownByInfo,
+        byteOffset: 128,
+        bufferByteLength: backingBuffer,
+      }),
+    ).toBe(shownByInfo);
+    expect(backingBuffer).toBeGreaterThan(INTRO_VIDEO_MAX_BYTES);
+    expect(introVideoViewByteLength({ byteLength: shownByInfo, bufferByteLength: backingBuffer })).toBeLessThan(
+      INTRO_VIDEO_MAX_BYTES,
+    );
+
+    expect(introVideoUploadProgressTooLarge({ totalBytesSent: 100, totalBytesExpectedToSend: shownByInfo })).toBe(
+      null,
+    );
+    expect(
+      introVideoUploadProgressTooLarge({ totalBytesSent: 100, totalBytesExpectedToSend: realFile }),
+    ).toBe(realFile);
+    expect(introVideoUploadProgressTooLarge(null)).toBeNull();
   });
 
   it('al reemplazar borra los intro viejos y deja el archivo nuevo', () => {

@@ -1,4 +1,4 @@
-import { File as ExpoFsFile } from 'expo-file-system';
+import { File as ExpoFsFile, Paths } from 'expo-file-system';
 import { getSupabaseAnonKey, getSupabaseUrl } from '../config/supabase';
 import { getSupabaseClient } from '../lib/supabase';
 import {
@@ -10,8 +10,12 @@ import {
   introVideoObjectsToDelete,
   introVideoPlaybackUrl,
   introVideoTooLargeMessage,
+  introVideoUploadProgress,
+  introVideoUploadProgressTooLarge,
+  introVideoViewByteLength,
   isIntroVideoTooLarge,
   isSafeIntroVideoPath,
+  pickIntroVideoByteSize,
 } from '../utils/introVideo';
 
 type UploadProgress = (ratio: number) => void;
@@ -39,29 +43,193 @@ function positiveSize(value: number | null | undefined): number | null {
   return value;
 }
 
-/** `File.size` no está en el tipo web del módulo; en el teléfono `info().size` sí. */
+/**
+ * El `File` que exporta el paquete no declara en el .d.ts todo lo que el
+ * teléfono tiene (`copy`, `bytes`, `size`). Se leen igual que `info()`.
+ */
+type LocalFile = {
+  uri: string;
+  exists: boolean;
+  size?: number | null;
+  info?: () => { size?: number | null };
+  open?: () => { size?: number | null; close?: () => void };
+  copy: (destination: LocalFile) => void;
+  delete: () => void;
+  bytes: () => Promise<Uint8Array>;
+};
+
+function asLocalFile(file: ExpoFsFile): LocalFile {
+  return file as unknown as LocalFile;
+}
+
+type LegacyFs = {
+  cacheDirectory: string | null;
+  copyAsync: (options: { from: string; to: string }) => Promise<void>;
+  getInfoAsync: (uri: string) => Promise<{ exists: boolean; size?: number }>;
+  deleteAsync: (uri: string, options?: { idempotent?: boolean }) => Promise<void>;
+  uploadAsync: (
+    url: string,
+    fileUri: string,
+    options: LegacyUploadOptions,
+  ) => Promise<{ status: number; body?: string }>;
+  createUploadTask?: (
+    url: string,
+    fileUri: string,
+    options: LegacyUploadOptions,
+    callback?: (progress: unknown) => void,
+  ) => {
+    uploadAsync: () => Promise<{ status: number; body?: string } | undefined | null>;
+    cancelAsync: () => Promise<void>;
+  };
+  FileSystemUploadType: { BINARY_CONTENT: number };
+  FileSystemSessionType?: { FOREGROUND: number };
+};
+
+type LegacyUploadOptions = {
+  httpMethod: 'POST';
+  uploadType: number;
+  sessionType?: number;
+  headers: Record<string, string>;
+};
+
+const STAGED_NAME_RE = /intro-upload-\d+\.(mp4|mov)$/i;
+
+function legacyFileSystem(): LegacyFs {
+  // El módulo legacy ya está en el binario (expo-file-system). Sube el file://
+  // sin pasar el video por un ArrayBuffer de JS.
+  return require('expo-file-system/legacy') as LegacyFs;
+}
+
+function fileReadings(file: LocalFile): Array<number | null | undefined> {
+  const readings: Array<number | null | undefined> = [file.size];
+  try {
+    readings.push(file.info?.().size);
+  } catch {
+    /* info() puede fallar en content:// */
+  }
+  try {
+    const handle = file.open?.();
+    readings.push(handle?.size);
+    handle?.close?.();
+  } catch {
+    /* el handle es otra lectura, no es obligatoria */
+  }
+  return readings;
+}
+
+/**
+ * El peso que se muestra es el de este archivo. Se queda con la lectura más
+ * grande: en Android `info().size` a veces informa menos que `File.size`.
+ */
 export function measureLocalVideoFile(uri: string): number | null {
   try {
-    const file = new ExpoFsFile(uri) as ExpoFsFile & {
-      info?: () => { size?: number | null };
-    };
-    return positiveSize(file.info?.().size);
+    return pickIntroVideoByteSize(fileReadings(asLocalFile(new ExpoFsFile(uri))));
   } catch {
     return null;
   }
 }
 
+async function measureFileBytes(uri: string, fallback?: number | null): Promise<number | null> {
+  const readings: Array<number | null | undefined> = [measureLocalVideoFile(uri)];
+  try {
+    const info = await legacyFileSystem().getInfoAsync(uri);
+    if (info.exists) readings.push(info.size);
+  } catch {
+    /* getInfoAsync en SDK 54 a veces devuelve size 0; las otras lecturas cubren */
+  }
+  // El fileSize del picker no pisa una medición del archivo: a veces miente.
+  // Solo se usa si ninguna API pudo leer el file://.
+  return pickIntroVideoByteSize(readings) ?? positiveSize(fallback);
+}
+
+function stagedExtension(uri: string): 'mp4' | 'mov' {
+  return /\.mov(\?|$)/i.test(uri) ? 'mov' : 'mp4';
+}
+
+function isStagedIntroVideo(uri: string): boolean {
+  return /^file:/i.test(uri) && STAGED_NAME_RE.test(uri.split('?')[0] ?? uri);
+}
+
 /**
- * Lee el video con el File de expo-file-system (file:// y content://).
- * No usar xhr.send({ uri }): en RN 0.81 Android eso pasa por ContentResolver,
- * que no abre file:// y responde «Could not retrieve file for uri…» como
- * error de red. iOS trata esa URI como un request y también cae en onerror.
- * Un clip de 2 s fallaba igual que uno grande, con «revisá tu conexión».
+ * Copia el video a un file:// propio y mide ESE archivo.
+ * La cámara y el picker pueden devolver un content:// cuyo `info().size`
+ * no es el archivo que después se lee. La copia nativa es el archivo que
+ * se muestra, se valida y se sube.
+ */
+export async function stageIntroVideoFile(
+  uri: string,
+  fallbackSize?: number | null,
+): Promise<{ uri: string; bytes: number; created: boolean }> {
+  const source = uri.trim();
+  if (!source) {
+    throw new Error('No se pudo leer el video en el teléfono. Volvé a grabarlo.');
+  }
+  if (isStagedIntroVideo(source)) {
+    const bytes = await measureFileBytes(source, fallbackSize);
+    if (bytes == null) {
+      throw new Error('No se pudo medir el peso del video. Volvé a grabarlo.');
+    }
+    return { uri: source, bytes, created: false };
+  }
+
+  const legacy = legacyFileSystem();
+  const cache = legacy.cacheDirectory;
+  if (!cache) {
+    throw new Error('No se pudo preparar el video en el teléfono. Volvé a grabarlo.');
+  }
+  const name = `intro-upload-${Date.now()}.${stagedExtension(source)}`;
+  const root = cache.endsWith('/') ? cache : `${cache}/`;
+  let destUri = `${root}${name}`;
+  try {
+    const dest = asLocalFile(new ExpoFsFile(Paths.cache, name));
+    asLocalFile(new ExpoFsFile(source)).copy(dest);
+    destUri = dest.uri || destUri;
+  } catch {
+    await legacy.copyAsync({ from: source, to: destUri });
+  }
+  const bytes = await measureFileBytes(destUri, fallbackSize);
+  if (bytes == null) {
+    await deleteStagedIntroVideo(destUri);
+    throw new Error('No se pudo medir el peso del video. Volvé a grabarlo.');
+  }
+  return { uri: destUri, bytes, created: true };
+}
+
+export async function deleteStagedIntroVideo(uri: string | null | undefined): Promise<void> {
+  const value = (uri ?? '').trim();
+  if (!isStagedIntroVideo(value)) return;
+  try {
+    const file = asLocalFile(new ExpoFsFile(value));
+    if (file.exists) file.delete();
+    return;
+  } catch {
+    /* legacy */
+  }
+  try {
+    await legacyFileSystem().deleteAsync(value, { idempotent: true });
+  } catch {
+    /* el sistema limpia la caché */
+  }
+}
+
+/**
+ * Lee el video con `File.bytes()` (la vista), no con `arrayBuffer()`.
+ * `arrayBuffer()` devuelve el buffer de atrás, que puede ser más grande
+ * que el archivo. No usar xhr.send({ uri }): en RN 0.81 Android eso pasa
+ * por ContentResolver, que no abre file://.
  */
 async function readLocalVideoBytes(uri: string): Promise<Uint8Array> {
   try {
-    const bytes = new Uint8Array(await new ExpoFsFile(uri).arrayBuffer());
-    if (bytes.byteLength > 0) return bytes;
+    const view = await asLocalFile(new ExpoFsFile(uri)).bytes();
+    const length = introVideoViewByteLength({
+      byteLength: view.byteLength,
+      byteOffset: view.byteOffset,
+      bufferByteLength: view.buffer?.byteLength,
+    });
+    if (length != null) {
+      if (view.byteOffset === 0 && view.buffer.byteLength === view.byteLength) return view;
+      return view.slice();
+    }
   } catch {
     /* fetch de respaldo, mismo patrón que el avatar */
   }
@@ -104,9 +272,77 @@ function uploadBytesWithXhr(params: {
     };
     xhr.ontimeout = () =>
       reject(new Error('La subida tardó demasiado. Probá de nuevo con mejor señal.'));
-    // Uint8Array → base64 en el bridge de RN y body binario con el Content-Type de arriba.
+    // Respaldo. La vista ya está recortada: no mandar `arrayBuffer()` entero,
+    // porque el bridge lo pasa a base64 y el body puede pasar los 10 MB.
     xhr.send(params.bytes as unknown as XMLHttpRequestBodyInit);
   });
+}
+
+async function uploadFileWithNative(params: {
+  url: string;
+  fileUri: string;
+  token: string;
+  mime: string;
+  source: 'camera' | 'picker';
+  onProgress?: UploadProgress;
+}): Promise<{ status: number; body: string }> {
+  const legacy = legacyFileSystem();
+  const options: LegacyUploadOptions = {
+    httpMethod: 'POST',
+    uploadType: legacy.FileSystemUploadType.BINARY_CONTENT,
+    ...(legacy.FileSystemSessionType
+      ? { sessionType: legacy.FileSystemSessionType.FOREGROUND }
+      : {}),
+    headers: {
+      Authorization: `Bearer ${params.token}`,
+      apikey: getSupabaseAnonKey(),
+      'Content-Type': params.mime,
+      'x-upsert': 'true',
+    },
+  };
+
+  if (typeof legacy.createUploadTask !== 'function') {
+    const uploaded = await legacy.uploadAsync(params.url, params.fileUri, options);
+    return { status: uploaded.status, body: uploaded.body ?? '' };
+  }
+
+  let rejectedBytes: number | null = null;
+  let sentBytes = 0;
+  let task: {
+    uploadAsync: () => Promise<{ status: number; body?: string } | undefined | null>;
+    cancelAsync: () => Promise<void>;
+  } | null = null;
+  task = legacy.createUploadTask(params.url, params.fileUri, options, (raw) => {
+    const tooLarge = introVideoUploadProgressTooLarge(raw);
+    if (tooLarge != null) {
+      rejectedBytes = tooLarge;
+      void task?.cancelAsync();
+      return;
+    }
+    const progress = introVideoUploadProgress(raw);
+    if (progress) {
+      if (progress.sent > 0) sentBytes = progress.sent;
+      params.onProgress?.(progress.sent / progress.total);
+    }
+  });
+
+  try {
+    const uploaded = await task.uploadAsync();
+    if (rejectedBytes != null) {
+      throw new Error(introVideoTooLargeMessage(rejectedBytes, params.source));
+    }
+    if (!uploaded) throw new Error('No se pudo subir el video. Volvé a intentar.');
+    return { status: uploaded.status, body: uploaded.body ?? '' };
+  } catch (e) {
+    if (rejectedBytes != null) {
+      throw new Error(introVideoTooLargeMessage(rejectedBytes, params.source));
+    }
+    if (sentBytes > 0) {
+      const msg = e instanceof Error ? e.message : '';
+      throw new Error(introVideoNetworkErrorMessage(msg));
+    }
+    throw e;
+  }
 }
 
 /** Lectura aislada: si la columna todavía no existe, el perfil sigue cargando. */
@@ -184,9 +420,11 @@ export async function saveIntroVideoFromUri(params: {
   previousPath?: string | null;
   onProgress?: UploadProgress;
 }): Promise<{ path: string; playbackUrl: string }> {
-  const knownSize = measureLocalVideoFile(params.localUri) ?? positiveSize(params.fileSize);
-  if (isIntroVideoTooLarge(knownSize)) {
-    throw new Error(introVideoTooLargeMessage(knownSize, params.source));
+  const source = params.source ?? 'camera';
+  const staged = await stageIntroVideoFile(params.localUri, params.fileSize);
+  if (isIntroVideoTooLarge(staged.bytes)) {
+    if (staged.created) await deleteStagedIntroVideo(staged.uri);
+    throw new Error(introVideoTooLargeMessage(staged.bytes, source));
   }
 
   const path = buildIntroVideoObjectPath(params.userId, introVideoExtension(params.mime));
@@ -197,18 +435,37 @@ export async function saveIntroVideoFromUri(params: {
   const token = await accessToken();
   const url = storageObjectUrl(path);
   params.onProgress?.(0);
-  const bytes = await readLocalVideoBytes(params.localUri);
-  if (isIntroVideoTooLarge(bytes.byteLength)) {
-    throw new Error(introVideoTooLargeMessage(bytes.byteLength, params.source));
+
+  let uploaded: { status: number; body: string };
+  try {
+    uploaded = await uploadFileWithNative({
+      url,
+      fileUri: staged.uri,
+      token,
+      mime: params.mime,
+      source,
+      onProgress: params.onProgress,
+    });
+  } catch (e) {
+    if (e instanceof Error && /pesa|10 MB|Revisá tu conexión|tardó demasiado/.test(e.message)) {
+      if (staged.created) await deleteStagedIntroVideo(staged.uri);
+      throw e;
+    }
+    const bytes = await readLocalVideoBytes(staged.uri);
+    if (isIntroVideoTooLarge(bytes.byteLength)) {
+      if (staged.created) await deleteStagedIntroVideo(staged.uri);
+      throw new Error(introVideoTooLargeMessage(bytes.byteLength, source));
+    }
+    uploaded = await uploadBytesWithXhr({
+      url,
+      bytes,
+      token,
+      mime: params.mime,
+      onProgress: params.onProgress,
+    });
   }
 
-  const uploaded = await uploadBytesWithXhr({
-    url,
-    bytes,
-    token,
-    mime: params.mime,
-    onProgress: params.onProgress,
-  });
+  if (staged.created) await deleteStagedIntroVideo(staged.uri);
 
   if (uploaded.status === 0) {
     throw new Error(introVideoNetworkErrorMessage(uploaded.body));
