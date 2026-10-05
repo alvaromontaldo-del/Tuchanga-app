@@ -45,6 +45,33 @@ export function isClientSelectableQuoteItem(it: {
   return price >= 0; // con stock: precio 0 raro pero permitido si el comercio lo cotizó
 }
 
+/**
+ * Suma de los ítems marcados que el cliente puede pedir.
+ * Un ítem sin stock y sin alternativa no entra, aunque su id esté en la selección.
+ */
+export function selectedMaterialsAmount(
+  items: ReadonlyArray<{
+    quoteItemId: string;
+    lineTotal: number;
+    inStock: boolean;
+    alternativeDescription: string | null;
+    variantLabel?: string | null;
+    unitPrice?: number;
+    clientDecision?: string | null;
+  }>,
+  selectedIds: ReadonlySet<string>,
+): number {
+  let sum = 0;
+  for (const it of items) {
+    if (!selectedIds.has(it.quoteItemId)) continue;
+    if (!isClientSelectableQuoteItem(it)) continue;
+    const n = Number(it.lineTotal);
+    if (!Number.isFinite(n) || n <= 0) continue;
+    sum += n;
+  }
+  return sum;
+}
+
 /** Una quote_item id por request_item (la más barata seleccionable). */
 export function defaultSelectedItemIds(card: ClientQuoteCard): Set<string> {
   const byRequest = new Map<string, ClientQuoteLineItem[]>();
@@ -144,6 +171,22 @@ export function variantOptionLabel(it: {
   if (brand) return brand;
   if (it.inStock) return 'Precio';
   return it.alternativeDescription?.trim() || 'Precio';
+}
+
+/**
+ * Texto de la fila que el cliente puede marcar.
+ * Sin stock no se muestra como el ítem pedido: es el reemplazo, o queda bloqueado.
+ */
+export function clientQuoteOptionLabel(it: {
+  variantLabel?: string | null;
+  inStock: boolean;
+  alternativeDescription?: string | null;
+}): string {
+  if (!it.inStock) {
+    const alt = it.alternativeDescription?.trim() || it.variantLabel?.trim() || '';
+    return alt ? `Alternativa: ${alt}` : 'Sin stock';
+  }
+  return variantOptionLabel(it);
 }
 
 /** Varias opciones: radio. Una sola (aunque tenga marca): checkbox. */

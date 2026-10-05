@@ -214,6 +214,9 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        <Text style={styles.lead}>
+          Describí cada material. Se envía a los comercios del rubro para que coticen precio y flete.
+        </Text>
         <Text style={styles.sectionLabel}>Rubro</Text>
         {loadingRubros ? (
           <ActivityIndicator color={colors.primary} style={{ marginBottom: spacing.md }} />

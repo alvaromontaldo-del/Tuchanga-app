@@ -2,14 +2,17 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { ClientQuoteCard, ClientQuoteLineItem } from '../types/materials';
 import {
+  clientQuoteOptionLabel,
   defaultSelectedItemIds,
   duplicateSelectedMaterials,
   groupQuoteItemsByRequest,
   initialSelectedItemIdsByQuote,
+  isClientSelectableQuoteItem,
   materialGroupHeader,
   pendingFeePayLabel,
   pendingServiceFeeGroups,
   pickBestQuoteId,
+  selectedMaterialsAmount,
   variantOptionLabel,
   variantSelectionControl,
 } from './pickBestQuote';
@@ -233,6 +236,48 @@ describe('agrupación de variantes', () => {
     expect(variantSelectionControl(groups[0].variants.length)).toBe('radio');
     expect(variantOptionLabel(groups[0].variants[0])).toBe('Precio');
     expect(variantOptionLabel(groups[0].variants[1])).toBe('Tornillo');
+    expect(clientQuoteOptionLabel(groups[0].variants[0])).toBe('Precio');
+    expect(clientQuoteOptionLabel(groups[0].variants[1])).toBe('Alternativa: Tornillo');
+  });
+});
+
+describe('totales de la selección y sin stock', () => {
+  it('el recuadro suma solo lo marcado y deja afuera el ítem sin stock', () => {
+    const lines = [
+      item({
+        quoteItemId: 'ok',
+        requestItemId: 'a',
+        lineTotal: 100,
+        unitPrice: 100,
+        inStock: true,
+      }),
+      item({
+        quoteItemId: 'alt',
+        requestItemId: 'b',
+        lineTotal: 40,
+        unitPrice: 40,
+        inStock: false,
+        alternativeDescription: 'Reemplazo',
+        variantLabel: 'Reemplazo',
+      }),
+      item({
+        quoteItemId: 'missing',
+        requestItemId: 'c',
+        lineTotal: 80,
+        unitPrice: 80,
+        inStock: false,
+        alternativeDescription: null,
+        variantLabel: null,
+      }),
+    ];
+    expect(isClientSelectableQuoteItem(lines[1])).toBe(true);
+    expect(isClientSelectableQuoteItem(lines[2])).toBe(false);
+    expect(clientQuoteOptionLabel(lines[2])).toBe('Sin stock');
+    expect(
+      selectedMaterialsAmount(lines, new Set(['ok', 'alt', 'missing'])),
+    ).toBe(140);
+    expect(selectedMaterialsAmount(lines, new Set(['ok']))).toBe(100);
+    expect(selectedMaterialsAmount(lines, new Set())).toBe(0);
   });
 });
 
@@ -356,7 +401,9 @@ describe('datos de la comparación', () => {
     expect(screen).toContain('Horario no informado');
     expect(screen).toContain('Total materiales');
     expect(screen).toContain('materialGroupHeader(');
-    expect(screen).toContain('variantOptionLabel(');
+    expect(screen).toContain('clientQuoteOptionLabel(');
+    expect(screen).toContain('selectedMaterialsAmount(');
+    expect(screen).toContain('Se actualiza con los ítems que marques');
     expect(screen).toContain('initialSelectedItemIdsByQuote(');
     const cardSrc = screen.slice(screen.indexOf('const QuoteCard'));
     expect(cardSrc).toContain('materialGroupHeader(group)');
