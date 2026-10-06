@@ -1,5 +1,6 @@
 /**
- * Preguntas frecuentes de Cuenta (cliente, profesional y comercio).
+ * Preguntas frecuentes de Cuenta (cliente y profesional).
+ * El shell comercio no muestra esta entrada.
  * Solo texto: se publica por OTA, sin dependencias nativas.
  *
  * Cada respuesta está contrastada con el código de la app. No incluye

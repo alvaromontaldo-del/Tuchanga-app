@@ -16,8 +16,14 @@ import { AppScreen } from '../../components/layout/AppScreen';
 import { useAppToast } from '../../components/toast/toast';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { colors, radii, spacing } from '../../constants/theme';
+import {
+  availableSessionRoles,
+  nextSessionRoleOnSwitch,
+  sessionRoleSwitchLabel,
+} from '../../constants/sessionRoleSwitch';
 import { useAuth } from '../../context/AuthContext';
 import { useCommerceShell } from '../../context/CommerceShellContext';
+import { useUserMode } from '../../context/UserModeContext';
 import type { CommerceStackParamList } from '../../navigation/mainTypes';
 import { storeStatusLabel } from '../../services/storeRegistrationSupabase';
 import { updateMyStoreAvatarFromUri } from '../../services/storeQuotesSupabase';
@@ -32,13 +38,24 @@ type Props = NativeStackScreenProps<CommerceStackParamList, 'CommerceAccount'>;
 export function CommerceAccountScreen({ navigation }: Props) {
   const toast = useAppToast();
   const { signOut, user } = useAuth();
+  const { isWorker } = useUserMode();
   const {
     primaryStore,
     stores,
     clearCommerceIntent,
     clearSessionRole,
+    chooseSessionRole,
+    sessionRole,
+    hasCommerceStore,
     refresh,
   } = useCommerceShell();
+  const nextRole = nextSessionRoleOnSwitch(
+    sessionRole,
+    availableSessionRoles({
+      hasEnabledCommerce: hasCommerceStore,
+      isProfessional: isWorker,
+    }),
+  );
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [storeAvatarUri, setStoreAvatarUri] = useState<string | null>(
     primaryStore?.avatarUrl ?? null,
@@ -48,8 +65,9 @@ export function CommerceAccountScreen({ navigation }: Props) {
     setStoreAvatarUri(primaryStore?.avatarUrl ?? null);
   }, [primaryStore?.avatarUrl]);
 
-  const onChooseRole = () => {
-    void clearSessionRole();
+  const onSwitchRole = () => {
+    if (!nextRole) return;
+    void chooseSessionRole(nextRole);
   };
 
   const onSignOut = () => {
@@ -214,31 +232,20 @@ export function CommerceAccountScreen({ navigation }: Props) {
         <Text style={[styles.rowBtnText, { color: colors.text }]}>Ver pedidos</Text>
       </Pressable>
 
-      <Pressable
-        style={({ pressed }) => [styles.rowBtn, pressed && styles.pressed]}
-        onPress={() => navigation.navigate('Faq')}
-        accessibilityRole="button"
-        accessibilityLabel="Preguntas frecuentes"
-      >
-        <Ionicons name="help-circle-outline" size={22} color={colors.text} />
-        <View style={styles.switchText}>
-          <Text style={[styles.rowBtnText, { color: colors.text }]}>Preguntas frecuentes</Text>
-          <Text style={styles.switchSub}>Cómo funciona YaChanga</Text>
-        </View>
-      </Pressable>
-
-      <Pressable
-        style={({ pressed }) => [styles.rowBtn, pressed && styles.pressed]}
-        onPress={onChooseRole}
-        accessibilityRole="button"
-        accessibilityLabel="Elegir otro rol"
-      >
-        <Ionicons name="people-outline" size={22} color={colors.primary} />
-        <View style={styles.switchText}>
-          <Text style={styles.rowBtnText}>Elegir otro rol</Text>
-          <Text style={styles.switchSub}>Cliente, profesional o comercio</Text>
-        </View>
-      </Pressable>
+      {nextRole ? (
+        <Pressable
+          style={({ pressed }) => [styles.rowBtn, pressed && styles.pressed]}
+          onPress={onSwitchRole}
+          accessibilityRole="button"
+          accessibilityLabel="Cambiar de rol"
+        >
+          <Ionicons name="people-outline" size={22} color={colors.primary} />
+          <View style={styles.switchText}>
+            <Text style={styles.rowBtnText}>Cambiar de rol</Text>
+            <Text style={styles.switchSub}>Pasar a {sessionRoleSwitchLabel(nextRole)}</Text>
+          </View>
+        </Pressable>
+      ) : null}
 
       <Pressable
         style={({ pressed }) => [styles.logoutBtn, pressed && styles.pressed]}

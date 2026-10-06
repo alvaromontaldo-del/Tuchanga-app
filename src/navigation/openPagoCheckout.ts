@@ -74,11 +74,11 @@ export async function openChatFromContratacion(
 
   const { data: profile } = await sb
     .from('profiles')
-    .select('nombre')
+    .select('nombre,avatar_url')
     .eq('id', otherId)
     .maybeSingle();
 
-  const profileRow = profile as { nombre?: string | null } | null;
+  const profileRow = profile as { nombre?: string | null; avatar_url?: string | null } | null;
   // #120: el apellido del cliente llega por RPC y solo al profesional de ese cliente.
   const peerFullName = myRole === 'cliente' ? null : await fetchPeerFullName(otherId);
   const otherDisplayName =
@@ -96,6 +96,7 @@ export async function openChatFromContratacion(
     otherDisplayName,
     headerSubtitle,
     workerId: myRole === 'cliente' ? parts.trabajador_id : undefined,
+    otherAvatarUrl: profileRow?.avatar_url?.trim() || null,
   };
 
   navigationRef.navigate('Main', {

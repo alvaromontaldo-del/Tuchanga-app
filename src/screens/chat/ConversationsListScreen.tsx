@@ -333,6 +333,7 @@ export function ConversationsListScreen({ navigation }: Props) {
                   otherDisplayName: item.otherDisplayName,
                   headerSubtitle: buildChatHeaderSubtitle(item),
                   workerId: item.myRole === 'cliente' ? item.otherUserId : undefined,
+                  otherAvatarUrl: item.otherAvatarUrl ?? null,
                 })
               }
             >
