@@ -10,6 +10,7 @@ import {
   estimateIntroVideoBytes,
   introVideoDurationSeconds,
   introVideoHttpErrorMessage,
+  isStorageTooLargeResponse,
   introVideoMimeFromAsset,
   introVideoNetworkErrorMessage,
   introVideoObjectsToDelete,
@@ -155,6 +156,21 @@ describe('video de presentación', () => {
       'No se pudo subir el video. Payload is set but no content-type header specified',
     );
     expect(introVideoHttpErrorMessage(413, 'Payload too large')).toMatch(/10 MB/);
+    // Respuesta real de Storage (Lonja, 2026-10-05): HTTP 400 con statusCode 413 para 2.5 MB.
+    const storageBody =
+      '{"statusCode":"413","error":"Payload too large","message":"The object exceeded the maximum allowed size"}';
+    expect(isStorageTooLargeResponse(400, storageBody)).toBe(true);
+    expect(isStorageTooLargeResponse(400, 'Invalid key')).toBe(false);
+    const serverLimit = introVideoHttpErrorMessage(400, storageBody, 2_625_053);
+    expect(serverLimit).toMatch(/2\.5 MB/);
+    expect(serverLimit).toMatch(/No es un problema de tu video/);
+    expect(serverLimit).not.toMatch(/más corto/);
+    expect(introVideoHttpErrorMessage(400, storageBody, 12 * 1024 * 1024)).toBe(
+      'El video pesa más de 10 MB. Volvé a grabarlo, más corto.',
+    );
+    expect(introVideoHttpErrorMessage(400, storageBody)).toBe(
+      'El video pesa más de 10 MB. Volvé a grabarlo, más corto.',
+    );
     expect(introVideoHttpErrorMessage(403, 'new row violates row-level security policy')).toBe(
       'No se pudo subir el video (permisos de Storage).',
     );

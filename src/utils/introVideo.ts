@@ -186,16 +186,44 @@ export function introVideoNetworkErrorMessage(nativeMessage: string | null | und
   return `No se pudo subir el video. ${msg.slice(0, 160)}`;
 }
 
-export function introVideoHttpErrorMessage(status: number, body: string): string {
+/**
+ * Storage responde `{"statusCode":"413","error":"Payload too large","message":"The object exceeded the maximum allowed size"}`
+ * con HTTP 400. Puede venir del tope del bucket (10 MB) o del *Global file size limit*
+ * del proyecto (Storage → Settings), que manda sobre el bucket.
+ */
+export function isStorageTooLargeResponse(status: number, body: string): boolean {
   const lower = (body ?? '').toLowerCase();
-  if (
+  return (
     status === 413 ||
-    lower.includes('payload') ||
-    lower.includes('too large') ||
-    lower.includes('maximum') ||
-    lower.includes('exceeded')
-  ) {
-    return `El video pesa más de ${formatVideoMegabytes(INTRO_VIDEO_MAX_BYTES)} MB. Volvé a grabarlo, más corto.`;
+    /"statuscode"\s*:\s*"?413/.test(lower) ||
+    lower.includes('entitytoolarge') ||
+    lower.includes('payload too large') ||
+    lower.includes('exceeded the maximum')
+  );
+}
+
+/**
+ * `uploadedBytes`: lo que salió a la red. Si Storage dice «muy grande» y el archivo
+ * pesa menos que el tope de la app, el límite está en el servidor (no en el video):
+ * no pedirle al trabajador que grabe más corto.
+ */
+export function introVideoHttpErrorMessage(
+  status: number,
+  body: string,
+  uploadedBytes?: number | null,
+): string {
+  const lower = (body ?? '').toLowerCase();
+  if (isStorageTooLargeResponse(status, body)) {
+    const maxLabel = formatVideoMegabytes(INTRO_VIDEO_MAX_BYTES);
+    if (
+      uploadedBytes != null &&
+      Number.isFinite(uploadedBytes) &&
+      uploadedBytes > 0 &&
+      !isIntroVideoTooLarge(uploadedBytes)
+    ) {
+      return `El servidor no aceptó el video de ${formatVideoMegabytes(uploadedBytes)} MB: su límite de subida está por debajo de ${maxLabel} MB. No es un problema de tu video. Avisá a soporte de YaChanga.`;
+    }
+    return `El video pesa más de ${maxLabel} MB. Volvé a grabarlo, más corto.`;
   }
   if (status === 415 || lower.includes('mime')) {
     return 'Solo se aceptan videos MP4 o MOV.';
