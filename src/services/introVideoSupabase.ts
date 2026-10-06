@@ -437,6 +437,7 @@ export async function saveIntroVideoFromUri(params: {
   params.onProgress?.(0);
 
   let uploaded: { status: number; body: string };
+  let uploadedBytes: number = staged.bytes;
   try {
     uploaded = await uploadFileWithNative({
       url,
@@ -452,6 +453,7 @@ export async function saveIntroVideoFromUri(params: {
       throw e;
     }
     const bytes = await readLocalVideoBytes(staged.uri);
+    uploadedBytes = bytes.byteLength;
     if (isIntroVideoTooLarge(bytes.byteLength)) {
       if (staged.created) await deleteStagedIntroVideo(staged.uri);
       throw new Error(introVideoTooLargeMessage(bytes.byteLength, source));
@@ -471,7 +473,7 @@ export async function saveIntroVideoFromUri(params: {
     throw new Error(introVideoNetworkErrorMessage(uploaded.body));
   }
   if (uploaded.status < 200 || uploaded.status >= 300) {
-    throw new Error(introVideoHttpErrorMessage(uploaded.status, uploaded.body));
+    throw new Error(introVideoHttpErrorMessage(uploaded.status, uploaded.body, uploadedBytes));
   }
 
   try {
