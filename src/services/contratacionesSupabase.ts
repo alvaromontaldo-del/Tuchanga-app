@@ -782,6 +782,15 @@ export async function trabajadorFinalizarTrabajo(contratacionId: string): Promis
   if (error) throw error;
 }
 
+/** #206: desde disputa, el profesional pide conformidad otra vez. */
+export async function trabajadorMarcarTrabajoReparado(contratacionId: string): Promise<void> {
+  const sb = getSupabaseClient();
+  const { error } = await sb.rpc('trabajador_marcar_trabajo_reparado', {
+    p_contratacion_id: contratacionId,
+  });
+  if (error) throw error;
+}
+
 export async function clienteResponderConformidad(params: {
   contratacionId: string;
   conforme: boolean;
