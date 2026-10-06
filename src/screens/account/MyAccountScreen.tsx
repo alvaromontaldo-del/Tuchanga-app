@@ -13,6 +13,11 @@ import {
 import { AppScreen } from '../../components/layout/AppScreen';
 import { ClickableAvatar } from '../../components/common/ClickableAvatar';
 import { StarRating } from '../../components/profile/StarRating';
+import {
+  availableSessionRoles,
+  nextSessionRoleOnSwitch,
+  sessionRoleSwitchLabel,
+} from '../../constants/sessionRoleSwitch';
 import { colors, radii, spacing } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useCommerceShell } from '../../context/CommerceShellContext';
@@ -72,9 +77,22 @@ function Row({
 
 export function MyAccountScreen({ navigation }: Props) {
   const { signOut, user } = useAuth();
-  const { clearSessionRole, clearCommerceIntent, chooseSessionRole, hasCommerceStore, hasPendingCommerceStore } =
-    useCommerceShell();
+  const {
+    clearSessionRole,
+    clearCommerceIntent,
+    chooseSessionRole,
+    hasCommerceStore,
+    hasPendingCommerceStore,
+    sessionRole,
+  } = useCommerceShell();
   const { isWorker } = useUserMode();
+  const nextRole = nextSessionRoleOnSwitch(
+    sessionRole,
+    availableSessionRoles({
+      hasEnabledCommerce: hasCommerceStore,
+      isProfessional: Boolean(isWorker),
+    }),
+  );
   const { isWorkerRegistered } = useWorkerProfile();
   const isWorkerRegisteredAnywhere = isWorkerRegistered || Boolean(isWorker);
 
@@ -235,6 +253,17 @@ export function MyAccountScreen({ navigation }: Props) {
               });
             }}
           />
+
+          {nextRole ? (
+            <Row
+              icon="people-outline"
+              title="Cambiar de rol"
+              subtitle={`Pasar a ${sessionRoleSwitchLabel(nextRole)}`}
+              onPress={() => {
+                void chooseSessionRole(nextRole);
+              }}
+            />
+          ) : null}
 
           <Row
             icon="log-out-outline"

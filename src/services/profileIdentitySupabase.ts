@@ -65,3 +65,21 @@ export async function fetchPeerFullName(peerId: string): Promise<string | null> 
   const full = `${textOrNull(row.nombre) ?? ''} ${textOrNull(row.apellido) ?? ''}`.trim();
   return full || null;
 }
+
+/**
+ * Foto de perfil del otro usuario del chat. Solo `avatar_url`.
+ * No lee apellido, domicilio ni otros campos.
+ */
+export async function fetchPeerAvatarUrl(peerId: string): Promise<string | null> {
+  if (!peerId) return null;
+  const sb = getSupabaseClient();
+  const { data, error } = await sb
+    .from('profiles')
+    .select('avatar_url')
+    .eq('id', peerId)
+    .maybeSingle();
+  if (error) return null;
+  const url = (data as { avatar_url?: string | null } | null)?.avatar_url;
+  const trimmed = typeof url === 'string' ? url.trim() : '';
+  return trimmed || null;
+}

@@ -19,11 +19,13 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureGalleryPermission, ensureCameraPermission } from '../../utils/mediaPermissions';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
+import { ClickableAvatar } from '../../components/common/ClickableAvatar';
 import { ExpandableText } from '../../components/common/ExpandableText';
 import { useAppToast } from '../../components/toast/toast';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { colors, radii, spacing } from '../../constants/theme';
 import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
+import { fetchPeerAvatarUrl } from '../../services/profileIdentitySupabase';
 import { useAuth } from '../../context/AuthContext';
 import { useFeed } from '../../context/FeedContext';
 import { useSocket } from '../../context/SocketContext';
@@ -142,6 +144,8 @@ export type ChatScreenParams = {
   headerSubtitle: string;
   /** Si el otro participante es un profesional, su userId/UUID para abrir su perfil. */
   workerId?: string;
+  /** Foto de perfil del otro (cliente o profesional). Si falta, el chat la pide. */
+  otherAvatarUrl?: string | null;
   /** Abierto desde Trabajos contratados: volver a esa pantalla, no a Mensajes. */
   backToContractedWork?: boolean;
 };
@@ -173,6 +177,19 @@ function firstNameOnly(name: string): string {
   if (!s) return 'Usuario';
   const parts = s.split(' ').filter(Boolean);
   return parts[0] ?? 'Usuario';
+}
+
+function initialsFromName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase();
+}
+
+function peerAvatarAccessibilityLabel(role: 'cliente' | 'trabajador' | null | undefined): string {
+  if (role === 'trabajador') return 'Ver foto de perfil del cliente';
+  if (role === 'cliente') return 'Ver foto de perfil del profesional';
+  return 'Ver foto de perfil ampliada';
 }
 
 /** Lista invertida: mensajes más nuevos al inicio del array (índice 0 = abajo en pantalla). */
@@ -245,6 +262,7 @@ type Props = {
   otherDisplayName: string;
   headerSubtitle: string;
   workerId?: string;
+  otherAvatarUrl?: string | null;
   backToContractedWork?: boolean;
 };
 
@@ -253,6 +271,7 @@ export function ChatScreen({
   otherDisplayName,
   headerSubtitle,
   workerId,
+  otherAvatarUrl,
   backToContractedWork,
 }: Props) {
   const navigation = useNavigation<any>();
@@ -293,6 +312,9 @@ export function ChatScreen({
     workerId: string;
     myRole: 'cliente' | 'trabajador';
   } | null>(null);
+  const [peerAvatarUrl, setPeerAvatarUrl] = useState<string | null>(
+    otherAvatarUrl?.trim() || null,
+  );
   const [blockStatus, setBlockStatus] = useState<PeerBlockStatus>({
     iBlockedThem: false,
     theyBlockedMe: false,
@@ -765,6 +787,10 @@ export function ChatScreen({
   }, [myId, conversationId]);
 
   useEffect(() => {
+    setPeerAvatarUrl(otherAvatarUrl?.trim() || null);
+  }, [conversationId, otherAvatarUrl]);
+
+  useEffect(() => {
     if (!isSupabaseConfigured() || !myId || !conversationId) return;
     let cancelled = false;
     void (async () => {
@@ -782,6 +808,10 @@ export function ChatScreen({
           workerId: c.trabajador_id,
           myRole,
         });
+        if (otherAvatarUrl?.trim()) return;
+        const otherId = myRole === 'cliente' ? c.trabajador_id : c.cliente_id;
+        const url = await fetchPeerAvatarUrl(otherId);
+        if (!cancelled && url) setPeerAvatarUrl(url);
       } catch {
         if (!cancelled) {
           toast.warning('No se pudo abrir este chat.', 'Chat');
@@ -792,7 +822,7 @@ export function ChatScreen({
     return () => {
       cancelled = true;
     };
-  }, [conversationId, leaveChat, myId, toast]);
+  }, [conversationId, leaveChat, myId, otherAvatarUrl, toast]);
 
   useEffect(() => {
     if (!isSupabaseConfigured() || !conversationId) return;
@@ -3035,6 +3065,18 @@ export function ChatScreen({
             </Pressable>
 
             <View style={styles.headerIdentity}>
+              <View style={styles.headerAvatar}>
+                {peerAvatarUrl ? (
+                  <ClickableAvatar
+                    uri={peerAvatarUrl}
+                    style={styles.headerAvatarImg}
+                    fill
+                    accessibilityLabel={peerAvatarAccessibilityLabel(participants?.myRole)}
+                  />
+                ) : (
+                  <Text style={styles.headerAvatarText}>{initialsFromName(displayName)}</Text>
+                )}
+              </View>
               <View style={styles.headerNameColumn}>
                 {profileWorkerId ? (
                   <Pressable
@@ -3265,6 +3307,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  headerAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    marginRight: 8,
+  },
+  headerAvatarImg: { width: '100%', height: '100%' },
+  headerAvatarText: { color: '#fff', fontSize: 13, fontWeight: '800' },
   headerNameColumn: {
     flex: 1,
     minWidth: 0,

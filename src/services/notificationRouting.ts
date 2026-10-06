@@ -49,11 +49,11 @@ async function openChatFromPush(conversationId: string): Promise<void> {
 
   const { data: profile } = await sb
     .from('profiles')
-    .select('nombre')
+    .select('nombre,avatar_url')
     .eq('id', otherId)
     .maybeSingle();
 
-  const row = profile as { nombre?: string } | null;
+  const row = profile as { nombre?: string; avatar_url?: string | null } | null;
   // #120: el apellido del cliente llega por RPC y solo al profesional de ese cliente.
   const peerFullName = myRole === 'cliente' ? null : await fetchPeerFullName(otherId);
   const otherDisplayName =
@@ -70,6 +70,7 @@ async function openChatFromPush(conversationId: string): Promise<void> {
         otherDisplayName,
         headerSubtitle: myRole === 'cliente' ? 'Profesional' : 'Cliente',
         workerId: myRole === 'cliente' ? trabajadorId : undefined,
+        otherAvatarUrl: row?.avatar_url?.trim() || null,
       },
     },
   });

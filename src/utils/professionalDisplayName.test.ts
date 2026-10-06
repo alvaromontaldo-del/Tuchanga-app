@@ -162,12 +162,12 @@ describe('vistas de cliente sin apellido ni inicial', () => {
     expect(chat).not.toMatch(/select\([^)]*apellido/);
 
     const pushRoute = read('src/services/notificationRouting.ts');
-    expect(pushRoute).toContain(".select('nombre')");
+    expect(pushRoute).toContain(".select('nombre,avatar_url')");
     expect(pushRoute).not.toMatch(/select\([^)]*apellido/);
     expect(pushRoute).toContain("myRole === 'cliente' ? null : await fetchPeerFullName(otherId)");
 
     const pago = read('src/navigation/openPagoCheckout.ts');
-    expect(pago).toContain(".select('nombre')");
+    expect(pago).toContain(".select('nombre,avatar_url')");
     expect(pago).not.toMatch(/select\([^)]*apellido/);
     expect(pago).toContain("myRole === 'cliente' ? null : await fetchPeerFullName(otherId)");
 
