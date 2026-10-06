@@ -8,14 +8,16 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest';
  * No toca producción: crea y borra la base material_pin_requester_test.
  *
  * Cliente antes y después de pagar, profesional que creó la solicitud
- * (material_requests.professional_id) antes y después, dueño del comercio
- * nunca, y cierre con completar_orden_material_con_pin.
+ * (material_requests.professional_id) antes y después, incluso si ese usuario
+ * es dueño del comercio que cotizó. El rol comercio (ni pagador ni creador)
+ * sigue sin leer el PIN. El cierre sigue siendo completar_orden_material_con_pin.
  */
 
 const DB = 'material_pin_requester_test';
 const SQL = resolve(process.cwd(), 'supabase/20261001_card_63_pin_requester.sql');
 const HOURS_SQL = resolve(process.cwd(), 'supabase/20261005_card_48_reveal_opening_hours.sql');
 const LIST_SQL = resolve(process.cwd(), 'supabase/20261005_card_103_client_only_material_pickups.sql');
+const OWN_STORE_SQL = resolve(process.cwd(), 'supabase/20261006_card_205_own_store_pickup_reveal.sql');
 
 const CLIENT = '11111111-1111-4111-8111-111111111111';
 const PRO = '22222222-2222-4222-8222-222222222222';
@@ -35,6 +37,11 @@ const ORDER_SELF = 'e3333333-3333-4333-8333-333333333333';
 const REQ_AS_CLIENT = 'c3333333-3333-4333-8333-333333333333';
 const QUOTE_AS_CLIENT = 'd3333333-3333-4333-8333-333333333333';
 const ORDER_AS_CLIENT = 'e4444444-4444-4444-8444-444444444444';
+const QUOTE_2_OTHER = 'd5555555-5555-4555-8555-555555555555';
+const ORDER_2_OTHER = 'e6666666-6666-4666-8666-666666666666';
+const REQ_CLIENT_OWNS = 'c4444444-4444-4444-8444-444444444444';
+const QUOTE_CLIENT_OWNS = 'd4444444-4444-4444-8444-444444444444';
+const ORDER_CLIENT_OWNS = 'e5555555-5555-4555-8555-555555555555';
 
 function postgresAvailable(): boolean {
   try {
@@ -417,13 +424,16 @@ INSERT INTO public.material_requests (id, professional_id, client_id, title, sta
 VALUES
   ('${REQ_1}', '${PRO}', '${CLIENT}', 'Obra cliente', 'accepted'),
   ('${REQ_2}', '${SELF}', '${CLIENT}', 'Autocompra', 'accepted'),
-  ('${REQ_AS_CLIENT}', '${STRANGER}', '${PRO}', 'Compra del trabajador', 'accepted');
+  ('${REQ_AS_CLIENT}', '${STRANGER}', '${PRO}', 'Compra del trabajador', 'accepted'),
+  ('${REQ_CLIENT_OWNS}', '${STRANGER}', '${SELF}', 'Cliente dueño del comercio', 'accepted');
 
 INSERT INTO public.quotes (id, request_id, store_id, client_id, status, freight_type, freight_cost)
 VALUES
   ('${QUOTE_1}', '${REQ_1}', '${STORE_A}', '${CLIENT}', 'accepted', 'pickup', 0),
   ('${QUOTE_2}', '${REQ_2}', '${STORE_B}', '${CLIENT}', 'accepted', 'pickup', 0),
-  ('${QUOTE_AS_CLIENT}', '${REQ_AS_CLIENT}', '${STORE_A}', '${PRO}', 'accepted', 'pickup', 0);
+  ('${QUOTE_2_OTHER}', '${REQ_2}', '${STORE_A}', '${CLIENT}', 'accepted', 'pickup', 0),
+  ('${QUOTE_AS_CLIENT}', '${REQ_AS_CLIENT}', '${STORE_A}', '${PRO}', 'accepted', 'pickup', 0),
+  ('${QUOTE_CLIENT_OWNS}', '${REQ_CLIENT_OWNS}', '${STORE_B}', '${SELF}', 'accepted', 'pickup', 0);
 
 INSERT INTO public.orders (
   id, quote_id, client_id, order_code, status, deposit_status,
@@ -444,6 +454,14 @@ INSERT INTO public.orders (
   (
     '${ORDER_AS_CLIENT}', '${QUOTE_AS_CLIENT}', '${PRO}', '8181', 'deposit_paid', 'paid',
     500, 1500, '8181', false
+  ),
+  (
+    '${ORDER_2_OTHER}', '${QUOTE_2_OTHER}', '${CLIENT}', '7373', 'deposit_paid', 'paid',
+    500, 3100, '7373', false
+  ),
+  (
+    '${ORDER_CLIENT_OWNS}', '${QUOTE_CLIENT_OWNS}', '${SELF}', '6464', 'deposit_paid', 'paid',
+    500, 900, '6464', false
   );
 `;
 
@@ -451,8 +469,9 @@ describe('contrato SQL del PIN para el creador', () => {
   const sql = readFileSync(SQL, 'utf8');
   const hoursSql = readFileSync(HOURS_SQL, 'utf8');
   const listSql = readFileSync(LIST_SQL, 'utf8');
+  const ownStoreSql = readFileSync(OWN_STORE_SQL, 'utf8');
 
-  it('conserva los guards y no abre el PIN al dueño del comercio', () => {
+  it('conserva los guards y no abre el PIN al rol comercio', () => {
     for (const guard of [
       'not_authenticated',
       'order_not_found',
@@ -461,27 +480,28 @@ describe('contrato SQL del PIN para el creador', () => {
       'not_request_party',
     ]) {
       expect(sql).toContain(`'${guard}'`);
+      expect(ownStoreSql).toContain(`'${guard}'`);
     }
     expect(sql).toContain('mr.professional_id');
-    expect(sql).toContain('v_req.professional_id = v_uid');
-    expect(sql).toContain('public.is_store_owner');
+    expect(ownStoreSql).toContain('mr.professional_id');
+    expect(ownStoreSql).toContain('v_req.professional_id = v_uid');
+    expect(ownStoreSql).toContain('v_is_payer OR v_is_requester');
+    expect(ownStoreSql).not.toContain('is_store_owner');
     expect(sql).not.toContain('FUNCTION public.completar_orden_material_con_pin');
+    expect(ownStoreSql).not.toContain('FUNCTION public.completar_orden_material_con_pin');
     expect(hoursSql).toContain('store_opening_hours jsonb');
-    expect(hoursSql).toContain('WHEN v_revealed THEN v_store.opening_hours');
-    expect(hoursSql).toContain('not_order_client');
-    expect(hoursSql).toContain('public.is_store_owner');
+    expect(ownStoreSql).toContain('store_opening_hours jsonb');
+    expect(ownStoreSql).toContain('WHEN v_revealed THEN v_store.opening_hours');
     expect(hoursSql).not.toContain('FUNCTION public.completar_orden_material_con_pin');
 
-    const membershipStart = listSql.indexOf('-- #103 solo cliente');
-    const membership = listSql.slice(membershipStart, listSql.indexOf(') x;', membershipStart));
+    const membershipStart = ownStoreSql.indexOf('-- #103 solo cliente');
+    const membership = ownStoreSql.slice(membershipStart, ownStoreSql.indexOf(') x;', membershipStart));
     expect(membership).toContain('mr.client_id = uid');
     expect(membership).toContain('q.client_id = uid');
     expect(membership).toContain('o.client_id = uid');
     expect(membership).not.toContain('professional_id');
-    expect(listSql).toContain('public.is_store_owner');
-    expect(listSql).toContain('_material_order_payer_can_reveal');
-    expect(listSql).not.toContain('FUNCTION public.get_material_order_reveal');
-    expect(listSql).not.toContain('FUNCTION public.completar_orden_material_con_pin');
+    expect(ownStoreSql).toContain('_material_order_payer_can_reveal');
+    expect(listSql).toContain('-- #103 solo cliente');
   });
 });
 
@@ -492,6 +512,7 @@ describe.skipIf(!postgresAvailable())('PIN de materiales para cliente y creador'
     psql(readFileSync(SQL, 'utf8'));
     psql(readFileSync(HOURS_SQL, 'utf8'));
     psql(readFileSync(LIST_SQL, 'utf8'));
+    psql(readFileSync(OWN_STORE_SQL, 'utf8'));
     psql(seedSql);
   });
 
@@ -566,19 +587,39 @@ describe.skipIf(!postgresAvailable())('PIN de materiales para cliente y creador'
     ).toMatch(/not_order_client/);
   });
 
-  it('el dueño del comercio no ve el PIN, ni aunque haya creado la solicitud', () => {
+  it('el profesional y el cliente ven dirección y PIN aunque el comercio sea suyo', () => {
     expect(errorText(asUser(OWNER, `SELECT * FROM public.get_material_order_reveal('${ORDER_PAID}');`))).toMatch(
       /not_order_client/,
     );
     expect(myOrder(OWNER, ORDER_PAID)).toBe('missing');
-    expect(quoteReveal(SELF, REQ_2, ORDER_SELF)).toBe('null|null|null|2002');
-    expect(reveal(SELF, ORDER_SELF)).toBe('null|null|null|2002|true');
+    expect(quoteReveal(SELF, REQ_2, ORDER_SELF)).toBe('5757|1155550000|Av Autocompra 9|2002');
+    expect(quoteReveal(SELF, REQ_2, ORDER_2_OTHER)).toBe('7373|1144440000|Calle Falsa 123|7373');
+    expect(reveal(SELF, ORDER_SELF)).toBe('5757|1155550000|Av Autocompra 9|2002|true');
+    expect(reveal(SELF, ORDER_2_OTHER)).toBe('7373|1144440000|Calle Falsa 123|7373|true');
     expect(revealHours(SELF, ORDER_SELF)).toBe('10:00');
     expect(myOrder(SELF, ORDER_SELF)).toBe('missing');
     expect(reveal(CLIENT, ORDER_SELF)).toBe('5757|1155550000|Av Autocompra 9|2002|true');
+    expect(reveal(CLIENT, ORDER_2_OTHER)).toBe('7373|1144440000|Calle Falsa 123|7373|true');
     expect(revealHours(CLIENT, ORDER_SELF)).toBe('10:00');
     expect(myOrder(CLIENT, ORDER_SELF)).toBe('5757|1155550000|Av Autocompra 9');
+    expect(myOrder(CLIENT, ORDER_2_OTHER)).toBe('7373|1144440000|Calle Falsa 123');
     expect(quoteReveal(CLIENT, REQ_2, ORDER_SELF)).toBe('5757|1155550000|Av Autocompra 9|2002');
+    expect(quoteReveal(CLIENT, REQ_2, ORDER_2_OTHER)).toBe('7373|1144440000|Calle Falsa 123|7373');
+    expect(
+      errorText(asUser(OWNER, `SELECT * FROM public.list_material_request_quote_reveals('${REQ_2}');`)),
+    ).toMatch(/not_request_party/);
+
+    expect(reveal(SELF, ORDER_CLIENT_OWNS)).toBe('6464|1155550000|Av Autocompra 9|6464|true');
+    expect(quoteReveal(SELF, REQ_CLIENT_OWNS, ORDER_CLIENT_OWNS)).toBe(
+      '6464|1155550000|Av Autocompra 9|6464',
+    );
+    expect(myOrder(SELF, ORDER_CLIENT_OWNS)).toBe('6464|1155550000|Av Autocompra 9');
+    expect(reveal(STRANGER, ORDER_CLIENT_OWNS)).toBe('6464|1155550000|Av Autocompra 9|6464|true');
+    expect(myOrder(STRANGER, ORDER_CLIENT_OWNS)).toBe('missing');
+    expect(myOrder(CLIENT, ORDER_CLIENT_OWNS)).toBe('missing');
+    expect(
+      errorText(asUser(OWNER, `SELECT * FROM public.get_material_order_reveal('${ORDER_CLIENT_OWNS}');`)),
+    ).toMatch(/not_order_client/);
   });
 
   it('el comercio cierra la orden tipeando el PIN y un PIN incorrecto no la cierra', () => {
@@ -606,11 +647,12 @@ describe.skipIf(!postgresAvailable())('PIN de materiales para cliente y creador'
       errorText(asUser(OWNER, `SELECT * FROM public.get_material_order_reveal('${ORDER_PAID}');`)),
     ).toMatch(/not_order_client/);
 
-    expect(reveal(SELF, ORDER_SELF)).toBe('null|null|null|2002|true');
+    expect(reveal(SELF, ORDER_SELF)).toBe('5757|1155550000|Av Autocompra 9|2002|true');
     expect(
       lastLine(asUser(SELF, `SELECT status FROM public.completar_orden_material_con_pin('2002', '5757');`)),
     ).toBe('completed');
     expect(reveal(CLIENT, ORDER_SELF)).toBe('5757|1155550000|Av Autocompra 9|2002|true');
-    expect(reveal(SELF, ORDER_SELF)).toBe('null|null|null|2002|true');
+    expect(reveal(SELF, ORDER_SELF)).toBe('5757|1155550000|Av Autocompra 9|2002|true');
+    expect(myOrder(SELF, ORDER_CLIENT_OWNS)).toBe('6464|1155550000|Av Autocompra 9');
   });
 });
