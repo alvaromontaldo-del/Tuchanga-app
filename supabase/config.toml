@@ -31,3 +31,12 @@ verify_jwt = false
 # Cron del dashboard y triggers pg_net. Mismo secreto.
 [functions.cleanup_chat_images]
 verify_jwt = false
+
+# #72. La dispara el trigger de user_reports con x-function-secret. Sin JWT de usuario.
+# El deploy por API no lee este archivo: hay que pasar verify_jwt = false en el deploy.
+[functions.notify_trabajo_no_conforme]
+verify_jwt = false
+
+# Reporte de chat. En producción verify_jwt = false: la función valida el access token.
+[functions.report_user]
+verify_jwt = false
