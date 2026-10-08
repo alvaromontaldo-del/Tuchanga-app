@@ -52,6 +52,28 @@ export const CONFORMIDAD_NEGATIVA: ConformidadResultado = {
   paso: 'El trabajo queda en disputa y el chat sigue visible para coordinar con el profesional.',
 };
 
+/** #206: el profesional repara y el cliente vuelve a dar conformidad. */
+export const TRABAJO_REPARADO = 'Trabajo reparado';
+
+export const DISPUTA_PASO_TRABAJADOR =
+  'Repará lo que indicó el cliente y marcá el trabajo como reparado. Después tiene que dar conformidad otra vez.';
+
+export const TRABAJO_REPARADO_ESPERA =
+  'Marcaste el trabajo como reparado. Esperamos que el cliente confirme si quedó conforme.';
+
+export const TRABAJO_REPARADO_PREGUNTA =
+  'El profesional marcó el trabajo como reparado. ¿Quedó bien ahora?';
+
+export function textoMotivoDisputa(motivo: string | null | undefined): string {
+  const text = (motivo ?? '').replace(/\s+/g, ' ').trim();
+  return text.length > 0 ? text : 'El cliente no cargó un detalle.';
+}
+
+/** Hay un motivo guardado: esta conformidad es la de un trabajo ya disputado. */
+export function esConformidadTrasReparo(motivo: string | null | undefined): boolean {
+  return (motivo ?? '').trim().length > 0;
+}
+
 /** El costo de servicio se paga en la app. No hace falta aceptar un aviso aparte. */
 export function puedeIniciarPagoCostoServicio(_aceptoSaldoFueraDeApp: boolean): boolean {
   return true;

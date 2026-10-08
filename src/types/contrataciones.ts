@@ -51,6 +51,10 @@ export type Contratacion = {
   offline_pago_notificado_at: string | null;
   offline_pago_confirmado_at: string | null;
   disputa_motivo: string;
+  /** Fallos del PIN de inicio. Lo escribe `verificar_pin`, no el cliente. */
+  pin_intentos_fallidos: number;
+  /** Fin del bloqueo de 15 minutos. null si no está bloqueado. */
+  pin_bloqueado_hasta: string | null;
   /** Días de garantía pactados en la cotización. null = sin garantía. */
   warranty_days: number | null;
   /** Inicio de la cuenta regresiva: primer finalizado. null hasta que el trabajo termina. */
@@ -72,6 +76,8 @@ export type ChatSystemEvent =
   | 'conformidad_rechazada'
   | 'conformidad_automatica'
   | 'conformidad_recordatorio'
+  | 'disputa_abierta'
+  | 'trabajo_reparado'
   | 'trabajo_finalizado'
   | 'saldo_pagado_cliente'
   | 'saldo_pagado_trabajador'

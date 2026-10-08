@@ -30,16 +30,18 @@ describe('cambiar de rol sin selector', () => {
     const fn = commerce.slice(start, end);
     expect(fn).toContain('chooseSessionRole(nextRole)');
     expect(fn).not.toContain('clearSessionRole');
-    expect(commerce).toContain('Cambiar de rol');
+    expect(commerce).toContain('sessionRoleSwitchButtonCopy');
+    expect(commerce).toContain('switchCopy.title');
     expect(commerce).not.toContain('Elegir otro rol');
     expect(commerce).toContain('nextSessionRoleOnSwitch');
     expect(commerce).toContain('clearSessionRole');
   });
 
-  it('perfil de cliente y profesional usa el mismo ciclo', () => {
+  it('perfil de cliente y profesional usa el mismo destino', () => {
     const account = read('src/screens/account/MyAccountScreen.tsx');
     expect(account).toContain('nextSessionRoleOnSwitch');
-    expect(account).toContain('title="Cambiar de rol"');
+    expect(account).toContain('sessionRoleSwitchButtonCopy');
+    expect(account).toContain('title={switchCopy.title}');
     expect(account).toContain('chooseSessionRole(nextRole)');
     const logout = account.slice(account.indexOf("title=\"Cerrar sesión\""));
     expect(logout).toContain('clearSessionRole');
