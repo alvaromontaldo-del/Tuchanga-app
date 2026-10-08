@@ -22,11 +22,18 @@ import { ReportarProblemaModal } from '../../components/jobs/ReportarProblemaMod
 import { QuoteMoneySummary } from '../../components/jobs/QuoteMoneySummary';
 import {
   CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE,
+  CONFORMIDAD_AUTOMATICA_AVISO_TRABAJADOR,
   CONFORMIDAD_NEGATIVA,
   CONFORMIDAD_POSITIVA,
   CONFORMIDAD_PREGUNTA,
   CONFORMIDAD_PROBLEMA,
   CONFORMIDAD_SI,
+  DISPUTA_PASO_TRABAJADOR,
+  esConformidadTrasReparo,
+  textoMotivoDisputa,
+  TRABAJO_REPARADO,
+  TRABAJO_REPARADO_ESPERA,
+  TRABAJO_REPARADO_PREGUNTA,
   SALDO_PAGADO_AL_PROFESIONAL,
   textoVisibleSinSena,
 } from '../../constants/serviceCostCopy';
@@ -52,6 +59,7 @@ import {
   rechazarRecotizacion,
   subscribeContratacionById,
   trabajadorConfirmarRecepcionOffline,
+  trabajadorMarcarTrabajoReparado,
   verificarPin,
 } from '../../services/contratacionesSupabase';
 import {
@@ -789,7 +797,11 @@ export function DetalleServicioScreen() {
 
         {myRole === 'cliente' && row.estado_trabajo === 'pendiente_conformidad' ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{CONFORMIDAD_PREGUNTA}</Text>
+            <Text style={styles.sectionTitle}>
+              {esConformidadTrasReparo(row.disputa_motivo)
+                ? TRABAJO_REPARADO_PREGUNTA
+                : CONFORMIDAD_PREGUNTA}
+            </Text>
             <Text style={styles.hint}>{CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE}</Text>
             <View style={styles.actions}>
               <Pressable
@@ -824,6 +836,48 @@ export function DetalleServicioScreen() {
         {myRole === 'cliente' && row.estado_trabajo === 'disputa' ? (
           <Text style={styles.hint}>
             Estado: {CONFORMIDAD_NEGATIVA.estado}. Próximo paso: {CONFORMIDAD_NEGATIVA.paso}
+          </Text>
+        ) : null}
+
+        {myRole === 'trabajador' && row.estado_trabajo === 'disputa' ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Estado: {CONFORMIDAD_NEGATIVA.estado}</Text>
+            <Text style={styles.hint}>Motivo: {textoMotivoDisputa(row.disputa_motivo)}</Text>
+            <Text style={styles.hint}>{DISPUTA_PASO_TRABAJADOR}</Text>
+            <Pressable
+              style={[styles.btnPrimary, { marginTop: spacing.md }, busy && styles.btnDisabled]}
+              disabled={busy}
+              onPress={() => {
+                Alert.alert(
+                  '¿Trabajo reparado?',
+                  'El cliente va a confirmar otra vez si el trabajo quedó bien.',
+                  [
+                    { text: 'Cancelar', style: 'cancel' },
+                    {
+                      text: TRABAJO_REPARADO,
+                      onPress: () =>
+                        void runAction(
+                          () => trabajadorMarcarTrabajoReparado(row.id),
+                          'Le pedimos la conformidad al cliente',
+                        ),
+                    },
+                  ],
+                );
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={TRABAJO_REPARADO}
+            >
+              <Text style={styles.btnPrimaryText}>{TRABAJO_REPARADO}</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {myRole === 'trabajador' && row.estado_trabajo === 'pendiente_conformidad' ? (
+          <Text style={styles.hint}>
+            {esConformidadTrasReparo(row.disputa_motivo)
+              ? TRABAJO_REPARADO_ESPERA
+              : 'Marcaste el trabajo como realizado. Esperamos que el cliente confirme si quedó conforme.'}{' '}
+            {CONFORMIDAD_AUTOMATICA_AVISO_TRABAJADOR}
           </Text>
         ) : null}
 

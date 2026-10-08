@@ -87,6 +87,12 @@ import {
   CONFORMIDAD_PREGUNTA,
   CONFORMIDAD_PROBLEMA,
   CONFORMIDAD_SI,
+  DISPUTA_PASO_TRABAJADOR,
+  esConformidadTrasReparo,
+  textoMotivoDisputa,
+  TRABAJO_REPARADO,
+  TRABAJO_REPARADO_ESPERA,
+  TRABAJO_REPARADO_PREGUNTA,
   COSTO_SERVICIO_LABEL,
   COSTO_SERVICIO_PAGADO,
   SALDO_PAGADO_AL_PROFESIONAL,
@@ -98,6 +104,7 @@ import {
   clienteNotificarPagoOffline,
   clienteResponderConformidad,
   trabajadorConfirmarRecepcionOffline,
+  trabajadorMarcarTrabajoReparado,
   fetchDisponibilidadOpciones,
   aceptarRecotizacion,
   obtenerPinCliente,
@@ -487,6 +494,7 @@ export function ChatScreen({
   const [saldoBusy, setSaldoBusy] = useState(false);
   const [problemaOpen, setProblemaOpen] = useState(false);
   const [conformidadBusy, setConformidadBusy] = useState(false);
+  const [reparadoBusy, setReparadoBusy] = useState(false);
   const [conformidadAviso, setConformidadAviso] = useState<typeof CONFORMIDAD_POSITIVA | null>(
     null,
   );
@@ -608,6 +616,9 @@ export function ChatScreen({
   );
   const showClientDisputaBar = Boolean(
     job && participants?.myRole === 'cliente' && job.estado_trabajo === 'disputa',
+  );
+  const showWorkerDisputaBar = Boolean(
+    job && participants?.myRole === 'trabajador' && job.estado_trabajo === 'disputa',
   );
 
   useEffect(() => {
@@ -1246,6 +1257,39 @@ export function ChatScreen({
     })();
   }, [conformidadBusy, conversationId, job?.id, refreshMessages, toast]);
 
+  const runMarcarTrabajoReparado = useCallback(() => {
+    if (reparadoBusy || !job?.id) return;
+    setReparadoBusy(true);
+    void (async () => {
+      try {
+        await trabajadorMarcarTrabajoReparado(job.id);
+        const j = await fetchLatestJobByConversation(conversationId);
+        if (j) setJob(j);
+        await refreshMessages();
+        toast.success('Le pedimos la conformidad al cliente', 'Servicio');
+      } catch (e) {
+        toast.error(
+          textoVisibleSinSena(e instanceof Error ? e.message : 'No se pudo marcar el trabajo'),
+          'Servicio',
+        );
+      } finally {
+        setReparadoBusy(false);
+      }
+    })();
+  }, [conversationId, job?.id, refreshMessages, reparadoBusy, toast]);
+
+  const handleMarcarTrabajoReparado = useCallback(() => {
+    if (reparadoBusy || !job?.id) return;
+    Alert.alert(
+      '¿Trabajo reparado?',
+      'El cliente va a confirmar otra vez si el trabajo quedó bien.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: TRABAJO_REPARADO, onPress: runMarcarTrabajoReparado },
+      ],
+    );
+  }, [job?.id, reparadoBusy, runMarcarTrabajoReparado]);
+
   // Reseña 1:1 por job_id (robusto: soporta múltiples trabajos por conversación).
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
@@ -1304,6 +1348,8 @@ export function ChatScreen({
               event === 'conformidad_solicitada' ||
               event === 'conformidad_aceptada' ||
               event === 'conformidad_rechazada' ||
+              event === 'disputa_abierta' ||
+              event === 'trabajo_reparado' ||
               event === 'conformidad_automatica' ||
               event === 'horario_confirmado' ||
               event === 'pin_validado' ||
@@ -2249,7 +2295,11 @@ export function ChatScreen({
 
         {isSupabaseConfigured() && showClientConformidadBar && job ? (
           <View style={[styles.completeBar, styles.completeBarStacked]}>
-            <Text style={styles.paySubtitle}>{CONFORMIDAD_PREGUNTA}</Text>
+            <Text style={styles.paySubtitle}>
+              {esConformidadTrasReparo(job.disputa_motivo)
+                ? TRABAJO_REPARADO_PREGUNTA
+                : CONFORMIDAD_PREGUNTA}
+            </Text>
             <Text style={styles.conformidadAutoHint}>{CONFORMIDAD_AUTOMATICA_AVISO_CLIENTE}</Text>
             <View style={styles.conformidadActions}>
                 <Pressable
@@ -2288,8 +2338,10 @@ export function ChatScreen({
           <View style={styles.completeBar}>
             <View style={styles.payBarText}>
               <Text style={styles.paySubtitle}>
-                Marcaste el trabajo como realizado. Esperamos que el cliente confirme si quedó
-                conforme. {CONFORMIDAD_AUTOMATICA_AVISO_TRABAJADOR}
+                {esConformidadTrasReparo(job.disputa_motivo)
+                  ? TRABAJO_REPARADO_ESPERA
+                  : 'Marcaste el trabajo como realizado. Esperamos que el cliente confirme si quedó conforme.'}{' '}
+                {CONFORMIDAD_AUTOMATICA_AVISO_TRABAJADOR}
               </Text>
             </View>
           </View>
@@ -2312,6 +2364,32 @@ export function ChatScreen({
                 Estado: {CONFORMIDAD_NEGATIVA.estado}. Próximo paso: {CONFORMIDAD_NEGATIVA.paso}
               </Text>
             </View>
+          </View>
+        ) : null}
+
+        {isSupabaseConfigured() && showWorkerDisputaBar && job ? (
+          <View style={[styles.completeBar, styles.completeBarStacked]}>
+            <Text style={styles.payTitle}>Estado: {CONFORMIDAD_NEGATIVA.estado}</Text>
+            <Text style={styles.paySubtitle}>
+              Motivo: {textoMotivoDisputa(job.disputa_motivo)}
+            </Text>
+            <Text style={styles.conformidadAutoHint}>{DISPUTA_PASO_TRABAJADOR}</Text>
+            <Pressable
+              style={({ pressed }) => [
+                styles.payBtn,
+                { alignSelf: 'flex-start', marginTop: spacing.sm },
+                reparadoBusy && styles.quoteBtnDisabled,
+                pressed && !reparadoBusy && styles.pressed,
+              ]}
+              disabled={reparadoBusy}
+              onPress={handleMarcarTrabajoReparado}
+              accessibilityRole="button"
+              accessibilityLabel={TRABAJO_REPARADO}
+            >
+              <Text style={styles.payBtnText}>
+                {reparadoBusy ? 'Enviando…' : TRABAJO_REPARADO}
+              </Text>
+            </Pressable>
           </View>
         ) : null}
 
@@ -2484,6 +2562,9 @@ export function ChatScreen({
       showClientAgendaBar,
       showClientConformidadBar,
       showClientDisputaBar,
+      showWorkerDisputaBar,
+      handleMarcarTrabajoReparado,
+      reparadoBusy,
       showClientPinBar,
       showClientSaldoEsperandoBar,
       showClientSaldoPagadoBar,

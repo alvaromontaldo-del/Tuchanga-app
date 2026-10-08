@@ -72,6 +72,8 @@ export type ChatSystemEvent =
   | 'conformidad_rechazada'
   | 'conformidad_automatica'
   | 'conformidad_recordatorio'
+  | 'disputa_abierta'
+  | 'trabajo_reparado'
   | 'trabajo_finalizado'
   | 'saldo_pagado_cliente'
   | 'saldo_pagado_trabajador'

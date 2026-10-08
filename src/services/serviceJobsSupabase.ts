@@ -33,6 +33,7 @@ export type ServiceJob = {
   offline_pago_notificado_at: string | null;
   offline_pago_confirmado_at: string | null;
   conformidad_aceptada: boolean | null;
+  disputa_motivo: string;
   completed_by_worker_at: string | null;
   created_at: string;
   updated_at: string;
@@ -69,6 +70,7 @@ export function contratacionToServiceJob(c: Contratacion): ServiceJob {
     offline_pago_notificado_at: c.offline_pago_notificado_at,
     offline_pago_confirmado_at: c.offline_pago_confirmado_at,
     conformidad_aceptada: c.conformidad_aceptada,
+    disputa_motivo: c.disputa_motivo,
     completed_by_worker_at: c.completed_by_worker_at ?? c.finalizado_at,
     created_at: c.created_at,
     updated_at: c.updated_at,
