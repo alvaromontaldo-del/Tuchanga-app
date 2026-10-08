@@ -32,6 +32,7 @@ import { SingleSelectModal } from '../../components/common/SingleSelectModal';
 import { TradeSearchModal } from '../../components/search/TradeSearchModal';
 import { TextLink } from '../../components/common/TextLink';
 import { TermsAndConditionsModal } from '../../components/legal/TermsAndConditionsModal';
+import { TERMS_VERSION } from '../../constants/terms';
 import { useAppToast } from '../../components/toast/toast';
 import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/nominatim';
 import {
@@ -1639,6 +1640,30 @@ export function RegisterScreen({ navigation, route }: Props) {
               </View>
             ) : null}
 
+            <View style={styles.termsCheckRow}>
+              <Pressable
+                onPress={() => setTermsAccepted((v) => !v)}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: termsAccepted }}
+                accessibilityLabel="Leí y acepto los Términos y condiciones"
+                hitSlop={6}
+                style={({ pressed }) => [styles.termsBox, termsAccepted && styles.termsBoxOn, pressed && styles.pressed]}
+              >
+                {termsAccepted ? <Ionicons name="checkmark" size={16} color="#fff" /> : null}
+              </Pressable>
+              <Text style={styles.termsText}>
+                Leí y acepto los{' '}
+                <Text
+                  style={styles.termsLink}
+                  onPress={() => setTermsOpen(true)}
+                  accessibilityRole="link"
+                >
+                  Términos y condiciones
+                </Text>
+                {' '}(versión {TERMS_VERSION}).
+              </Text>
+            </View>
+
             <AppButton
               title={
                 asCommerce
@@ -1649,16 +1674,9 @@ export function RegisterScreen({ navigation, route }: Props) {
               }
               onPress={handleSubmit}
               loading={loading}
+              disabled={!termsAccepted}
               style={styles.submitButton}
             />
-
-            <View style={styles.termsRow}>
-              <Text style={styles.termsText}>Al crear tu cuenta, aceptás los </Text>
-              <TextLink inline onPress={() => setTermsOpen(true)}>
-                Términos y Condiciones
-              </TextLink>
-              <Text style={styles.termsText}>.</Text>
-            </View>
 
             <View style={styles.footerRow}>
               <Text style={styles.muted}>¿Ya tenés cuenta? </Text>
@@ -1780,11 +1798,8 @@ export function RegisterScreen({ navigation, route }: Props) {
 
         <TermsAndConditionsModal
           visible={termsOpen}
+          mode="read"
           onClose={() => setTermsOpen(false)}
-          onAccept={() => {
-            setTermsAccepted(true);
-            setTermsOpen(false);
-          }}
         />
       </AppKeyboardAvoidingView>
     </AppScreen>
@@ -2292,14 +2307,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   pressed: { opacity: 0.9 },
-  termsRow: {
+  termsCheckRow: {
     marginTop: spacing.md,
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  termsBox: {
+    width: 22,
+    height: 22,
+    marginTop: 1,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: colors.background,
   },
-  termsText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
+  termsBoxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  termsText: {
+    flex: 1,
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 19,
+  },
+  termsLink: {
+    color: colors.primary,
+    fontWeight: '800',
+    textDecorationLine: 'underline',
+  },
   footerRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',

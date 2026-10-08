@@ -33,7 +33,7 @@ describe('modal de términos en el registro (#101)', () => {
     expect(scroll).not.toContain('showsVerticalScrollIndicator={false}');
   });
 
-  it('cliente, profesional y comercio usan el mismo modal, sin texto legal nuevo', () => {
+  it('cliente, profesional y comercio usan el mismo modal', () => {
     for (const choice of ['client', 'professional', 'commerce'] as const) {
       expect(signupRoleRegisterTarget(choice).screen).toBe('Register');
     }
@@ -41,11 +41,14 @@ describe('modal de términos en el registro (#101)', () => {
     const usage = register.slice(register.indexOf('<TermsAndConditionsModal'));
     expect(usage).not.toContain('asCommerce');
     expect(usage).not.toContain('asProfessional');
+    expect(usage).toContain('mode="read"');
 
-    expect(modal).toContain('He leído y acepto los términos');
-    expect(modal).toContain('>Continuar<');
-    expect(modal).toContain('>Volver<');
-    expect(modal).toContain('8. Jurisdicción y ley aplicable');
-    expect(modal).toContain('intermediario tecnológico');
+    expect(modal).toContain('buildTermsDocument');
+    expect(modal).toContain('>Acepto<');
+    expect(modal).toContain('>Cerrar<');
+    expect(modal).not.toContain('toLocaleDateString');
+    expect(modal).not.toContain('asCommerce');
+    expect(register).toContain('disabled={!termsAccepted}');
+    expect(register).toContain('Leí y acepto los');
   });
 });

@@ -3192,13 +3192,21 @@ export function ChatScreen({
                     <Text
                       style={[styles.headerName, styles.headerNameLink]}
                       numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.7}
                       ellipsizeMode="tail"
                     >
                       {displayName}
                     </Text>
                   </Pressable>
                 ) : (
-                  <Text style={styles.headerName} numberOfLines={1} ellipsizeMode="tail">
+                  <Text
+                    style={styles.headerName}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.7}
+                    ellipsizeMode="tail"
+                  >
                     {displayName}
                   </Text>
                 )}
@@ -3242,7 +3250,7 @@ export function ChatScreen({
                     }}
                     accessibilityRole="button"
                     accessibilityLabel={quoteChip.label}
-                    hitSlop={4}
+                    hitSlop={{ top: 6, bottom: 6, left: 0, right: 0 }}
                     style={({ pressed }) => [
                       styles.headerActionChip,
                       quoteChip.disabled && styles.modalBtnDisabled,
@@ -3250,8 +3258,8 @@ export function ChatScreen({
                     ]}
                     disabled={quoteChip.disabled}
                   >
-                    <Ionicons name="calculator-outline" size={14} color={colors.text} />
-                    <Text style={styles.headerActionChipText}>{quoteChip.label}</Text>
+                    <Ionicons name="calculator-outline" size={16} color={colors.text} />
+                    <Text style={styles.headerActionChipText} numberOfLines={1}>{quoteChip.label}</Text>
                   </Pressable>
                   <Pressable
                     onPress={() => {
@@ -3266,11 +3274,11 @@ export function ChatScreen({
                     }}
                     accessibilityRole="button"
                     accessibilityLabel="Cotizaciones de materiales"
-                    hitSlop={4}
+                    hitSlop={{ top: 6, bottom: 6, left: 0, right: 0 }}
                     style={({ pressed }) => [styles.headerActionChip, pressed && styles.pressed]}
                   >
-                    <Ionicons name="clipboard-outline" size={14} color={colors.text} />
-                    <Text style={styles.headerActionChipText}>Materiales</Text>
+                    <Ionicons name="clipboard-outline" size={16} color={colors.text} />
+                    <Text style={styles.headerActionChipText} numberOfLines={1}>Materiales</Text>
                   </Pressable>
                 </View>
               ) : null}
@@ -3402,7 +3410,7 @@ const styles = StyleSheet.create({
     width: '100%',
     minHeight: 44,
   },
-  /** Fila: [columna nombre + subtítulo] [chips centrados en vertical]. */
+  /** Fila: [foto] [columna nombre + subtítulo, flex] [chips angostos, centrados]. */
   headerIdentity: {
     flex: 1,
     minWidth: 0,
@@ -3433,13 +3441,15 @@ const styles = StyleSheet.create({
     minWidth: 0,
     alignSelf: 'stretch',
   },
+  /** Cotizar y Materiales, uno al lado del otro y centrados en la fila del nombre. */
   headerChipsInline: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'center',
-    gap: 4,
+    justifyContent: 'center',
+    gap: 2,
     flexShrink: 0,
-    marginLeft: 6,
+    marginLeft: 2,
   },
   headerIconCluster: {
     flexDirection: 'row',
@@ -3460,6 +3470,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     letterSpacing: -0.2,
     flexShrink: 1,
+    width: '100%',
   },
   headerNameLink: { textDecorationLine: 'underline' },
   headerTrade: {
@@ -3469,22 +3480,32 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   headerWarn: { fontSize: 12, fontWeight: '700', color: colors.primary, marginTop: 2 },
+  /**
+   * Ícono arriba y la palabra abajo, chica y centrada.
+   * El chip queda más angosto para que el nombre entre; si aún no entra, la letra
+   * baja hasta minimumFontScale y el ellipsis es el último recurso.
+   */
   headerActionChip: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
-    gap: 3,
-    paddingVertical: 5,
-    paddingHorizontal: 7,
-    borderRadius: 999,
+    justifyContent: 'center',
+    gap: 1,
+    paddingVertical: 3,
+    paddingHorizontal: 2,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.background,
     flexShrink: 0,
   },
   headerActionChipText: {
-    fontSize: 11,
+    fontSize: 10,
+    lineHeight: 12,
     fontWeight: '800',
+    letterSpacing: -0.2,
     color: colors.text,
+    textAlign: 'center',
+    includeFontPadding: false,
   },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   chatBody: { flex: 1, minHeight: 0 },
