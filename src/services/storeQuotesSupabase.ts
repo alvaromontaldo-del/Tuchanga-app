@@ -13,7 +13,13 @@ import type {
   StoreRequestDetail,
 } from '../types/materials';
 import { formatOrderCodeDisplay } from '../utils/orderCode';
-import { parseIncludeFreightFlag, storeAmountDue } from '../utils/quoteFreightTotal';
+import { isLegacyQuoteItemInsertError } from '../utils/quoteItemInsert';
+import {
+  parseIncludeFreightFlag,
+  storeAmountDue,
+  storeDeliveryBoardLabel,
+  storeDeliveryChoice,
+} from '../utils/quoteFreightTotal';
 
 export async function fetchMyStores(): Promise<MyStoreSummary[]> {
   const sb = getSupabaseClient();
@@ -306,12 +312,15 @@ function preferBoardOrder(
 }
 
 type QuoteItemRow = {
+  id?: string;
   unit_price: number | string;
   client_decision?: string | null;
   request_item_id?: string;
+  variant_index?: number | null;
+  variant_label?: string | null;
   request_items?:
-    | { id: string; description: string | null }
-    | { id: string; description: string | null }[]
+    | { id: string; description: string | null; quantity?: number | string | null }
+    | { id: string; description: string | null; quantity?: number | string | null }[]
     | null;
 };
 
@@ -437,10 +446,13 @@ export async function fetchStoreBoardCards(): Promise<StoreBoardCard[]> {
         freight_type,
         freight_cost,
         quote_items (
+          id,
           unit_price,
           client_decision,
           request_item_id,
-          request_items ( id, description )
+          variant_index,
+          variant_label,
+          request_items ( id, description, quantity )
         )
       `,
       )
@@ -621,9 +633,12 @@ export async function fetchStoreBoardCards(): Promise<StoreBoardCard[]> {
       const raw = String(qi.client_decision ?? 'pending').toLowerCase();
       const decision: 'accepted' | 'rejected' | 'pending' =
         raw === 'accepted' || raw === 'rejected' ? raw : 'pending';
+      const base = (ri?.description ?? '').trim() || 'Ítem';
+      const brand = (qi.variant_label ?? '').trim();
       return {
+        quoteItemId: String(qi.id ?? `${qi.request_item_id ?? ''}-${qi.variant_index ?? 1}`),
         requestItemId: String(qi.request_item_id ?? ri?.id ?? ''),
-        description: (ri?.description ?? '').trim() || 'Ítem',
+        description: brand ? `${base} (${brand})` : base,
         unitPrice: Number(qi.unit_price) || 0,
         decision,
       };
@@ -675,6 +690,26 @@ export async function fetchStoreBoardCards(): Promise<StoreBoardCard[]> {
         ? Number(order.deposit_amount)
         : null;
 
+    const selectionLocked = Boolean(order) && (orderStatus ?? '').toLowerCase() !== 'cancelled';
+    const freightMaterials = (quote?.quote_items ?? []).reduce((acc, qi) => {
+      const raw = String(qi.client_decision ?? 'pending').toLowerCase();
+      if (selectionLocked && raw !== 'accepted') return acc;
+      const ri = one(qi.request_items);
+      const qty = Number(ri?.quantity);
+      const quantity = Number.isFinite(qty) && qty > 0 ? qty : 1;
+      return acc + (Number(qi.unit_price) || 0) * quantity;
+    }, 0);
+    const deliveryLabel = storeDeliveryBoardLabel(
+      storeDeliveryChoice({
+        freightType,
+        quotedFreightCost: Number(quote?.freight_cost) || 0,
+        orderIncludeFreight: order?.include_freight ?? null,
+        acceptedTotal: persistedTotal,
+        materialsSubtotal: freightMaterials,
+        selectionLocked,
+      }),
+    );
+
     // Código existe desde el accept (trigger); Confirmadas requiere fee pagado.
     // Se guarda siempre para el buscador; la UI solo lo destaca en confirmadas/cerradas.
     const orderCodeDigits = order?.order_code
@@ -705,6 +740,7 @@ export async function fetchStoreBoardCards(): Promise<StoreBoardCard[]> {
       serviceFee,
       acceptedItems,
       rejectedItems,
+      deliveryLabel,
     });
   }
 
@@ -881,6 +917,33 @@ export async function fetchStoreRequestDetail(params: {
     const qStatusRaw = String(quoteRow.status ?? 'sent');
     const quoteStatus: ExistingStoreQuote['status'] =
       qStatusRaw === 'accepted' || qStatusRaw === 'rejected' ? qStatusRaw : 'sent';
+
+    let orderIncludeFreight: boolean | null = null;
+    let orderAcceptedTotal: number | null = null;
+    let selectionLocked = false;
+    const orderRes = await sb
+      .from('orders')
+      .select('include_freight, accepted_total, status')
+      .eq('quote_id', quoteRow.id);
+    if (!orderRes.error) {
+      const active = (orderRes.data ?? []).find(
+        (row) => String((row as { status?: string }).status ?? '').toLowerCase() !== 'cancelled',
+      ) as { include_freight?: unknown; accepted_total?: number | string | null } | undefined;
+      if (active) {
+        selectionLocked = true;
+        orderIncludeFreight = parseIncludeFreightFlag(active.include_freight);
+        orderAcceptedTotal =
+          active.accepted_total != null && Number.isFinite(Number(active.accepted_total))
+            ? Number(active.accepted_total)
+            : null;
+      }
+    }
+
+    const quoteItems = [...(quoteRow.quote_items ?? [])].sort((a, b) => {
+      const byItem = String(a.request_item_id).localeCompare(String(b.request_item_id));
+      if (byItem !== 0) return byItem;
+      return (Number(a.variant_index) || 1) - (Number(b.variant_index) || 1);
+    });
     existingQuote = {
       quoteId: quoteRow.id,
       freightType: (['pickup', 'free', 'cost'] as FreightType[]).includes(freightType)
@@ -889,7 +952,10 @@ export async function fetchStoreRequestDetail(params: {
       freightCost: Number(quoteRow.freight_cost) || 0,
       notes: (quoteRow.notes ?? '').trim(),
       status: quoteStatus,
-      items: (quoteRow.quote_items ?? []).map((qi) => {
+      orderIncludeFreight,
+      orderAcceptedTotal,
+      selectionLocked,
+      items: quoteItems.map((qi) => {
         const raw = String(qi.client_decision ?? 'pending').toLowerCase();
         const clientDecision: ExistingStoreQuoteItem['clientDecision'] =
           raw === 'accepted' || raw === 'rejected' ? raw : 'pending';
@@ -1025,12 +1091,7 @@ export async function submitStoreQuote(
   }));
 
   let itemsError = (await sb.from('quote_items').insert(itemRowsFull)).error;
-  if (
-    itemsError &&
-    /variant_index|variant_label|in_stock|alternative_description|item_note|schema cache|column|duplicate/i.test(
-      itemsError.message ?? '',
-    )
-  ) {
+  if (isLegacyQuoteItemInsertError(itemsError)) {
     // Fallback: sin columnas nuevas / unique viejo → una fila por request_item (primera variante).
     const seen = new Set<string>();
     const compact = itemRowsFull.filter((row) => {

@@ -81,6 +81,7 @@ export type StoreBoardColumn =
   | 'rechazadas';
 
 export type StoreBoardQuoteItemDecision = {
+  quoteItemId: string;
   requestItemId: string;
   description: string;
   unitPrice: number;
@@ -117,6 +118,11 @@ export type StoreBoardCard = {
   serviceFee: number | null;
   acceptedItems: StoreBoardQuoteItemDecision[];
   rejectedItems: StoreBoardQuoteItemDecision[];
+  /**
+   * Elección del cliente ya cerrada: «Retiro en local», «Flete $X» o «Flete gratis».
+   * null mientras la cotización sigue abierta.
+   */
+  deliveryLabel: string | null;
 };
 
 /** Cotización ya enviada por el comercio (vista solo lectura). */
@@ -140,6 +146,11 @@ export type ExistingStoreQuote = {
   notes: string;
   status: 'sent' | 'accepted' | 'rejected';
   items: ExistingStoreQuoteItem[];
+  /** null si no hay orden vigente. */
+  orderIncludeFreight: boolean | null;
+  orderAcceptedTotal: number | null;
+  /** Hay orden no cancelada: la logística es la del cliente, no la oferta. */
+  selectionLocked: boolean;
 };
 
 export type StoreRequestDetail = {

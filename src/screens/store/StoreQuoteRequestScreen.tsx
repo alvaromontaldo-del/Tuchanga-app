@@ -33,10 +33,15 @@ import { normalizeDisplayAddress } from '../../utils/formatAddress';
 import { listKey } from '../../utils/safeAsync';
 import { sanitizePriceText } from '../../services/storeQuotesSupabase';
 import type {
+  ExistingStoreQuote,
   ExistingStoreQuoteItem,
   FreightType,
   MaterialRequestItem,
 } from '../../types/materials';
+import {
+  storeDeliveryChoice,
+  storeDeliveryDetailLabel,
+} from '../../utils/quoteFreightTotal';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 const FREIGHT_OPTIONS: { value: FreightType; label: string }[] = [
@@ -53,6 +58,20 @@ function formatDraftPrice(priceText: string): string {
   const n = Number(String(priceText).replace(',', '.'));
   if (!Number.isFinite(n) || n < 0) return '—';
   return formatMoneyAr(n);
+}
+
+function materialsForDelivery(
+  quote: ExistingStoreQuote,
+  requestItems: MaterialRequestItem[],
+): number {
+  const accepted = quote.items.filter((line) => line.clientDecision === 'accepted');
+  const lines = accepted.length > 0 ? accepted : quote.items;
+  return lines.reduce((acc, line) => {
+    const req = requestItems.find((it) => it.id === line.requestItemId);
+    const qty = Number(req?.quantity);
+    const quantity = Number.isFinite(qty) && qty > 0 ? qty : 1;
+    return acc + (Number(line.unitPrice) || 0) * quantity;
+  }, 0);
 }
 
 function formatItemQty(item: MaterialRequestItem): string {
@@ -279,9 +298,15 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
           }
           if (row.type === 'item') {
             const draft = itemDraftsRef.current[row.item.id] ?? EMPTY_DRAFT;
-            const decision =
-              detail.existingQuote?.items.find((it) => it.requestItemId === row.item.id)
-                ?.clientDecision ?? 'pending';
+            const saved =
+              detail.existingQuote?.items
+                .filter((it) => it.requestItemId === row.item.id)
+                .sort((a, b) => a.variantIndex - b.variantIndex) ?? [];
+            const decision = saved.some((it) => it.clientDecision === 'accepted')
+              ? 'accepted'
+              : saved.length > 0 && saved.every((it) => it.clientDecision === 'rejected')
+                ? 'rejected'
+                : 'pending';
             return (
               <QuoteItemRow
                 // draftTick re-renderiza la fila; la key no puede incluirlo o el TextInput se remonta y se cierra el teclado.
@@ -290,6 +315,7 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
                 editable={!locked}
                 draft={draft}
                 clientDecision={decision}
+                variantDecisions={saved.map((it) => it.clientDecision)}
                 onPatch={(patch) => patchItemDraft(row.item.id, patch)}
               />
             );
@@ -300,6 +326,20 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
                 freightType={freightType}
                 freightCostText={freightCostText}
                 editable={!locked}
+                readOnlyLabel={
+                  detail.existingQuote
+                    ? storeDeliveryDetailLabel(
+                        storeDeliveryChoice({
+                          freightType: detail.existingQuote.freightType,
+                          quotedFreightCost: detail.existingQuote.freightCost,
+                          orderIncludeFreight: detail.existingQuote.orderIncludeFreight,
+                          acceptedTotal: detail.existingQuote.orderAcceptedTotal,
+                          materialsSubtotal: materialsForDelivery(detail.existingQuote, detail.items),
+                          selectionLocked: detail.existingQuote.selectionLocked,
+                        }),
+                      )
+                    : freightOptionLabel(freightType)
+                }
                 onFreightTypeChange={setFreightType}
                 onFreightCostChange={(t) => {
                   const cleaned = sanitizePriceText(t);
@@ -343,12 +383,14 @@ const QuoteItemRow = memo(function QuoteItemRow({
   editable,
   draft,
   clientDecision = 'pending',
+  variantDecisions = [],
   onPatch,
 }: {
   item: MaterialRequestItem;
   editable: boolean;
   draft: QuoteItemDraftState;
   clientDecision?: ExistingStoreQuoteItem['clientDecision'];
+  variantDecisions?: ExistingStoreQuoteItem['clientDecision'][];
   onPatch: (patch: Partial<QuoteItemDraftState>) => void;
 }) {
   const variants = draft.variants.length > 0 ? draft.variants : [{ label: '', priceText: '' }];
@@ -420,7 +462,15 @@ const QuoteItemRow = memo(function QuoteItemRow({
             </Text>
           ) : null}
           {(inStock ? variants : variants.filter((v) => v.label.trim() || v.priceText.trim())).map(
-            (v, i) => (
+            (v, i) => {
+              const variantDecision = variantDecisions[i];
+              const variantDecisionLabel =
+                variants.length > 1 && variantDecision === 'accepted'
+                  ? 'Aceptado'
+                  : variants.length > 1 && variantDecision === 'rejected'
+                    ? 'Rechazado'
+                    : null;
+              return (
               <View key={`ro-v-${i}`} style={styles.roMetaBlock}>
                 <Text style={styles.roMetaLabel}>
                   {!inStock
@@ -433,8 +483,19 @@ const QuoteItemRow = memo(function QuoteItemRow({
                   <Text style={styles.roAltText}>{v.label.trim()}</Text>
                 ) : null}
                 <Text style={styles.roMetaValue}>{formatDraftPrice(v.priceText)}</Text>
+                {variantDecisionLabel ? (
+                  <Text
+                    style={[
+                      styles.decisionBadge,
+                      variantDecision === 'accepted' ? styles.decisionOk : styles.decisionNo,
+                    ]}
+                  >
+                    {variantDecisionLabel}
+                  </Text>
+                ) : null}
               </View>
-            ),
+              );
+            },
           )}
           {!inStock && variants.every((v) => !v.label.trim() && !v.priceText.trim()) ? (
             <Text style={styles.altHint}>Sin alternativa.</Text>
@@ -515,18 +576,12 @@ const QuoteItemRow = memo(function QuoteItemRow({
               maxLength={12}
               accessibilityLabel="Precio del alternativo"
             />
-            <Text style={styles.pricePreview}>
-              {formatDraftPrice(variants[0]?.priceText ?? '') === '—'
-                ? '\u00a0'
-                : formatDraftPrice(variants[0]?.priceText ?? '')}
-            </Text>
           </View>
         </View>
       ) : null}
 
       {inStock
         ? variants.map((v, index) => {
-        const preview = formatDraftPrice(v.priceText);
         return (
           <View key={`var-${index}`} style={styles.variantBlock}>
             <View style={styles.variantFields}>
@@ -558,7 +613,6 @@ const QuoteItemRow = memo(function QuoteItemRow({
                   maxLength={12}
                   accessibilityLabel="Precio unitario"
                 />
-                <Text style={styles.pricePreview}>{preview === '—' ? '\u00a0' : preview}</Text>
               </View>
             </View>
             {variants.length > 1 ? (
@@ -605,32 +659,25 @@ function LogisticsBlock({
   freightType,
   freightCostText,
   editable,
+  readOnlyLabel,
   onFreightTypeChange,
   onFreightCostChange,
 }: {
   freightType: FreightType;
   freightCostText: string;
   editable: boolean;
+  readOnlyLabel: string;
   onFreightTypeChange: (t: FreightType) => void;
   onFreightCostChange: (t: string) => void;
 }) {
   if (!editable) {
-    const costNum = Number(String(freightCostText).replace(',', '.'));
-    const showCost =
-      freightType === 'cost' && Number.isFinite(costNum) && costNum >= 0;
     return (
       <View style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>Logística</Text>
         <View style={styles.roMetaList}>
           <View style={styles.roMetaRow}>
-            <Text style={styles.roMetaValue}>{freightOptionLabel(freightType)}</Text>
+            <Text style={styles.roMetaValue}>{readOnlyLabel}</Text>
           </View>
-          {showCost ? (
-            <View style={styles.roMetaRow}>
-              <Text style={styles.roMetaLabel}>Costo</Text>
-              <Text style={styles.roMetaValue}>{formatMoneyAr(costNum)}</Text>
-            </View>
-          ) : null}
         </View>
       </View>
     );
@@ -878,14 +925,6 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     flexBasis: 140,
     minWidth: 140,
-  },
-  pricePreview: {
-    marginTop: 4,
-    minHeight: 18,
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.text,
-    fontVariant: ['tabular-nums'],
   },
   roMetaList: {
     gap: 8,

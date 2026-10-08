@@ -17,6 +17,8 @@ import {
 import { normalizeOrderCodeInput, normalizePinInput } from '../utils/orderCode';
 import {
   buildMaterialCheckoutPayload,
+  clientCoordinatesDelivery,
+  freightIsIncluded,
   parseIncludeFreightFlag,
   quoteFreightDisplay,
 } from '../utils/quoteFreightTotal';
@@ -1014,6 +1016,9 @@ export async function acceptQuoteAndCreateOrder(
       throw new Error('Ya existe una orden para este comercio.');
     }
     if (/request_completed/i.test(msg)) throw new Error('Este pedido ya está cerrado.');
+    if (/multiple_variants_selected/i.test(msg)) {
+      throw new Error('Elegí una sola marca por material.');
+    }
     if (/not_client/i.test(msg)) throw new Error('Solo el cliente puede aceptar la cotización.');
     if (!/accept_material_quote|function|schema/i.test(msg)) {
       throw error;
@@ -1026,11 +1031,20 @@ export async function acceptQuoteAndCreateOrder(
       .from('quote_items')
       .update({ client_decision: 'rejected' })
       .eq('quote_id', quoteId);
-    await sb
+    const byQuoteItem = await sb
       .from('quote_items')
       .update({ client_decision: 'accepted' })
       .eq('quote_id', quoteId)
-      .in('request_item_id', acceptedItemIds);
+      .in('id', acceptedItemIds)
+      .select('id');
+    if (!byQuoteItem.error && (byQuoteItem.data?.length ?? 0) === 0) {
+      await sb
+        .from('quote_items')
+        .update({ client_decision: 'accepted' })
+        .eq('quote_id', quoteId)
+        .in('request_item_id', acceptedItemIds)
+        .eq('variant_index', 1);
+    }
   }
 
   const { data: order, error: orderError } = await sb
@@ -1092,6 +1106,8 @@ export type MaterialOrderReveal = {
   contactRevealed: boolean;
   /** Horario de `stores.opening_hours`, ya formateado. null si no hay dato o aún no se pagó. */
   openingHoursLabel: string | null;
+  /** La selección incluye flete (gratis o pago). El teléfono sigue oculto hasta pagar. */
+  coordinateDelivery: boolean;
 };
 
 type OrderStoreHoursEmbed = {
@@ -1162,6 +1178,9 @@ export async function fetchMaterialOrderReveal(orderId: string): Promise<Materia
       () => null,
     );
   }
+  const coordinateDelivery = await fetchOrderCoordinatesDelivery(
+    String(row.order_id ?? orderId),
+  ).catch(() => false);
 
   return {
     orderId: String(row.order_id),
@@ -1181,6 +1200,7 @@ export async function fetchMaterialOrderReveal(orderId: string): Promise<Materia
     storeAddress: contactRevealed ? formatClientStoreAddress(storeAddress) : null,
     contactRevealed,
     openingHoursLabel: materialRevealOpeningHoursLabel(openingHoursRaw, contactRevealed),
+    coordinateDelivery,
   };
 }
 
@@ -1231,6 +1251,64 @@ export async function fetchMaterialGroupReveals(
 
   const list = reveals.filter((r): r is MaterialOrderReveal => r != null);
   return list.length > 0 ? list : [primary];
+}
+
+/**
+ * Si esta orden incluye entrega a domicilio. No lee teléfono ni dirección.
+ */
+async function fetchOrderCoordinatesDelivery(orderId: string): Promise<boolean> {
+  const sb = getSupabaseClient();
+  const { data, error } = await sb
+    .from('orders')
+    .select(
+      'include_freight, accepted_total, quotes(freight_type, freight_cost, quote_items(unit_price, client_decision, request_items(quantity)))',
+    )
+    .eq('id', orderId)
+    .maybeSingle();
+  if (error || !data) return false;
+
+  type Line = {
+    unit_price?: number | string | null;
+    client_decision?: string | null;
+    request_items?: { quantity?: number | string | null } | { quantity?: number | string | null }[] | null;
+  };
+  const quote = one(
+    (data as { quotes?: { freight_type?: string | null; freight_cost?: number | string | null; quote_items?: Line[] | null } | null })
+      .quotes,
+  );
+  const freightType = (quote?.freight_type ?? 'pickup') as FreightType;
+  const freightCost = Number(quote?.freight_cost) || 0;
+  const acceptedTotal =
+    (data as { accepted_total?: number | string | null }).accepted_total != null
+      ? Number((data as { accepted_total: number | string }).accepted_total)
+      : null;
+  const lines = quote?.quote_items ?? [];
+  const accepted = lines.filter((line) => String(line.client_decision ?? '') === 'accepted');
+  const billable = accepted.length > 0 ? accepted : lines;
+  const materialsSubtotal = billable.reduce((acc, line) => {
+    const req = one(line.request_items);
+    const qty = Number(req?.quantity);
+    const quantity = Number.isFinite(qty) && qty > 0 ? qty : 1;
+    return acc + (Number(line.unit_price) || 0) * quantity;
+  }, 0);
+  const included = freightIsIncluded({
+    materialsSubtotal,
+    freightType,
+    quotedFreightCost: freightCost,
+    orderIncludeFreight: parseIncludeFreightFlag(
+      (data as { include_freight?: unknown }).include_freight,
+    ),
+    uiIncludeFreight: false,
+    canChooseFreight: false,
+    selectionLocked: true,
+    acceptedTotal,
+  });
+  return clientCoordinatesDelivery({
+    freightType,
+    freightCost,
+    includeFreight: included,
+    hasSelectedItems: true,
+  });
 }
 
 export async function completarOrdenMaterialConPin(
@@ -1337,6 +1415,9 @@ export async function createMaterialCheckout(
     }
     if (/mixed_requests/i.test(msg)) {
       throw new Error('Las cotizaciones deben ser del mismo pedido.');
+    }
+    if (/multiple_variants_selected/i.test(msg)) {
+      throw new Error('Elegí una sola marca por material.');
     }
     if (/not_client/i.test(msg)) {
       throw new Error('Solo el cliente puede confirmar el pedido.');

@@ -455,6 +455,7 @@ function KanbanCard({
           <Text style={styles.cardClient}>{card.clientFirstName}</Text>
         ) : null}
         {summary ? <Text style={styles.cardMeta}>{summary}</Text> : null}
+        {card.deliveryLabel ? <Text style={styles.cardMeta}>{card.deliveryLabel}</Text> : null}
         {priceLabel && card.column !== 'cotizadas' && card.column !== 'rechazadas' ? (
           <Text style={styles.cardPrice}>
             {card.column === 'nuevas' || card.column === 'cerradas' ? 'Total' : 'A cobrar'}{' '}
@@ -494,7 +495,7 @@ function KanbanCard({
             <View style={styles.decisionBlock}>
               <Text style={styles.decisionTitleOk}>Aceptados</Text>
               {card.acceptedItems.map((it) => (
-                <Text key={`a-${it.requestItemId}`} style={styles.decisionLine} numberOfLines={2}>
+                <Text key={`a-${it.quoteItemId}`} style={styles.decisionLine} numberOfLines={2}>
                   · {it.description}
                 </Text>
               ))}
@@ -505,7 +506,7 @@ function KanbanCard({
               <Text style={styles.decisionTitleNo}>Rechazados</Text>
               {card.rejectedItems.map((it) => (
                 <Text
-                  key={`r-${it.requestItemId}`}
+                  key={`r-${it.quoteItemId}`}
                   style={styles.decisionLineMuted}
                   numberOfLines={2}
                 >
@@ -524,7 +525,7 @@ function KanbanCard({
             {rejectedForDisplay.length > 0 ? (
               rejectedForDisplay.map((it) => (
                 <Text
-                  key={`rj-${it.requestItemId}`}
+                  key={`rj-${it.quoteItemId}`}
                   style={styles.decisionLineMuted}
                   numberOfLines={3}
                 >
