@@ -1,4 +1,5 @@
 import type { FreightType } from '../types/materials';
+import { formatArs } from './formatMoney';
 
 export type QuoteFreightDisplay = {
   /** Monto de flete que entra en el TOTAL. 0 si el cliente no lo eligió. */
@@ -130,13 +131,8 @@ export function storeDeliveryChoice(params: {
 }
 
 function pesos(amount: number): string {
-  const n = money(amount);
-  return n.toLocaleString('es-AR', {
-    style: 'currency',
-    currency: 'ARS',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  });
+  // #207: agrupado determinístico (sin Intl), igual que el resto de la app.
+  return formatArs(money(amount));
 }
 
 /** Detalle de la cotización. Sin orden: lo que ofreció el comercio. */

@@ -36,6 +36,7 @@ import {
 import { sortHistorialReciente } from '../../utils/agendaHistorialSort';
 import { formatPostDate } from '../../utils/formatDate';
 import { professionalPayoutAmount } from '../../utils/contractedWorkDisplay';
+import { formatArs } from '../../utils/formatMoney';
 import type { AgendaStackScreenProps } from '../../navigation/mainTypes';
 
 type Props = AgendaStackScreenProps<'Agenda'>;
@@ -53,10 +54,6 @@ function AgendaCard({
   clienteInfo?: AgendaClienteInfo;
   onPress: () => void;
 }) {
-  const currency = new Intl.NumberFormat('es-AR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
   const showEstado = section === 'historial';
   const showUbicacion = section !== 'historial' && Boolean(clienteInfo?.direccionTexto);
   const montoACobrar = professionalPayoutAmount(item);
@@ -83,7 +80,7 @@ function AgendaCard({
           ) : null}
         </View>
         <Text style={styles.cardMonto} accessibilityLabel="Monto a cobrar">
-          ${currency.format(montoACobrar)}
+          {formatArs(montoACobrar)}
         </Text>
       </View>
 

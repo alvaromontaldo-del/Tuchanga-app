@@ -17,6 +17,7 @@ import { colors, radii, spacing, typography } from '../../constants/theme';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { getSupabaseClient } from '../../lib/supabase';
 import { formatPostDate } from '../../utils/formatDate';
+import { formatArs } from '../../utils/formatMoney';
 import { formatContratacionEstado, formatContratacionEstadoPago } from '../../utils/contratacionStatus';
 import { fetchContratacionesByUser } from '../../services/contratacionesSupabase';
 import type { Contratacion, ContratacionEstadoPago, ContratacionEstadoTrabajo } from '../../types/contrataciones';
@@ -154,16 +155,6 @@ export function MyWorkOrdersScreen() {
   const [reviewByJobId, setReviewByJobId] = useState<Record<string, { rating: number; comment: string }>>(
     {},
   );
-
-  const currency = useMemo(
-    () =>
-      new Intl.NumberFormat('es-AR', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
-    [],
-  );
-  const fmtMoney = (n: number) => `$${currency.format(Math.round((Number(n) || 0) * 100) / 100)}`;
 
   const dateRange = useMemo(() => {
     if (filter === 'all') return null;
@@ -393,7 +384,7 @@ export function MyWorkOrdersScreen() {
           <Text style={styles.earningsLabel}>
             {filter === 'all' ? 'Total ganado con YaChanga' : 'Total en el período'}
           </Text>
-          <Text style={styles.earningsValue}>{fmtMoney(displayedTotal)}</Text>
+          <Text style={styles.earningsValue}>{formatArs(displayedTotal)}</Text>
           <Text style={styles.earningsHint}>
             {filter === 'all'
               ? 'Neto acumulado del profesional (sin el costo de servicio YaChanga).'
@@ -401,7 +392,7 @@ export function MyWorkOrdersScreen() {
           </Text>
           {filter !== 'all' ? (
             <Text style={styles.earningsAccumulated}>
-              Acumulado total: {fmtMoney(totalAcumulado)}
+              Acumulado total: {formatArs(totalAcumulado)}
             </Text>
           ) : null}
         </View>
@@ -443,7 +434,7 @@ export function MyWorkOrdersScreen() {
                 <Text style={styles.clientName} numberOfLines={1}>
                   Cliente: <Text style={styles.clientNameStrong}>{clientName}</Text>
                 </Text>
-                <Text style={styles.amount}>{fmtMoney(q.earned)}</Text>
+                <Text style={styles.amount}>{formatArs(q.earned)}</Text>
                 <ExpandableText
                   text={q.description?.trim() || 'Sin detalle del servicio.'}
                   numberOfLinesCollapsed={3}

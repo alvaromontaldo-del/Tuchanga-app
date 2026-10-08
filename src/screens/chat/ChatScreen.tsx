@@ -142,6 +142,12 @@ import {
   splitChatBodyHeight,
 } from '../../utils/chatReviewLayout';
 import { setActiveConversationForNotifications } from '../../services/chatFocus';
+import {
+  amountToArsInput,
+  formatMoneyCeilAr,
+  maskArsInput,
+  parseArsInput,
+} from '../../utils/formatMoney';
 
 export type ChatScreenParams = {
   conversationId: string;
@@ -650,20 +656,6 @@ export function ChatScreen({
       .catch(() => {});
   }, [conversationId, job?.id, job?.work_status, job?.quote_id, quoteById]);
 
-  const currency = useMemo(
-    () =>
-      new Intl.NumberFormat('es-AR', {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 0,
-      }),
-    [],
-  );
-  const formatMoney = useCallback(
-    (n: number) =>
-      `$${currency.format(Math.max(0, Math.ceil(Number(n) || 0)))}`,
-    [currency],
-  );
-
   const hasActiveQuote = useMemo(() => quotes.some((q) => q.status === 'pending'), [quotes]);
   const hasActiveJob = useMemo(() => Boolean(job && job.work_status === 'PENDING'), [job]);
   const quoteChip = useMemo(
@@ -684,18 +676,19 @@ export function ChatScreen({
   // "Cotizar" debe permanecer activo; solo evitamos doble envío con `quoteSubmitting`.
 
   function onChangeQuoteNetText(text: string) {
-    // Entero positivo (sin decimales). Editable: dejamos solo dígitos y permitimos vacío.
-    const digits = (text ?? '').replace(/\D/g, '').slice(0, 9);
-    setQuoteNetText(digits);
-    const next = digits ? Math.min(Number(digits), 999_999_999) : 0;
-    setQuoteNetAmount(Number.isFinite(next) ? Math.max(0, Math.floor(next)) : 0);
+    const masked = maskArsInput(text);
+    setQuoteNetText(masked);
+    const parsed = parseArsInput(masked);
+    const next = parsed == null ? 0 : Math.min(parsed, 999_999_999);
+    setQuoteNetAmount(Number.isFinite(next) ? next : 0);
   }
 
   function onChangeRecotizarText(text: string) {
-    const digits = (text ?? '').replace(/\D/g, '').slice(0, 9);
-    setRecotizarText(digits);
-    const next = digits ? Math.min(Number(digits), 999_999_999) : 0;
-    setRecotizarAmount(Number.isFinite(next) ? Math.max(0, Math.floor(next)) : 0);
+    const masked = maskArsInput(text);
+    setRecotizarText(masked);
+    const parsed = parseArsInput(masked);
+    const next = parsed == null ? 0 : Math.min(parsed, 999_999_999);
+    setRecotizarAmount(Number.isFinite(next) ? next : 0);
   }
 
   function respondRecotizacion(action: 'accept' | 'reject') {
@@ -1859,13 +1852,13 @@ export function ChatScreen({
                   <Text style={styles.quoteLine}>{quoteWarrantyLabel(q.warranty_days)}</Text>
 
                   {myRole === 'trabajador' ? (
-                    <QuoteMoneySummary variant="worker" amount={formatMoney(q.net_amount)} />
+                    <QuoteMoneySummary variant="worker" amount={formatMoneyCeilAr(q.net_amount)} />
                   ) : myRole === 'cliente' ? (
                     <QuoteMoneySummary
                       variant="client"
-                      finalAmount={formatMoney(q.final_amount)}
-                      serviceFee={formatMoney(Math.max(q.final_amount - q.net_amount, 0))}
-                      balance={formatMoney(
+                      finalAmount={formatMoneyCeilAr(q.final_amount)}
+                      serviceFee={formatMoneyCeilAr(Math.max(q.final_amount - q.net_amount, 0))}
+                      balance={formatMoneyCeilAr(
                         computeSaldoPendiente(q.final_amount, q.final_amount - q.net_amount),
                       )}
                     />
@@ -1967,7 +1960,9 @@ export function ChatScreen({
                       onPress={() => {
                         setQuoteModalOpen(true);
                         setQuoteNetAmount(Math.max(0, Math.floor(Number(q.net_amount) || 0)));
-                        setQuoteNetText(String(Math.max(0, Math.floor(Number(q.net_amount) || 0))));
+                        setQuoteNetText(
+                          amountToArsInput(Math.max(0, Math.floor(Number(q.net_amount) || 0))),
+                        );
                         setQuoteDetail(q.service_detail ?? '');
                         if (
                           q.warranty_days != null &&
@@ -2028,7 +2023,6 @@ export function ChatScreen({
     },
     [
       conversationId,
-      formatMoney,
       hasActiveQuote,
       job?.estado_trabajo,
       job?.id,
@@ -2116,7 +2110,7 @@ export function ChatScreen({
         {isSupabaseConfigured() && showClientSaldoPagadoBar && job ? (
           <View style={[styles.completeBar, styles.completeBarStacked]}>
             <Text style={styles.paySubtitle}>
-              Pagá el saldo restante ({formatMoney(saldoPendiente)}) al profesional y confirmá acá cuando
+              Pagá el saldo restante ({formatMoneyCeilAr(saldoPendiente)}) al profesional y confirmá acá cuando
               lo hayas hecho.
             </Text>
             <Pressable
@@ -2181,9 +2175,9 @@ export function ChatScreen({
               {serviceFeePayBarCopy(job.estado_trabajo).showQuotedFee ? (
                 <QuoteMoneySummary
                   variant="client"
-                  finalAmount={formatMoney(job.amount)}
-                  serviceFee={formatMoney(job.seña)}
-                  balance={formatMoney(computeSaldoPendiente(job.amount, job.seña))}
+                  finalAmount={formatMoneyCeilAr(job.amount)}
+                  serviceFee={formatMoneyCeilAr(job.seña)}
+                  balance={formatMoneyCeilAr(computeSaldoPendiente(job.amount, job.seña))}
                 />
               ) : null}
             </View>
@@ -2540,7 +2534,6 @@ export function ChatScreen({
       agendaOpciones,
       clientPin,
       conversationId,
-      formatMoney,
       handleConfirmAgenda,
       handleConfirmarSaldoTrabajador,
       handleMarcarTrabajoFinalizado,

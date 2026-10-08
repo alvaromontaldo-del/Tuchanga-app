@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../lib/supabase';
+import { formatArs } from '../utils/formatMoney';
 import { normalizeDisplayAddress } from '../utils/formatAddress';
 import { haversineKm } from './materialRequestsSupabase';
 import type {
@@ -1347,13 +1348,7 @@ export async function completarOrdenMaterialConPin(
 }
 
 export function formatMoneyAr(amount: number): string {
-  const n = money(amount);
-  return n.toLocaleString('es-AR', {
-    style: 'currency',
-    currency: 'ARS',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  });
+  return formatArs(money(amount));
 }
 
 export function freightLabel(type: FreightType, _cost?: number): string {
