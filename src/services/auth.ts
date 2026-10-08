@@ -24,6 +24,7 @@ import {
   takeDeactivationSignOutSince,
 } from './accountDeactivation';
 import { fetchAuthUserFromSupabase, persistSignUpToSupabase } from './supabaseUser';
+import { acceptCurrentTerms } from './termsAcceptance';
 
 const MOCK_DELAY_MS = 900;
 /** Cobertura de varias idas a Auth (cada fetch tiene su propio tope en `supabaseFetch`). */
@@ -659,6 +660,8 @@ export async function signUp(payload: SignUpPayload): Promise<AuthResult> {
       try {
         await persistSignUpToSupabase(persistPayload, uid);
         await clearPendingProfileSignup();
+        // No frena el alta si el RPC todavía no está. El cartel vuelve a pedirlo al entrar.
+        await acceptCurrentTerms();
       } catch (e) {
         await savePendingProfileSignup(uid, payload);
         const raw = e instanceof Error ? e.message : 'No se pudo guardar el perfil. Volvé a intentar o ingresá más tarde.';
