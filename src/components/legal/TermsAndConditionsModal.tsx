@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Platform,
   Pressable,
@@ -11,29 +12,43 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { buildTermsDocument } from '../../constants/termsDocument';
+import { TERMS_VERSION } from '../../constants/terms';
 import { colors, radii, spacing } from '../../constants/theme';
 
 type Props = {
   visible: boolean;
-  onClose: () => void;
-  onAccept: () => void;
+  /** `read`: consulta desde Cuenta o el registro. `accept`: hay que tocar Acepto para seguir. */
+  mode?: 'read' | 'accept';
+  onClose?: () => void;
+  onAccept?: () => void;
+  accepting?: boolean;
+  acceptError?: string | null;
 };
 
-function formatTodayEs(): string {
-  const d = new Date();
-  return d.toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' });
-}
-
-export function TermsAndConditionsModal({ visible, onClose, onAccept }: Props) {
-  const [checked, setChecked] = useState(false);
+export function TermsAndConditionsModal({
+  visible,
+  mode = 'read',
+  onClose,
+  onAccept,
+  accepting = false,
+  acceptError = null,
+}: Props) {
   const { height: windowHeight } = useWindowDimensions();
   // Altura fija: con solo maxHeight el ScrollView crece con el texto y el modal lo recorta.
   const sheetHeight = Math.round(windowHeight * 0.92);
-
-  const today = useMemo(() => formatTodayEs(), []);
+  const readOnly = mode !== 'accept';
+  const document = useMemo(() => buildTermsDocument(), []);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={() => {
+        if (readOnly) onClose?.();
+      }}
+    >
       <View style={styles.backdrop}>
         <SafeAreaView
           style={[styles.sheetSafe, { height: sheetHeight }]}
@@ -42,18 +57,20 @@ export function TermsAndConditionsModal({ visible, onClose, onAccept }: Props) {
           <View style={styles.sheet}>
             <View style={styles.header}>
               <View style={styles.headerLeft}>
-                <Text style={styles.title}>Términos y Condiciones</Text>
-                <Text style={styles.subtitle}>Última actualización: {today}</Text>
+                <Text style={styles.title}>{document.title}</Text>
+                <Text style={styles.subtitle}>{document.updatedLabel}</Text>
               </View>
-              <Pressable
-                onPress={onClose}
-                accessibilityRole="button"
-                accessibilityLabel="Cerrar términos y condiciones"
-                hitSlop={10}
-                style={({ pressed }) => [styles.iconBtn, pressed && styles.iconBtnPressed]}
-              >
-                <Ionicons name="close" size={20} color={colors.textSecondary} />
-              </Pressable>
+              {readOnly ? (
+                <Pressable
+                  onPress={onClose}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cerrar términos y condiciones"
+                  hitSlop={10}
+                  style={({ pressed }) => [styles.iconBtn, pressed && styles.iconBtnPressed]}
+                >
+                  <Ionicons name="close" size={20} color={colors.textSecondary} />
+                </Pressable>
+              ) : null}
             </View>
 
             <ScrollView
@@ -63,138 +80,52 @@ export function TermsAndConditionsModal({ visible, onClose, onAccept }: Props) {
               nestedScrollEnabled
               keyboardShouldPersistTaps="handled"
             >
-              <Text style={styles.p}>
-                Este documento (los “Términos”) regula el acceso y uso de la aplicación YaChanga (la
-                “Plataforma”). Al registrarte, declarás que leíste y comprendiste estos Términos y
-                aceptás quedar vinculado/a por ellos.
-              </Text>
-
-              <Text style={styles.h}>1. Rol de la Plataforma (intermediario tecnológico)</Text>
-              <Text style={styles.p}>
-                La Plataforma actúa exclusivamente como un intermediario tecnológico que facilita el
-                contacto entre personas usuarias que solicitan servicios (“Clientes”) y personas usuarias
-                que ofrecen servicios (“Trabajadores”). La Plataforma no presta, no supervisa ni garantiza
-                la ejecución de los servicios contratados entre Usuarios.
-              </Text>
-
-              <Text style={styles.h}>2. Relación entre Usuarios</Text>
-              <Text style={styles.p}>
-                Cualquier acuerdo, negociación, precio, alcance, condiciones, plazos y forma de pago del
-                servicio es celebrado directamente entre Cliente y Trabajador. La Plataforma no es parte
-                del contrato de prestación de servicios que pudiera existir entre Usuarios.
-              </Text>
-
-              <Text style={styles.h}>3. Exención de responsabilidad (limitación)</Text>
-              <Text style={styles.p}>
-                En la medida máxima permitida por la normativa aplicable, la Plataforma no será
-                responsable, directa ni indirectamente, por:
-              </Text>
-              <View style={styles.bullets}>
-                <Text style={styles.bullet}>
-                  • Daños físicos, lesiones, accidentes o cualquier perjuicio personal ocurrido durante o
-                  con motivo de la prestación del servicio.
-                </Text>
-                <Text style={styles.bullet}>
-                  • Daños materiales a bienes, inmuebles o herramientas, incluyendo desperfectos,
-                  deterioros o pérdidas.
-                </Text>
-                <Text style={styles.bullet}>
-                  • Robos, hurtos, pérdidas de propiedad, extravíos o apropiación indebida de bienes
-                  durante o con motivo del servicio.
-                </Text>
-                <Text style={styles.bullet}>
-                  • Incidentes derivados de la prestación del servicio, incluyendo incumplimientos,
-                  demoras, resultados insatisfactorios o conflictos entre Usuarios.
-                </Text>
-                <Text style={styles.bullet}>
-                  • La veracidad absoluta, exactitud, actualidad o autenticidad de perfiles, identidad,
-                  credenciales, matrículas, antecedentes, habilitaciones, experiencia o referencias
-                  declaradas por los Usuarios.
-                </Text>
-              </View>
-
-              <Text style={styles.h}>4. Recomendaciones de seguridad</Text>
-              <Text style={styles.p}>
-                Recomendamos verificar referencias, acordar condiciones por escrito dentro del chat de la
-                Plataforma cuando sea posible, y tomar precauciones razonables antes, durante y después
-                de la prestación del servicio (por ejemplo, requerir presupuestos, comprobantes y
-                documentación pertinente).
-              </Text>
-
-              <Text style={styles.h}>5. Contenido, conducta y uso</Text>
-              <Text style={styles.p}>
-                El Usuario se obliga a utilizar la Plataforma de manera lícita, sin publicar contenido
-                engañoso, discriminatorio, violento o que infrinja derechos de terceros. La Plataforma
-                podrá suspender cuentas ante sospecha razonable de fraude o incumplimiento de estos
-                Términos.
-              </Text>
-
-              <Text style={styles.h}>6. Tratamiento de datos (resumen)</Text>
-              <Text style={styles.p}>
-                La Plataforma podrá tratar datos necesarios para operar el servicio (por ejemplo, perfil,
-                ubicación base y mensajes). Placeholder: aquí se integrará una Política de Privacidad
-                completa (finalidad, base legal, plazos, derechos ARCO, etc.).
-              </Text>
-
-              <Text style={styles.h}>7. Modificaciones</Text>
-              <Text style={styles.p}>
-                La Plataforma puede actualizar estos Términos. Te notificaremos cambios materiales por
-                medios razonables. El uso continuado tras la vigencia de cambios implica aceptación.
-              </Text>
-
-              <Text style={styles.h}>8. Jurisdicción y ley aplicable</Text>
-              <Text style={styles.p}>
-                Placeholder: indicar ley aplicable, jurisdicción competente y domicilio legal de la
-                Plataforma.
-              </Text>
+              <Text style={styles.p}>{document.intro}</Text>
+              {document.sections.map((section) => (
+                <View key={section.title}>
+                  <Text style={styles.h}>{section.title}</Text>
+                  <Text style={styles.p}>{section.body}</Text>
+                </View>
+              ))}
             </ScrollView>
 
             <View style={styles.footer}>
-              <Pressable
-                onPress={() => setChecked((v) => !v)}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked }}
-                accessibilityLabel="He leído y acepto los términos"
-                hitSlop={6}
-                style={({ pressed }) => [styles.checkRow, pressed && styles.checkRowPressed]}
-              >
-                <View style={[styles.checkbox, checked && styles.checkboxOn]}>
-                  {checked ? <Ionicons name="checkmark" size={16} color="#fff" /> : null}
-                </View>
-                <Text style={styles.checkText}>He leído y acepto los términos</Text>
-              </Pressable>
-
-              <View style={styles.actions}>
+              {readOnly ? (
                 <Pressable
                   onPress={onClose}
                   accessibilityRole="button"
+                  accessibilityLabel="Cerrar"
                   style={({ pressed }) => [styles.secondaryBtn, pressed && styles.btnPressed]}
                 >
-                  <Text style={styles.secondaryBtnText}>Volver</Text>
+                  <Text style={styles.secondaryBtnText}>Cerrar</Text>
                 </Pressable>
-
-                <Pressable
-                  disabled={!checked}
-                  onPress={() => {
-                    onAccept();
-                    setChecked(false);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: !checked }}
-                  style={({ pressed }) => [
-                    styles.primaryBtn,
-                    !checked && styles.primaryBtnDisabled,
-                    pressed && checked && styles.btnPressed,
-                  ]}
-                >
-                  <Text style={styles.primaryBtnText}>Continuar</Text>
-                </Pressable>
-              </View>
-
-              <Text style={styles.disclaimer}>
-                Al continuar, confirmás que aceptás estos Términos y que comprendés que YaChanga es un
-                intermediario tecnológico.
-              </Text>
+              ) : (
+                <>
+                  <Pressable
+                    disabled={accepting}
+                    onPress={onAccept}
+                    accessibilityRole="button"
+                    accessibilityLabel="Acepto los términos y condiciones"
+                    accessibilityState={{ disabled: accepting }}
+                    style={({ pressed }) => [
+                      styles.primaryBtn,
+                      accepting && styles.primaryBtnDisabled,
+                      pressed && !accepting && styles.btnPressed,
+                    ]}
+                  >
+                    {accepting ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.primaryBtnText}>Acepto</Text>
+                    )}
+                  </Pressable>
+                  {acceptError ? <Text style={styles.error}>{acceptError}</Text> : null}
+                  <Text style={styles.disclaimer}>
+                    Tenés que aceptar para seguir usando YaChanga. Al tocar Acepto confirmás esta
+                    versión ({TERMS_VERSION}).
+                  </Text>
+                </>
+              )}
             </View>
           </View>
         </SafeAreaView>
@@ -254,8 +185,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     lineHeight: 19,
   },
-  bullets: { marginTop: spacing.sm, gap: 8 },
-  bullet: { fontSize: 13, color: colors.textSecondary, lineHeight: 19, fontWeight: '600' },
   footer: {
     flexShrink: 0,
     paddingHorizontal: spacing.lg,
@@ -265,33 +194,7 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     backgroundColor: colors.background,
   },
-  checkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radii.card,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  checkRowPressed: { opacity: 0.9 },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.background,
-  },
-  checkboxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  checkText: { flex: 1, fontSize: 13, fontWeight: '800', color: colors.text },
-  actions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.md },
   secondaryBtn: {
-    flex: 1,
     height: 48,
     borderRadius: radii.button,
     alignItems: 'center',
@@ -302,7 +205,6 @@ const styles = StyleSheet.create({
   },
   secondaryBtnText: { fontSize: 15, fontWeight: '900', color: colors.text },
   primaryBtn: {
-    flex: 1,
     height: 48,
     borderRadius: radii.button,
     alignItems: 'center',
@@ -312,6 +214,13 @@ const styles = StyleSheet.create({
   primaryBtnDisabled: { opacity: 0.55 },
   primaryBtnText: { fontSize: 15, fontWeight: '900', color: '#fff' },
   btnPressed: { opacity: 0.9 },
+  error: {
+    marginTop: spacing.sm,
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.error,
+    lineHeight: 16,
+  },
   disclaimer: {
     marginTop: spacing.md,
     fontSize: 11,
