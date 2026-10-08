@@ -762,6 +762,49 @@ export async function obtenerDireccionCliente(contratacionId: string): Promise<{
   };
 }
 
+export type RecotizacionHistorial = {
+  id: string;
+  precioTrabajadorAnterior: number;
+  precioTrabajadorNuevo: number;
+  fundamentos: string;
+  estado: 'pendiente' | 'aceptada' | 'rechazada' | 'otro';
+};
+
+const RECOTIZACION_SELECT = [
+  'id',
+  'precio_trabajador_anterior',
+  'precio_trabajador_nuevo',
+  'fundamentos',
+  'estado',
+  'created_at',
+].join(',');
+
+function recotizacionEstado(value: unknown): RecotizacionHistorial['estado'] {
+  if (value === 'pendiente' || value === 'aceptada' || value === 'rechazada') return value;
+  return 'otro';
+}
+
+/** Historial de recotizaciones del trabajo. Sin comisión ni precio final (#118). */
+export async function fetchRecotizaciones(contratacionId: string): Promise<RecotizacionHistorial[]> {
+  const sb = getSupabaseClient();
+  const { data, error } = await sb
+    .from('recotizaciones')
+    .select(RECOTIZACION_SELECT)
+    .eq('contratacion_id', contratacionId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((row) => {
+    const r = row as unknown as Record<string, unknown>;
+    return {
+      id: String(r.id),
+      precioTrabajadorAnterior: toNum(r.precio_trabajador_anterior),
+      precioTrabajadorNuevo: toNum(r.precio_trabajador_nuevo),
+      fundamentos: typeof r.fundamentos === 'string' ? r.fundamentos.trim() : '',
+      estado: recotizacionEstado(r.estado),
+    };
+  });
+}
+
 export async function recotizarEnCurso(
   contratacionId: string,
   nuevoPrecioTrabajador: number,

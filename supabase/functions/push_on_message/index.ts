@@ -215,12 +215,9 @@ Deno.serve(async (req) => {
   } else if (event === "recotizacion_propuesta_trabajador") {
     body = "Enviaste una recotización. El cliente tiene que aceptarla o rechazarla.";
   } else if (event === "recotizacion_aceptada") {
-    const diff = Number(meta?.diferencia ?? 0);
     body = audience === "trabajador"
       ? "El cliente aceptó la recotización. El trabajo sigue con el monto nuevo."
-      : diff > 0
-        ? "Aceptaste la recotización. Falta pagar la diferencia del costo de servicio YaChanga."
-        : "Aceptaste la recotización. El trabajo sigue con el monto nuevo.";
+      : "Aceptaste la recotización. El trabajo sigue con el monto nuevo.";
   } else if (event === "recotizacion_rechazada") {
     body = audience === "trabajador"
       ? "El cliente rechazó la recotización. El trabajo sigue con el monto original."

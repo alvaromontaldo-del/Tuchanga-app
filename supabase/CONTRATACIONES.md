@@ -30,7 +30,7 @@ La función autoritativa es `public.calc_yachanga_service_fee`, llamada desde `c
 
 El costo de servicio de materiales es otra función (`calculate_material_service_fee`) y no usa estos tramos.
 
-**Recotización con costo de servicio ya pagado (`recotizar_en_curso`).** Si la contratación tiene la seña acreditada (`seña_pagada` / `totalmente_pagado`, o transacciones MP aprobadas de `seña_inicial`/`diferencia_seña`), el nuevo costo de servicio nunca baja de lo ya pagado: `comision = max(calc_yachanga_service_fee(neto), pagado)` y `precio_final = neto + comision`. Solo se cobra la diferencia positiva (`comision − max(comision_app, pagado)`); no hay devoluciones. Si la seña todavía no se pagó, se usa la fórmula nueva tal cual. Esto evita diferencias negativas en trabajos cotizados con el 22% anterior.
+**Recotización con costo de servicio ya pagado (`recotizar_en_curso`, opción A).** Si la contratación tiene la seña acreditada (`seña_pagada` / `totalmente_pagado`, o transacciones MP aprobadas de `seña_inicial`/`diferencia_seña`), `comision_app` queda en lo ya pagado: no baja (#39) y tampoco sube. `precio_final = neto + esa comisión`. El cliente no paga ningún costo adicional. `aceptar_recotizacion` no cambia `estado_pago` y nunca vuelve a `pendiente_seña`.
 
 - `precio_trabajador`: neto en mano del prestador (privado en UI del trabajador).
 - `comision_app`: seña inicial (MercadoPago) o base de la diferencia en recotización mayor.
@@ -88,8 +88,8 @@ El costo de servicio de materiales es otra función (`calculate_material_service
 | `obtener_pin_cliente` | Cliente | PIN post-seña |
 | `verificar_pin` | Trabajador | → `en_curso` |
 | `obtener_direccion_cliente` | Trabajador | Post-seña |
-| `recotizar_en_curso` | Trabajador | (#4) Monto nuevo + fundamentos, con PIN validado. Queda pendiente del cliente; una sola a la vez; no mientras falte pagar una diferencia |
-| `aceptar_recotizacion` | Cliente | Aplica el monto. Si sube el costo de servicio, `estado_pago` → `pendiente_seña` y el checkout cobra solo la diferencia (`diferencia_seña`); hasta acreditarla no se puede marcar realizado |
+| `recotizar_en_curso` | Trabajador | (#4) Monto nuevo + fundamentos, con PIN validado. Queda pendiente del cliente; una sola a la vez. La comisión queda en lo ya pagado |
+| `aceptar_recotizacion` | Cliente | Aplica el monto del profesional y la comisión ya pagada. No cobra diferencia y no pasa a `pendiente_seña` |
 | `rechazar_recotizacion` | Cliente | (#4) Sigue el monto original y el trabajo vuelve a `en_curso`. Ya no finaliza ni acredita crédito |
 | `cliente_notificar_pago_offline` | Cliente | Conciliación |
 | `trabajador_confirmar_recepcion_offline` | Trabajador | → `totalmente_pagado` |
