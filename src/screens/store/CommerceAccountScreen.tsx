@@ -19,7 +19,7 @@ import { colors, radii, spacing } from '../../constants/theme';
 import {
   availableSessionRoles,
   nextSessionRoleOnSwitch,
-  sessionRoleSwitchLabel,
+  sessionRoleSwitchButtonCopy,
 } from '../../constants/sessionRoleSwitch';
 import { useAuth } from '../../context/AuthContext';
 import { useCommerceShell } from '../../context/CommerceShellContext';
@@ -49,13 +49,12 @@ export function CommerceAccountScreen({ navigation }: Props) {
     hasCommerceStore,
     refresh,
   } = useCommerceShell();
-  const nextRole = nextSessionRoleOnSwitch(
-    sessionRole,
-    availableSessionRoles({
-      hasEnabledCommerce: hasCommerceStore,
-      isProfessional: isWorker,
-    }),
-  );
+  const sessionRoles = availableSessionRoles({
+    hasEnabledCommerce: hasCommerceStore,
+    isProfessional: isWorker,
+  });
+  const nextRole = nextSessionRoleOnSwitch(sessionRole, sessionRoles);
+  const switchCopy = nextRole ? sessionRoleSwitchButtonCopy(nextRole, sessionRoles) : null;
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [storeAvatarUri, setStoreAvatarUri] = useState<string | null>(
     primaryStore?.avatarUrl ?? null,
@@ -232,17 +231,17 @@ export function CommerceAccountScreen({ navigation }: Props) {
         <Text style={[styles.rowBtnText, { color: colors.text }]}>Ver pedidos</Text>
       </Pressable>
 
-      {nextRole ? (
+      {nextRole && switchCopy ? (
         <Pressable
           style={({ pressed }) => [styles.rowBtn, pressed && styles.pressed]}
           onPress={onSwitchRole}
           accessibilityRole="button"
-          accessibilityLabel="Cambiar de rol"
+          accessibilityLabel={switchCopy.title}
         >
           <Ionicons name="people-outline" size={22} color={colors.primary} />
           <View style={styles.switchText}>
-            <Text style={styles.rowBtnText}>Cambiar de rol</Text>
-            <Text style={styles.switchSub}>Pasar a {sessionRoleSwitchLabel(nextRole)}</Text>
+            <Text style={styles.rowBtnText}>{switchCopy.title}</Text>
+            <Text style={styles.switchSub}>{switchCopy.subtitle}</Text>
           </View>
         </Pressable>
       ) : null}

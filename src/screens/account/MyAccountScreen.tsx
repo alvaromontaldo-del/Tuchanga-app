@@ -16,7 +16,7 @@ import { StarRating } from '../../components/profile/StarRating';
 import {
   availableSessionRoles,
   nextSessionRoleOnSwitch,
-  sessionRoleSwitchLabel,
+  sessionRoleSwitchButtonCopy,
 } from '../../constants/sessionRoleSwitch';
 import { colors, radii, spacing } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
@@ -86,13 +86,12 @@ export function MyAccountScreen({ navigation }: Props) {
     sessionRole,
   } = useCommerceShell();
   const { isWorker } = useUserMode();
-  const nextRole = nextSessionRoleOnSwitch(
-    sessionRole,
-    availableSessionRoles({
-      hasEnabledCommerce: hasCommerceStore,
-      isProfessional: Boolean(isWorker),
-    }),
-  );
+  const sessionRoles = availableSessionRoles({
+    hasEnabledCommerce: hasCommerceStore,
+    isProfessional: Boolean(isWorker),
+  });
+  const nextRole = nextSessionRoleOnSwitch(sessionRole, sessionRoles);
+  const switchCopy = nextRole ? sessionRoleSwitchButtonCopy(nextRole, sessionRoles) : null;
   const { isWorkerRegistered } = useWorkerProfile();
   const isWorkerRegisteredAnywhere = isWorkerRegistered || Boolean(isWorker);
 
@@ -254,11 +253,11 @@ export function MyAccountScreen({ navigation }: Props) {
             }}
           />
 
-          {nextRole ? (
+          {nextRole && switchCopy ? (
             <Row
               icon="people-outline"
-              title="Cambiar de rol"
-              subtitle={`Pasar a ${sessionRoleSwitchLabel(nextRole)}`}
+              title={switchCopy.title}
+              subtitle={switchCopy.subtitle}
               onPress={() => {
                 void chooseSessionRole(nextRole);
               }}

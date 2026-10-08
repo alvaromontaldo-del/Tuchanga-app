@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Modal,
   Platform,
   Pressable,
@@ -72,6 +71,12 @@ import {
   formatContratacionEstadoPago,
   puedeNotificarSaldoOffline,
 } from '../../utils/contratacionStatus';
+import { openClientInMaps } from '../../utils/openClientMaps';
+import {
+  mensajePinBloqueado,
+  parsePinBloqueadoHasta,
+  resultadoVerificacionPin,
+} from '../../utils/pinBloqueo';
 import { formatMoneyCeilAr } from '../../utils/formatMoney';
 import {
   AGENDA_DEFAULT_DURATION_MINUTES,
@@ -195,17 +200,6 @@ type DireccionCliente = {
   lat: number;
   lng: number;
 };
-
-function openGoogleMaps(lat: number, lng: number): void {
-  const web = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-  const native =
-    Platform.OS === 'ios'
-      ? `maps://?daddr=${lat},${lng}`
-      : `geo:${lat},${lng}?q=${lat},${lng}`;
-  void Linking.openURL(native).catch(() => {
-    void Linking.openURL(web);
-  });
-}
 
 export function DetalleServicioScreen() {
   const navigation = useNavigation();
@@ -421,6 +415,23 @@ export function DetalleServicioScreen() {
     }, [reload]),
   );
 
+  const pinLockUntil = useMemo(
+    () => parsePinBloqueadoHasta(row?.pin_bloqueado_hasta),
+    [row?.pin_bloqueado_hasta],
+  );
+  const [pinClock, setPinClock] = useState(0);
+  useEffect(() => {
+    if (!pinLockUntil) return;
+    const wait = pinLockUntil.getTime() - Date.now();
+    if (wait <= 0) return;
+    const timer = setTimeout(() => setPinClock((n) => n + 1), wait + 250);
+    return () => clearTimeout(timer);
+  }, [pinLockUntil]);
+  const pinLocked = useMemo(() => {
+    if (!pinLockUntil) return false;
+    return pinLockUntil.getTime() > Date.now();
+  }, [pinLockUntil, pinClock]);
+
   const runAction = async (fn: () => Promise<void>, okMsg?: string) => {
     if (busy) return;
     setBusy(true);
@@ -436,6 +447,56 @@ export function DetalleServicioScreen() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const onVerificarPin = () => {
+    if (busy || pinLocked || !row) return;
+    setBusy(true);
+    void (async () => {
+      let ok: boolean | null = null;
+      let error: unknown;
+      try {
+        ok = await verificarPin(row.id, pinInput);
+      } catch (e) {
+        error = e;
+      }
+      try {
+        if (ok === true) {
+          setPinInput('');
+          await reload();
+          toast.success('Trabajo en curso', 'Servicio');
+          return;
+        }
+        const fresh = await fetchContratacionById(row.id);
+        if (fresh) setRow(fresh);
+        const result = resultadoVerificacionPin({
+          ok,
+          error,
+          pinIntentosFallidos: fresh?.pin_intentos_fallidos,
+          pinBloqueadoHasta: fresh?.pin_bloqueado_hasta,
+        });
+        if (result.type === 'ok') return;
+        if (result.type === 'bloqueado' && result.hasta && !fresh?.pin_bloqueado_hasta) {
+          setRow((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  pin_bloqueado_hasta: result.hasta!.toISOString(),
+                  pin_intentos_fallidos: Math.max(prev.pin_intentos_fallidos, 5),
+                }
+              : prev,
+          );
+        }
+        toast.error(textoVisibleSinSena(result.message), 'Servicio');
+      } catch (e) {
+        toast.error(
+          textoVisibleSinSena(e instanceof Error ? e.message : 'No se pudo completar'),
+          'Servicio',
+        );
+      } finally {
+        setBusy(false);
+      }
+    })();
   };
 
   if (loading) {
@@ -687,24 +748,22 @@ export function DetalleServicioScreen() {
         row.estado_pago === 'seña_pagada' ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Iniciar trabajo (PIN)</Text>
+            {pinLocked && pinLockUntil ? (
+              <Text style={styles.pinLock}>{mensajePinBloqueado(pinLockUntil)}</Text>
+            ) : null}
             <TextInput
               value={pinInput}
               onChangeText={(t) => setPinInput(t.replace(/\D/g, '').slice(0, 4))}
               keyboardType="number-pad"
               placeholder="0000"
               maxLength={4}
-              style={styles.pinInput}
+              editable={!pinLocked && !busy}
+              style={[styles.pinInput, pinLocked && styles.btnDisabled]}
             />
             <Pressable
-              style={[styles.btnPrimary, busy && styles.btnDisabled]}
-              disabled={busy || pinInput.length < 4}
-              onPress={() =>
-                void runAction(async () => {
-                  const ok = await verificarPin(row.id, pinInput);
-                  if (!ok) throw new Error('PIN incorrecto');
-                  setPinInput('');
-                }, 'Trabajo en curso')
-              }
+              style={[styles.btnPrimary, (busy || pinLocked) && styles.btnDisabled]}
+              disabled={busy || pinLocked || pinInput.length < 4}
+              onPress={onVerificarPin}
             >
               <Text style={styles.btnPrimaryText}>Verificar PIN</Text>
             </Pressable>
@@ -732,7 +791,13 @@ export function DetalleServicioScreen() {
                   <Pressable
                     style={[styles.btnGhost, styles.mapBtn, busy && styles.btnDisabled]}
                     disabled={busy}
-                    onPress={() => openGoogleMaps(direccionData.lat, direccionData.lng)}
+                    onPress={() =>
+                      void openClientInMaps({
+                        lat: direccionData.lat,
+                        lng: direccionData.lng,
+                        direccionTexto: direccionData.direccion_texto,
+                      })
+                    }
                   >
                     <Ionicons name="map-outline" size={18} color={colors.primary} />
                     <Text style={styles.btnGhostText}>Abrir en Google Maps</Text>
@@ -1105,6 +1170,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 8,
     textAlign: 'center',
+    marginBottom: spacing.sm,
+  },
+  pinLock: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.error,
     marginBottom: spacing.sm,
   },
   hint: { fontSize: 13, color: colors.textSecondary, marginTop: spacing.xs },

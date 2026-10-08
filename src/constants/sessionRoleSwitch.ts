@@ -1,8 +1,9 @@
 import type { SessionRole } from '../context/commerceShellState';
 
 /**
- * Orden del botón «Cambiar de rol». No es el default de login ni de arranque
- * en frío: eso sigue en `defaultSessionRoleAfterLogin` (comercio > profesional > cliente).
+ * Orden de desempate cuando el rol actual no está definido.
+ * No es el default de login ni de arranque en frío: eso sigue en
+ * `defaultSessionRoleAfterLogin` (comercio > profesional > cliente).
  */
 export const SESSION_ROLE_SWITCH_ORDER = ['commerce', 'professional', 'client'] as const;
 
@@ -35,10 +36,11 @@ export function availableSessionRoles(input: {
 
 /**
  * Un toque, sin «¿Cómo querés ingresar?».
- * - Un rol: null (ocultar el botón).
- * - Dos: el otro.
- * - Tres: el siguiente del anillo comercio → profesional → cliente → comercio.
- * Si falta un rol, se salta y sigue el mismo orden entre los que sí tiene.
+ * Con local habilitado el cambio es entre particular y comercio:
+ * - comercio → profesional si la cuenta es trabajador, si no cliente;
+ * - profesional o cliente → comercio.
+ * Sin local habilitado se mantiene profesional ↔ cliente.
+ * Un solo rol: null (no hay botón).
  */
 export function nextSessionRoleOnSwitch(
   current: SessionRole | null,
@@ -47,13 +49,47 @@ export function nextSessionRoleOnSwitch(
   const ordered = SESSION_ROLE_SWITCH_ORDER.filter((role) => available.includes(role));
   if (ordered.length < 2) return null;
 
-  if (current && ordered.includes(current)) {
-    if (ordered.length === 2) {
+  const hasCommerce = ordered.includes('commerce');
+  if (!hasCommerce) {
+    if (current && ordered.includes(current)) {
       return ordered.find((role) => role !== current) ?? null;
     }
-    const index = ordered.indexOf(current);
-    return ordered[(index + 1) % ordered.length];
+    return ordered[0] ?? null;
+  }
+
+  if (current === 'commerce') {
+    return ordered.includes('professional') ? 'professional' : 'client';
+  }
+  if (current === 'professional' || current === 'client') {
+    return 'commerce';
   }
 
   return ordered[0] ?? null;
+}
+
+/**
+ * Con comercio el botón dice a dónde va (comercio o particular).
+ * Sin comercio sigue el texto de hoy: «Cambiar de rol» y el destino concreto.
+ */
+export function sessionRoleSwitchButtonCopy(
+  next: SessionRole,
+  available: readonly SessionRole[],
+): { title: string; subtitle: string } {
+  const destination = sessionRoleSwitchLabel(next);
+  if (!available.includes('commerce')) {
+    return {
+      title: 'Cambiar de rol',
+      subtitle: `Pasar a ${destination}`,
+    };
+  }
+  if (next === 'commerce') {
+    return {
+      title: 'Cambiar a Comercio',
+      subtitle: 'Pasar a Comercio',
+    };
+  }
+  return {
+    title: 'Cambiar a Particular',
+    subtitle: `Pasar a ${destination}`,
+  };
 }
