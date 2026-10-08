@@ -4,6 +4,7 @@ import type { SignUpPayload } from './auth';
 import { fetchMyStoresDetailed, registerMyStore } from './storeRegistrationSupabase';
 import { updateMyStoreAvatarFromUri } from './storeQuotesSupabase';
 import { persistSignUpToSupabase } from './supabaseUser';
+import { acceptCurrentTerms } from './termsAcceptance';
 
 const KEY = '@tuchanga/pending_profile_signup_v1';
 
@@ -72,6 +73,7 @@ async function applyPendingInternal(userId: string): Promise<void> {
     // persistSignUpToSupabase ya maneja perfil existente (trigger / alta parcial)
     // y completa birth_date + avatar en vez de descartar el pending.
     await persistSignUpToSupabase(pending.profile, userId);
+    await acceptCurrentTerms();
     if (pending.store) {
       const { avatarUri, ...storeInput } = pending.store;
       let storeId: string | null = null;
