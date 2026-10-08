@@ -23,6 +23,7 @@ import {
 import { normalizeDisplayAddress } from '../../utils/formatAddress';
 import { describePaymentStartFailure } from '../../utils/paymentStartError';
 import { formatOrderCodeDisplay } from '../../utils/orderCode';
+import { FREIGHT_COORDINATION_AFTER_PAY } from '../../utils/quoteFreightTotal';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 type ParamList = {
@@ -195,6 +196,9 @@ export function MaterialOrderDetailScreen({ navigation, route }: Props) {
             {r.storePhone?.trim() ? (
               <Text style={styles.line}>Tel: {r.storePhone.trim()}</Text>
             ) : null}
+            {r.coordinateDelivery ? (
+              <Text style={styles.coordNotice}>{FREIGHT_COORDINATION_AFTER_PAY}</Text>
+            ) : null}
             <Text style={styles.line}>
               Horarios: {r.openingHoursLabel?.trim() || 'No especificado'}
             </Text>
@@ -245,6 +249,14 @@ const styles = StyleSheet.create({
   title: { fontSize: 18, fontWeight: '800', color: colors.text },
   lead: { fontSize: 14, color: colors.textSecondary, lineHeight: 20 },
   line: { fontSize: 15, color: colors.text },
+  coordNotice: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.text,
+    backgroundColor: '#FFF8E8',
+    borderRadius: radii.input,
+    padding: spacing.sm,
+  },
   strong: { fontWeight: '800' },
   meta: { fontSize: 13, color: colors.textSecondary },
   revealedTitle: { fontSize: 14, fontWeight: '700', color: colors.primary },

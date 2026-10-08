@@ -78,6 +78,109 @@ export function freightIsIncluded(params: {
   return true;
 }
 
+export type StoreDeliveryMode = 'pickup' | 'free' | 'cost';
+
+export type StoreDeliveryChoice = {
+  /** true cuando el cliente ya cerró la selección (hay orden vigente). */
+  decided: boolean;
+  mode: StoreDeliveryMode;
+  /** Costo cotizado, solo si el modo es flete pago. */
+  cost: number;
+};
+
+/**
+ * Lo que el comercio debe leer como logística.
+ * Con flete gratis `include_freight` queda en false: no es retiro en local.
+ * El flag crudo no alcanza: `freightIsIncluded` lo cruza con el total aceptado.
+ */
+export function storeDeliveryChoice(params: {
+  freightType: FreightType;
+  quotedFreightCost: number;
+  orderIncludeFreight: boolean | null;
+  acceptedTotal?: number | null;
+  materialsSubtotal: number;
+  selectionLocked: boolean;
+}): StoreDeliveryChoice {
+  const quoted = money(params.quotedFreightCost);
+  if (!params.selectionLocked) {
+    const mode: StoreDeliveryMode =
+      params.freightType === 'free' ? 'free' : params.freightType === 'cost' ? 'cost' : 'pickup';
+    return { decided: false, mode, cost: mode === 'cost' ? quoted : 0 };
+  }
+
+  if (params.freightType === 'free') {
+    return { decided: true, mode: 'free', cost: 0 };
+  }
+
+  const included = freightIsIncluded({
+    materialsSubtotal: params.materialsSubtotal,
+    freightType: params.freightType,
+    quotedFreightCost: params.quotedFreightCost,
+    orderIncludeFreight: params.orderIncludeFreight,
+    uiIncludeFreight: false,
+    canChooseFreight: false,
+    selectionLocked: true,
+    acceptedTotal: params.acceptedTotal,
+  });
+
+  if (included && params.freightType === 'cost' && quoted > 0) {
+    return { decided: true, mode: 'cost', cost: quoted };
+  }
+  return { decided: true, mode: 'pickup', cost: 0 };
+}
+
+function pesos(amount: number): string {
+  const n = money(amount);
+  return n.toLocaleString('es-AR', {
+    style: 'currency',
+    currency: 'ARS',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+}
+
+/** Detalle de la cotización. Sin orden: lo que ofreció el comercio. */
+export function storeDeliveryDetailLabel(choice: StoreDeliveryChoice): string {
+  const body =
+    choice.mode === 'free'
+      ? 'Flete gratis'
+      : choice.mode === 'cost'
+        ? `Flete con costo ${pesos(choice.cost)}`
+        : 'Retiro en local';
+  return choice.decided ? body : `Ofreciste: ${body}`;
+}
+
+/** Tarjeta del tablero. null hasta que el cliente elige. */
+export function storeDeliveryBoardLabel(choice: StoreDeliveryChoice): string | null {
+  if (!choice.decided) return null;
+  if (choice.mode === 'free') return 'Flete gratis';
+  if (choice.mode === 'cost') return `Flete ${pesos(choice.cost)}`;
+  return 'Retiro en local';
+}
+
+export const FREIGHT_COORDINATION_BEFORE_PAY =
+  'Vas a tener que coordinar la entrega por teléfono con el comercio. Te mostramos su número cuando pagues el costo de servicio.';
+
+export const FREIGHT_COORDINATION_AFTER_PAY =
+  'Llamá al comercio para coordinar la entrega.';
+
+/**
+ * El cliente tiene que coordinar la entrega.
+ * Flete gratis no ofrece retiro: el aviso aparece al elegir ítems.
+ * Flete pago: solo con el toggle activo. Retiro en local: nunca.
+ */
+export function clientCoordinatesDelivery(params: {
+  freightType: FreightType;
+  freightCost: number;
+  includeFreight: boolean;
+  hasSelectedItems: boolean;
+}): boolean {
+  if (params.freightType === 'pickup') return false;
+  if (params.freightType === 'free') return params.hasSelectedItems;
+  if (money(params.freightCost) <= 0) return false;
+  return params.includeFreight === true;
+}
+
 /**
  * TOTAL de una cotización de materiales.
  * El flete cotizado solo se suma si el cliente lo eligió en ESA cotización.

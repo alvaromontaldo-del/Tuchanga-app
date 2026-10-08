@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildMaterialCheckoutPayload,
+  clientCoordinatesDelivery,
   quoteFreightDisplay,
   shownIncludeFreight,
   storeAmountDue,
+  storeDeliveryBoardLabel,
+  storeDeliveryChoice,
+  storeDeliveryDetailLabel,
 } from './quoteFreightTotal';
 
 const base = {
@@ -235,5 +239,166 @@ describe('quoteFreightDisplay', () => {
         canChooseFreight: false,
       }).total,
     ).toBe(30);
+  });
+});
+
+describe('storeDeliveryChoice', () => {
+  const flags = [true, false, null] as const;
+
+  function norm(label: string): string {
+    return label.replace(/\u00a0/g, ' ');
+  }
+
+  it('sin orden muestra lo ofrecido y no inventa la elección del cliente', () => {
+    for (const flag of flags) {
+      const pickup = storeDeliveryChoice({
+        freightType: 'pickup',
+        quotedFreightCost: 0,
+        orderIncludeFreight: flag,
+        materialsSubtotal: 1000,
+        selectionLocked: false,
+      });
+      expect(pickup.decided).toBe(false);
+      expect(storeDeliveryBoardLabel(pickup)).toBeNull();
+      expect(norm(storeDeliveryDetailLabel(pickup))).toBe('Ofreciste: Retiro en local');
+
+      const free = storeDeliveryChoice({
+        freightType: 'free',
+        quotedFreightCost: 0,
+        orderIncludeFreight: flag,
+        materialsSubtotal: 1000,
+        selectionLocked: false,
+      });
+      expect(norm(storeDeliveryDetailLabel(free))).toBe('Ofreciste: Flete gratis');
+      expect(storeDeliveryBoardLabel(free)).toBeNull();
+    }
+
+    const cost = storeDeliveryChoice({
+      freightType: 'cost',
+      quotedFreightCost: 3000,
+      orderIncludeFreight: false,
+      materialsSubtotal: 1500,
+      selectionLocked: false,
+    });
+    expect(norm(storeDeliveryDetailLabel(cost))).toContain('Ofreciste: Flete con costo');
+    expect(norm(storeDeliveryDetailLabel(cost))).toContain('3.000');
+  });
+
+  it('con la selección cerrada distingue retiro, flete pago y flete gratis', () => {
+    for (const flag of flags) {
+      for (const accepted of [null, 1500, 4500] as const) {
+        const free = storeDeliveryChoice({
+          freightType: 'free',
+          quotedFreightCost: 0,
+          orderIncludeFreight: flag,
+          acceptedTotal: accepted,
+          materialsSubtotal: 1500,
+          selectionLocked: true,
+        });
+        expect(free).toMatchObject({ decided: true, mode: 'free' });
+        expect(storeDeliveryBoardLabel(free)).toBe('Flete gratis');
+        expect(storeDeliveryDetailLabel(free)).toBe('Flete gratis');
+
+        const pickupOffer = storeDeliveryChoice({
+          freightType: 'pickup',
+          quotedFreightCost: 3000,
+          orderIncludeFreight: flag,
+          acceptedTotal: accepted,
+          materialsSubtotal: 1500,
+          selectionLocked: true,
+        });
+        expect(pickupOffer.mode).toBe('pickup');
+        expect(storeDeliveryBoardLabel(pickupOffer)).toBe('Retiro en local');
+      }
+    }
+
+    for (const accepted of [null, 1500, 4500] as const) {
+      const declined = storeDeliveryChoice({
+        freightType: 'cost',
+        quotedFreightCost: 3000,
+        orderIncludeFreight: false,
+        acceptedTotal: accepted,
+        materialsSubtotal: 1500,
+        selectionLocked: true,
+      });
+      expect(declined.mode).toBe('pickup');
+      expect(storeDeliveryDetailLabel(declined)).toBe('Retiro en local');
+    }
+
+    const charged = storeDeliveryChoice({
+      freightType: 'cost',
+      quotedFreightCost: 3000,
+      orderIncludeFreight: true,
+      acceptedTotal: 4500,
+      materialsSubtotal: 1500,
+      selectionLocked: true,
+    });
+    expect(charged.mode).toBe('cost');
+    expect(norm(storeDeliveryDetailLabel(charged))).toContain('Flete con costo');
+    expect(norm(storeDeliveryBoardLabel(charged) ?? '')).toContain('Flete');
+    expect(norm(storeDeliveryBoardLabel(charged) ?? '')).not.toContain('con costo');
+    expect(norm(storeDeliveryBoardLabel(charged) ?? '')).toContain('3.000');
+
+    const flagMentiroso = storeDeliveryChoice({
+      freightType: 'cost',
+      quotedFreightCost: 3000,
+      orderIncludeFreight: true,
+      acceptedTotal: 1500,
+      materialsSubtotal: 1500,
+      selectionLocked: true,
+    });
+    expect(flagMentiroso.mode).toBe('pickup');
+    expect(storeDeliveryDetailLabel(flagMentiroso)).toBe('Retiro en local');
+  });
+});
+
+describe('clientCoordinatesDelivery', () => {
+  it('avisa con flete pago solo si el toggle está activo', () => {
+    expect(
+      clientCoordinatesDelivery({
+        freightType: 'cost',
+        freightCost: 3000,
+        includeFreight: true,
+        hasSelectedItems: true,
+      }),
+    ).toBe(true);
+    expect(
+      clientCoordinatesDelivery({
+        freightType: 'cost',
+        freightCost: 3000,
+        includeFreight: false,
+        hasSelectedItems: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('con flete gratis avisa al elegir ítems y no ofrece retiro', () => {
+    expect(
+      clientCoordinatesDelivery({
+        freightType: 'free',
+        freightCost: 0,
+        includeFreight: false,
+        hasSelectedItems: true,
+      }),
+    ).toBe(true);
+    expect(
+      clientCoordinatesDelivery({
+        freightType: 'free',
+        freightCost: 0,
+        includeFreight: false,
+        hasSelectedItems: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('retiro en local no avisa', () => {
+    expect(
+      clientCoordinatesDelivery({
+        freightType: 'pickup',
+        freightCost: 0,
+        includeFreight: true,
+        hasSelectedItems: true,
+      }),
+    ).toBe(false);
   });
 });
