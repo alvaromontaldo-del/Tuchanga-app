@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   availableSessionRoles,
   nextSessionRoleOnSwitch,
+  sessionRoleSwitchButtonCopy,
   sessionRoleSwitchLabel,
 } from './sessionRoleSwitch';
 
@@ -25,63 +26,58 @@ describe('roles disponibles para cambiar', () => {
     ).toEqual(['commerce', 'client']);
   });
 
-  it('los tres, en el orden del anillo', () => {
+  it('los tres, con comercio primero', () => {
     expect(
       availableSessionRoles({ hasEnabledCommerce: true, isProfessional: true }),
     ).toEqual(['commerce', 'professional', 'client']);
   });
 });
 
-describe('un toque cambia de rol sin selector', () => {
-  const three = availableSessionRoles({ hasEnabledCommerce: true, isProfessional: true });
-
-  it('con tres roles cicla comercio → profesional → cliente → comercio', () => {
-    expect(nextSessionRoleOnSwitch('commerce', three)).toBe('professional');
-    expect(nextSessionRoleOnSwitch('professional', three)).toBe('client');
-    expect(nextSessionRoleOnSwitch('client', three)).toBe('commerce');
+describe('un toque cambia entre particular y comercio', () => {
+  const comercioYProfesional = availableSessionRoles({
+    hasEnabledCommerce: true,
+    isProfessional: true,
+  });
+  const comercioYCliente = availableSessionRoles({
+    hasEnabledCommerce: true,
+    isProfessional: false,
+  });
+  const soloProfesional = availableSessionRoles({
+    hasEnabledCommerce: false,
+    isProfessional: true,
+  });
+  const soloCliente = availableSessionRoles({
+    hasEnabledCommerce: false,
+    isProfessional: false,
   });
 
-  it('con dos roles pasa al otro', () => {
-    const commerceAndClient = availableSessionRoles({
-      hasEnabledCommerce: true,
-      isProfessional: false,
-    });
-    expect(nextSessionRoleOnSwitch('commerce', commerceAndClient)).toBe('client');
-    expect(nextSessionRoleOnSwitch('client', commerceAndClient)).toBe('commerce');
-
-    const professionalAndClient = availableSessionRoles({
-      hasEnabledCommerce: false,
-      isProfessional: true,
-    });
-    expect(nextSessionRoleOnSwitch('professional', professionalAndClient)).toBe('client');
-    expect(nextSessionRoleOnSwitch('client', professionalAndClient)).toBe('professional');
+  it('comercio y profesional: profesional ↔ comercio, y el cliente también va a comercio', () => {
+    expect(nextSessionRoleOnSwitch('commerce', comercioYProfesional)).toBe('professional');
+    expect(nextSessionRoleOnSwitch('professional', comercioYProfesional)).toBe('commerce');
+    expect(nextSessionRoleOnSwitch('client', comercioYProfesional)).toBe('commerce');
+    expect(nextSessionRoleOnSwitch('professional', comercioYProfesional)).not.toBe('client');
   });
 
-  it('con un solo rol no cambia', () => {
-    const onlyClient = availableSessionRoles({
-      hasEnabledCommerce: false,
-      isProfessional: false,
-    });
-    expect(nextSessionRoleOnSwitch('client', onlyClient)).toBeNull();
-    expect(nextSessionRoleOnSwitch(null, onlyClient)).toBeNull();
+  it('comercio sin profesional: cliente ↔ comercio', () => {
+    expect(nextSessionRoleOnSwitch('commerce', comercioYCliente)).toBe('client');
+    expect(nextSessionRoleOnSwitch('client', comercioYCliente)).toBe('commerce');
+    expect(nextSessionRoleOnSwitch('professional', comercioYCliente)).toBe('commerce');
   });
 
-  it('si el rol actual no está entre los disponibles, toma el primero del orden', () => {
-    const commerceAndClient = availableSessionRoles({
-      hasEnabledCommerce: true,
-      isProfessional: false,
-    });
-    expect(nextSessionRoleOnSwitch('professional', commerceAndClient)).toBe('commerce');
-    expect(nextSessionRoleOnSwitch(null, three)).toBe('commerce');
+  it('sin comercio se mantiene profesional ↔ cliente', () => {
+    expect(nextSessionRoleOnSwitch('professional', soloProfesional)).toBe('client');
+    expect(nextSessionRoleOnSwitch('client', soloProfesional)).toBe('professional');
   });
 
-  it('salta el rol que la cuenta no tiene', () => {
-    const noProfessional = availableSessionRoles({
-      hasEnabledCommerce: true,
-      isProfessional: false,
-    });
-    expect(noProfessional).not.toContain('professional');
-    expect(nextSessionRoleOnSwitch('commerce', noProfessional)).toBe('client');
+  it('solo cliente no cambia', () => {
+    expect(nextSessionRoleOnSwitch('client', soloCliente)).toBeNull();
+    expect(nextSessionRoleOnSwitch(null, soloCliente)).toBeNull();
+  });
+
+  it('con current null toma el primero del orden', () => {
+    expect(nextSessionRoleOnSwitch(null, comercioYProfesional)).toBe('commerce');
+    expect(nextSessionRoleOnSwitch(null, comercioYCliente)).toBe('commerce');
+    expect(nextSessionRoleOnSwitch(null, soloProfesional)).toBe('professional');
   });
 });
 
@@ -90,6 +86,31 @@ describe('textos del botón', () => {
     expect(sessionRoleSwitchLabel('commerce')).toBe('Comercio');
     expect(sessionRoleSwitchLabel('professional')).toBe('Profesional');
     expect(sessionRoleSwitchLabel('client')).toBe('Cliente');
+  });
+
+  it('con comercio dice Comercio o Particular, y aclara profesional o cliente', () => {
+    const tres = availableSessionRoles({ hasEnabledCommerce: true, isProfessional: true });
+    expect(sessionRoleSwitchButtonCopy('commerce', tres)).toEqual({
+      title: 'Cambiar a Comercio',
+      subtitle: 'Pasar a Comercio',
+    });
+    expect(sessionRoleSwitchButtonCopy('professional', tres)).toEqual({
+      title: 'Cambiar a Particular',
+      subtitle: 'Pasar a Profesional',
+    });
+    expect(sessionRoleSwitchButtonCopy('client', tres)).toEqual({
+      title: 'Cambiar a Particular',
+      subtitle: 'Pasar a Cliente',
+    });
+  });
+
+  it('sin comercio mantiene Cambiar de rol', () => {
+    const roles = availableSessionRoles({ hasEnabledCommerce: false, isProfessional: true });
+    expect(sessionRoleSwitchButtonCopy('client', roles)).toEqual({
+      title: 'Cambiar de rol',
+      subtitle: 'Pasar a Cliente',
+    });
+    expect(sessionRoleSwitchButtonCopy('professional', roles).title).toBe('Cambiar de rol');
   });
 });
 
