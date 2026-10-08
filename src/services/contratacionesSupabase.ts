@@ -16,6 +16,11 @@ import {
   type BusyAgendaSlot,
 } from '../utils/agendaSlotOverlap';
 import { normalizeDisplayAddress } from '../utils/formatAddress';
+import {
+  PinBloqueadoError,
+  mensajeErrorRpc,
+  pinBloqueadoDesdeRpc,
+} from '../utils/pinBloqueo';
 import { calculateYachangaServiceFee } from '../utils/yachangaJobServiceFee';
 import { assertWarrantyDays } from '../utils/warrantyDays';
 
@@ -167,6 +172,11 @@ function mapContratacionRow(r: Record<string, unknown>): Contratacion {
     offline_pago_notificado_at: (r.offline_pago_notificado_at as string | null) ?? null,
     offline_pago_confirmado_at: (r.offline_pago_confirmado_at as string | null) ?? null,
     disputa_motivo: String(r.disputa_motivo ?? ''),
+    pin_intentos_fallidos: Math.max(0, Math.floor(toNum(r.pin_intentos_fallidos))),
+    pin_bloqueado_hasta:
+      r.pin_bloqueado_hasta == null || r.pin_bloqueado_hasta === ''
+        ? null
+        : String(r.pin_bloqueado_hasta),
     warranty_days: readWarrantyDays(r.warranty_days),
     warranty_anchor_at: (r.warranty_anchor_at as string | null) ?? null,
     created_at: String(r.created_at),
@@ -720,7 +730,11 @@ export async function verificarPin(contratacionId: string, pin: string): Promise
     p_contratacion_id: contratacionId,
     p_pin_ingresado: pin,
   });
-  if (error) throw error;
+  if (error) {
+    const bloqueo = pinBloqueadoDesdeRpc(error);
+    if (bloqueo) throw new PinBloqueadoError(bloqueo.hasta);
+    throw new Error(mensajeErrorRpc(error, 'No se pudo verificar el PIN'));
+  }
   return Boolean(data);
 }
 

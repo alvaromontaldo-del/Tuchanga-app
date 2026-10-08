@@ -20,7 +20,9 @@ import {
   crearPreferenciaCostoServicioMateriales,
 } from '../../services/pagosMercadoPago';
 import { describePaymentStartFailure } from '../../utils/paymentStartError';
+import { FREIGHT_COORDINATION_BEFORE_PAY } from '../../utils/quoteFreightTotal';
 import { calculateServiceFee } from '../../utils/yachangaServiceFee';
+import type { FreightType } from '../../types/materials';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 export type MaterialOrderSummarySelection = {
@@ -31,6 +33,9 @@ export type MaterialOrderSummarySelection = {
   items: { id: string; quoteItemId?: string; description: string; lineTotal: number }[];
   includeFreight: boolean;
   freightCost: number;
+  freightType?: FreightType;
+  /** true si la selección incluye entrega (flete gratis o flete pago activo). */
+  coordinateDelivery?: boolean;
   materialsSubtotal: number;
 };
 
@@ -145,6 +150,13 @@ export function MaterialOrderSummaryScreen({ navigation, route }: Props) {
                   {s.includeFreight ? formatMoneyAr(s.freightCost) : formatMoneyAr(0)}
                 </Text>
               </View>
+            ) : s.freightType === 'free' ? (
+              <View style={styles.row}>
+                <Text style={styles.itemDesc}>Flete gratis</Text>
+              </View>
+            ) : null}
+            {s.coordinateDelivery ? (
+              <Text style={styles.coordNotice}>{FREIGHT_COORDINATION_BEFORE_PAY}</Text>
             ) : null}
             <View style={styles.divider} />
             <View style={styles.row}>
@@ -204,6 +216,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.text,
     fontVariant: ['tabular-nums'],
+  },
+  coordNotice: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.text,
+    backgroundColor: '#FFF8E8',
+    borderRadius: radii.input,
+    padding: spacing.sm,
   },
   divider: {
     height: StyleSheet.hairlineWidth,

@@ -1,6 +1,7 @@
 -- YaChanga #207 — separador de miles en los textos de recotización.
 --
--- NO APLICADO en producción. Este archivo queda para revisión.
+-- APLICADO en producción el 2026-10-08 como migration `card_207_miles`
+-- (dry-run BEGIN…ROLLBACK previo sobre un trabajo real: mismos montos, solo cambia el texto).
 -- Cuerpos reconstruidos con pg_get_functiondef el 2026-10-08
 -- (kyxehrxcdealbujvvnxp), firmas:
 --   public.recotizar_en_curso(uuid, numeric, text)

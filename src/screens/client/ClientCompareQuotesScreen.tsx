@@ -27,7 +27,13 @@ import {
   confirmarCostoServicioMaterialesMp,
   crearPreferenciaCostoServicioMateriales,
 } from '../../services/pagosMercadoPago';
-import { quoteFreightDisplay, shownIncludeFreight } from '../../utils/quoteFreightTotal';
+import {
+  clientCoordinatesDelivery,
+  FREIGHT_COORDINATION_AFTER_PAY,
+  FREIGHT_COORDINATION_BEFORE_PAY,
+  quoteFreightDisplay,
+  shownIncludeFreight,
+} from '../../utils/quoteFreightTotal';
 import { formatOrderCodeDisplay } from '../../utils/orderCode';
 import { normalizeDisplayAddress } from '../../utils/formatAddress';
 import { describePaymentStartFailure } from '../../utils/paymentStartError';
@@ -63,9 +69,12 @@ type LegacyClientQuotesParamList = {
       quoteId: string;
       storeLabel: string;
       itemIds: string[];
-      items: { id: string; description: string; lineTotal: number }[];
+      quoteItemIds?: string[];
+      items: { id: string; quoteItemId?: string; description: string; lineTotal: number }[];
       includeFreight: boolean;
       freightCost: number;
+      freightType?: 'pickup' | 'free' | 'cost';
+      coordinateDelivery?: boolean;
       materialsSubtotal: number;
     }[];
   };
@@ -359,6 +368,13 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
         items,
         includeFreight: freightQuoted && freightOn,
         freightCost: freightQuoted ? card.freightCost : 0,
+        freightType: card.freightType,
+        coordinateDelivery: clientCoordinatesDelivery({
+          freightType: card.freightType,
+          freightCost: card.freightCost,
+          includeFreight: freightOn,
+          hasSelectedItems: true,
+        }),
         materialsSubtotal,
       });
     }
@@ -781,6 +797,9 @@ const QuoteCard = memo(function QuoteCard({
           {card.storePhone?.trim() ? (
             <Text style={styles.addressLine}>Tel: {card.storePhone.trim()}</Text>
           ) : null}
+          {freightDisplay.freightIncluded ? (
+            <Text style={styles.coordNotice}>{FREIGHT_COORDINATION_AFTER_PAY}</Text>
+          ) : null}
           {card.orderCode || card.verificationPin ? (
             <View style={styles.pinBox}>
               {card.orderCode ? (
@@ -847,6 +866,17 @@ const QuoteCard = memo(function QuoteCard({
             Incluir flete (si no, retiro en local)
           </Text>
         </Pressable>
+      ) : null}
+
+      {!card.contactRevealed &&
+      clientCoordinatesDelivery({
+        freightType: card.freightType,
+        freightCost: card.freightCost,
+        includeFreight,
+        hasSelectedItems:
+          card.freightType === 'free' ? (canSelectItems ? selectedItemIds.size > 0 : true) : true,
+      }) ? (
+        <Text style={styles.coordNotice}>{FREIGHT_COORDINATION_BEFORE_PAY}</Text>
       ) : null}
 
       <Pressable
@@ -1464,6 +1494,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: colors.text,
+  },
+  coordNotice: {
+    marginTop: spacing.sm,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.text,
+    backgroundColor: '#FFF8E8',
+    borderRadius: radii.input,
+    padding: spacing.sm,
   },
   cartBar: {
     position: 'absolute',
