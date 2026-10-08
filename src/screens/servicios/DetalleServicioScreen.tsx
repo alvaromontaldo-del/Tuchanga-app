@@ -72,7 +72,7 @@ import {
   formatContratacionEstadoPago,
   puedeNotificarSaldoOffline,
 } from '../../utils/contratacionStatus';
-import { formatMoneyCeilAr } from '../../utils/formatMoney';
+import { formatArs, formatMoneyCeilAr } from '../../utils/formatMoney';
 import {
   AGENDA_DEFAULT_DURATION_MINUTES,
   agendaPickerFieldForOverlap,
@@ -303,16 +303,6 @@ export function DetalleServicioScreen() {
     return null;
   }, [row, user?.id]);
 
-  const currency = useMemo(
-    () =>
-      new Intl.NumberFormat('es-AR', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
-    [],
-  );
-  const fmt = (n: number) => `$${currency.format(n)}`;
-
   const showNotificarPagoOffline = useMemo(() => {
     if (!row || myRole !== 'cliente') return false;
     return puedeNotificarSaldoOffline(row);
@@ -478,7 +468,7 @@ export function DetalleServicioScreen() {
         ) : null}
 
         {myRole === 'trabajador' ? (
-          <QuoteMoneySummary variant="worker" amount={fmt(row.precio_trabajador)} />
+          <QuoteMoneySummary variant="worker" amount={formatArs(row.precio_trabajador)} />
         ) : (
           <QuoteMoneySummary
             variant="client"

@@ -12,6 +12,7 @@ import type {
   StoreIncomingRequest,
   StoreRequestDetail,
 } from '../types/materials';
+import { maskArsInput, parseArsInput } from '../utils/formatMoney';
 import { formatOrderCodeDisplay } from '../utils/orderCode';
 import { parseIncludeFreightFlag, storeAmountDue } from '../utils/quoteFreightTotal';
 
@@ -1071,32 +1072,14 @@ export async function submitStoreQuote(
   return { quoteId };
 }
 
-/** Normaliza texto de precio para tipado rápido en mostrador. */
+/**
+ * Máscara de precio entero. El punto es separador de miles («300.000» = 300000),
+ * no decimal. Sin centavos: el teclado es numérico.
+ */
 export function sanitizePriceText(raw: string): string {
-  let t = raw.replace(/[^\d.,]/g, '');
-  const comma = t.indexOf(',');
-  const dot = t.indexOf('.');
-  if (comma >= 0 && dot >= 0) {
-    // Quedarse con el último separador como decimal
-    if (comma > dot) t = t.replace(/\./g, '').replace(',', '.');
-    else t = t.replace(/,/g, '');
-  } else if (comma >= 0) {
-    t = t.replace(',', '.');
-  }
-  const parts = t.split('.');
-  if (parts.length > 2) {
-    t = `${parts[0]}.${parts.slice(1).join('')}`;
-  }
-  if (parts[1]?.length > 2) {
-    t = `${parts[0]}.${parts[1].slice(0, 2)}`;
-  }
-  return t;
+  return maskArsInput(raw);
 }
 
 export function parsePriceText(text: string): number | null {
-  const cleaned = sanitizePriceText(text).trim();
-  if (!cleaned) return null;
-  const n = Number(cleaned);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.round(n * 100) / 100;
+  return parseArsInput(text);
 }

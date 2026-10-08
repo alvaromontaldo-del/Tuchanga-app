@@ -81,6 +81,16 @@ describe('presupuesto del comercio', () => {
     ).toBe(false);
   });
 
+  it('el punto del precio es separador de miles', () => {
+    const rows = buildStoreQuoteItemRows([cemento], {
+      cemento: draft({
+        inStock: true,
+        variants: [{ label: 'Acme', priceText: '300.000' }],
+      }),
+    });
+    expect(rows[0]?.unitPrice).toBe(300000);
+  });
+
   it('un alternativo sin precio no se envía', () => {
     expect(() =>
       buildStoreQuoteItemRows([cemento], {

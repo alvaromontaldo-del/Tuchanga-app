@@ -1,4 +1,5 @@
 import type { MaterialRequestItem } from '../types/materials';
+import { parseArsInput } from './formatMoney';
 
 export type QuoteVariantDraft = {
   label: string;
@@ -31,11 +32,7 @@ export function emptyQuoteItemDraft(): QuoteItemDraftState {
 }
 
 function parseDraftPrice(text: string): number | null {
-  const cleaned = text.trim().replace(',', '.');
-  if (!cleaned) return null;
-  const n = Number(cleaned);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.round(n * 100) / 100;
+  return parseArsInput(text);
 }
 
 function unavailableRow(item: MaterialRequestItem, note: string | null): BuiltStoreQuoteItem {

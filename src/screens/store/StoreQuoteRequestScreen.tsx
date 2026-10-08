@@ -30,8 +30,9 @@ import {
 import type { CommerceStackParamList } from '../../navigation/mainTypes';
 import { formatMoneyAr } from '../../services/clientQuotesSupabase';
 import { normalizeDisplayAddress } from '../../utils/formatAddress';
+import { amountToArsInput } from '../../utils/formatMoney';
 import { listKey } from '../../utils/safeAsync';
-import { sanitizePriceText } from '../../services/storeQuotesSupabase';
+import { parsePriceText, sanitizePriceText } from '../../services/storeQuotesSupabase';
 import type {
   ExistingStoreQuoteItem,
   FreightType,
@@ -50,8 +51,8 @@ function freightOptionLabel(type: FreightType): string {
 }
 
 function formatDraftPrice(priceText: string): string {
-  const n = Number(String(priceText).replace(',', '.'));
-  if (!Number.isFinite(n) || n < 0) return '—';
+  const n = parsePriceText(priceText);
+  if (n == null) return '—';
   return formatMoneyAr(n);
 }
 
@@ -113,7 +114,7 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
           label: line.variantLabel ?? line.alternativeDescription ?? '',
           priceText:
             Number.isFinite(line.unitPrice) && line.unitPrice >= 0
-              ? String(line.unitPrice)
+              ? amountToArsInput(line.unitPrice)
               : '',
         };
         if (!prev) {
@@ -132,7 +133,7 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
       setFreightType(quote.freightType);
       const costText =
         quote.freightType === 'cost' && Number.isFinite(quote.freightCost)
-          ? String(quote.freightCost)
+          ? amountToArsInput(quote.freightCost)
           : '';
       freightCostRef.current = costText;
       setFreightCostText(costText);
@@ -508,11 +509,12 @@ const QuoteItemRow = memo(function QuoteItemRow({
               onChangeText={(raw) =>
                 updateVariant(0, { priceText: sanitizePriceText(raw) })
               }
-              keyboardType="decimal-pad"
+              keyboardType="number-pad"
+              inputMode="numeric"
               placeholder="0"
               placeholderTextColor={colors.textSecondary}
               style={styles.priceInput}
-              maxLength={12}
+              maxLength={11}
               accessibilityLabel="Precio del alternativo"
             />
             <Text style={styles.pricePreview}>
@@ -551,11 +553,12 @@ const QuoteItemRow = memo(function QuoteItemRow({
                   onChangeText={(raw) =>
                     updateVariant(index, { priceText: sanitizePriceText(raw) })
                   }
-                  keyboardType="decimal-pad"
+                  keyboardType="number-pad"
+                  inputMode="numeric"
                   placeholder="0"
                   placeholderTextColor={colors.textSecondary}
                   style={styles.priceInput}
-                  maxLength={12}
+                  maxLength={11}
                   accessibilityLabel="Precio unitario"
                 />
                 <Text style={styles.pricePreview}>{preview === '—' ? '\u00a0' : preview}</Text>
@@ -615,9 +618,7 @@ function LogisticsBlock({
   onFreightCostChange: (t: string) => void;
 }) {
   if (!editable) {
-    const costNum = Number(String(freightCostText).replace(',', '.'));
-    const showCost =
-      freightType === 'cost' && Number.isFinite(costNum) && costNum >= 0;
+    const costNum = parsePriceText(freightCostText);
     return (
       <View style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>Logística</Text>
@@ -625,7 +626,7 @@ function LogisticsBlock({
           <View style={styles.roMetaRow}>
             <Text style={styles.roMetaValue}>{freightOptionLabel(freightType)}</Text>
           </View>
-          {showCost ? (
+          {freightType === 'cost' && costNum != null ? (
             <View style={styles.roMetaRow}>
               <Text style={styles.roMetaLabel}>Costo</Text>
               <Text style={styles.roMetaValue}>{formatMoneyAr(costNum)}</Text>
@@ -664,12 +665,13 @@ function LogisticsBlock({
             value={freightCostText}
             editable={editable}
             onChangeText={onFreightCostChange}
-            keyboardType="decimal-pad"
+            keyboardType="number-pad"
+            inputMode="numeric"
             placeholder="0"
             placeholderTextColor={colors.textSecondary}
             style={styles.freightInput}
             selectTextOnFocus
-            maxLength={12}
+            maxLength={11}
           />
         </View>
       ) : null}
