@@ -107,10 +107,12 @@ import {
   trabajadorMarcarTrabajoReparado,
   fetchDisponibilidadOpciones,
   aceptarRecotizacion,
+  fetchRecotizaciones,
   obtenerPinCliente,
   rechazarDisponibilidad,
   rechazarRecotizacion,
   recotizarEnCurso,
+  type RecotizacionHistorial,
 } from '../../services/contratacionesSupabase';
 import type { DisponibilidadOpcion } from '../../types/contrataciones';
 import { openPagoCheckout } from '../../navigation/openPagoCheckout';
@@ -123,15 +125,16 @@ import {
 } from '../../utils/claimChatVisibility';
 import { getSystemEvent, shouldRenderSystemMessageInChat } from '../../utils/chatSystemMessages';
 import {
-  isRecotizacionChatEvent,
+  isRecotizacionProposalEvent,
   quoteChipForJob,
   readMetaNumber,
   readMetaString,
+  recotizacionLiveStatus,
+  recotizacionResponseById,
   recotizarAmountError,
   recotizarFundamentosError,
-  recotizacionLiveStatus,
+  resolvePrecioTrabajadorAnterior,
   serviceFeePayBarCopy,
-  WORKER_WAITING_FEE_DIFF,
 } from '../../utils/recotizarUi';
 import { dedupeMaterialServiceFeePaidMessages } from '../../utils/materialFeePaidChat';
 import { newRandomUserId } from '../../utils/stableUserId';
@@ -485,6 +488,7 @@ export function ChatScreen({
   );
   const [replacesQuoteId, setReplacesQuoteId] = useState<string | null>(null);
   const [job, setJob] = useState<ServiceJob | null>(null);
+  const [recotizaciones, setRecotizaciones] = useState<RecotizacionHistorial[]>([]);
   const [clientPin, setClientPin] = useState<string | null>(null);
   const [review, setReview] = useState<Awaited<ReturnType<typeof fetchReviewForJob>>>(null);
   const [reviewRating, setReviewRating] = useState(5);
@@ -521,9 +525,7 @@ export function ChatScreen({
     job &&
       participants?.myRole === 'cliente' &&
       job.payment_status === 'PENDING' &&
-      (job.estado_trabajo === 'aceptado' ||
-        job.estado_trabajo === 'en_curso' ||
-        job.estado_trabajo === 'pendiente_pago_diferencia'),
+      job.estado_trabajo === 'aceptado',
   );
   const showPay = canPaySeña;
   const showClientPinBar = Boolean(
@@ -555,12 +557,6 @@ export function ChatScreen({
       participants?.myRole === 'cliente' &&
       job.estado_trabajo === 'precio_aceptado' &&
       agendaOpciones.length > 0,
-  );
-  const showWorkerWaitingFeeDiff = Boolean(
-    job &&
-      participants?.myRole === 'trabajador' &&
-      job.estado_trabajo === 'en_curso' &&
-      job.payment_status === 'PENDING',
   );
   const showWorkerJobBar = Boolean(
     job &&
@@ -625,6 +621,35 @@ export function ChatScreen({
   );
   const showWorkerDisputaBar = Boolean(
     job && participants?.myRole === 'trabajador' && job.estado_trabajo === 'disputa',
+  );
+
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !job?.id) {
+      setRecotizaciones([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchRecotizaciones(job.id)
+      .then((rows) => {
+        if (!cancelled) setRecotizaciones(rows);
+      })
+      .catch(() => {
+        /* el metadata nuevo igual trae el monto anterior */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [job?.id, job?.recotizacion_id, job?.estado_trabajo, job?.precio_trabajador]);
+
+  const recotizacionesById = useMemo(() => {
+    const map = new Map<string, RecotizacionHistorial>();
+    for (const row of recotizaciones) map.set(row.id, row);
+    return map;
+  }, [recotizaciones]);
+
+  const recotizacionResponses = useMemo(
+    () => recotizacionResponseById(messages),
+    [messages],
   );
 
   useEffect(() => {
@@ -1667,24 +1692,35 @@ export function ChatScreen({
 
         const systemMeta = normalizeMessageMetadata(item.metadata);
         const systemEvent = getSystemEvent(systemMeta);
-        if (systemEvent && isRecotizacionChatEvent(systemEvent) && participants?.myRole) {
-          const status = recotizacionLiveStatus({
-            event: systemEvent,
-            messageRecotizacionId: readMetaString(systemMeta, 'recotizacion_id'),
-            jobEstado: job?.estado_trabajo,
-            jobRecotizacionId: job?.recotizacion_id,
-          });
+        const recotizacionRole = participants?.myRole;
+        if (
+          systemEvent &&
+          isRecotizacionProposalEvent(systemEvent) &&
+          (recotizacionRole === 'cliente' || recotizacionRole === 'trabajador')
+        ) {
           const precioTrabajador = readMetaNumber(systemMeta, 'precio_trabajador');
+          const recotizacionId = readMetaString(systemMeta, 'recotizacion_id');
           if (precioTrabajador != null) {
+            const row = recotizacionId ? recotizacionesById.get(recotizacionId) : undefined;
+            const status = recotizacionLiveStatus({
+              event: systemEvent,
+              messageRecotizacionId: recotizacionId,
+              jobEstado: job?.estado_trabajo,
+              jobRecotizacionId: job?.recotizacion_id,
+              rowEstado: row?.estado,
+              responseEvent: recotizacionId ? recotizacionResponses.get(recotizacionId) : null,
+            });
             return (
               <View style={styles.systemRow}>
                 <RecotizacionCard
-                  role={participants.myRole}
+                  role={recotizacionRole}
                   status={status}
                   precioTrabajador={precioTrabajador}
-                  precioFinal={readMetaNumber(systemMeta, 'precio_final')}
-                  comision={readMetaNumber(systemMeta, 'comision_app')}
-                  fundamentos={readMetaString(systemMeta, 'fundamentos') ?? ''}
+                  precioTrabajadorAnterior={resolvePrecioTrabajadorAnterior(
+                    readMetaNumber(systemMeta, 'precio_trabajador_anterior'),
+                    row?.precioTrabajadorAnterior,
+                  )}
+                  fundamentos={readMetaString(systemMeta, 'fundamentos') ?? row?.fundamentos ?? ''}
                   busy={recotizarBusy}
                   onAccept={() => respondRecotizacion('accept')}
                   onReject={() => respondRecotizacion('reject')}
@@ -2027,6 +2063,8 @@ export function ChatScreen({
       job?.estado_trabajo,
       job?.id,
       job?.recotizacion_id,
+      recotizacionResponses,
+      recotizacionesById,
       latestQuoteAny,
       latestRejected?.id,
       myId,
@@ -2170,9 +2208,9 @@ export function ChatScreen({
         {isSupabaseConfigured() && showPay && job ? (
           <View style={[styles.payBar, styles.completeBarStacked]}>
             <View style={styles.payBarText}>
-              <Text style={styles.payTitle}>{serviceFeePayBarCopy(job.estado_trabajo).title}</Text>
-              <Text style={styles.paySubtitle}>{serviceFeePayBarCopy(job.estado_trabajo).body}</Text>
-              {serviceFeePayBarCopy(job.estado_trabajo).showQuotedFee ? (
+              <Text style={styles.payTitle}>{serviceFeePayBarCopy().title}</Text>
+              <Text style={styles.paySubtitle}>{serviceFeePayBarCopy().body}</Text>
+              {serviceFeePayBarCopy().showQuotedFee ? (
                 <QuoteMoneySummary
                   variant="client"
                   finalAmount={formatMoneyCeilAr(job.amount)}
@@ -2416,14 +2454,6 @@ export function ChatScreen({
           </View>
         ) : null}
 
-        {isSupabaseConfigured() && showWorkerWaitingFeeDiff && job ? (
-          <View style={styles.completeBar}>
-            <View style={styles.payBarText}>
-              <Text style={styles.paySubtitle}>{WORKER_WAITING_FEE_DIFF}</Text>
-            </View>
-          </View>
-        ) : null}
-
         {isSupabaseConfigured() && showReviewForm && job && participants?.myRole === 'cliente' ? (
           <View style={styles.reviewCard}>
             <Text style={styles.reviewTitle}>Dejá tu reseña</Text>
@@ -2570,7 +2600,6 @@ export function ChatScreen({
       showWorkerSaldoRecibidoBar,
       showWorkerSeñaPagadaBar,
       showWorkerJobBar,
-      showWorkerWaitingFeeDiff,
       toast,
       workerJobPaid,
     ],

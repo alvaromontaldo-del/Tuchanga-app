@@ -6,8 +6,7 @@ type Props = {
   role: 'cliente' | 'trabajador';
   status: RecotizacionStatus;
   precioTrabajador: number;
-  precioFinal?: number | null;
-  comision?: number | null;
+  precioTrabajadorAnterior?: number | null;
   fundamentos: string;
   busy?: boolean;
   /** En el detalle del trabajo la tarjeta ocupa el ancho de la pantalla. */
@@ -20,8 +19,7 @@ export function RecotizacionCard({
   role,
   status,
   precioTrabajador,
-  precioFinal,
-  comision,
+  precioTrabajadorAnterior,
   fundamentos,
   busy = false,
   fill = false,
@@ -32,8 +30,7 @@ export function RecotizacionCard({
     role,
     status,
     precioTrabajador,
-    precioFinal: role === 'cliente' ? precioFinal : null,
-    comision: role === 'cliente' ? comision : null,
+    precioTrabajadorAnterior: role === 'cliente' ? precioTrabajadorAnterior : null,
     fundamentos,
   });
 
@@ -43,17 +40,16 @@ export function RecotizacionCard({
         <Text style={styles.title}>{model.title}</Text>
         <Text style={styles.badge}>{model.badge}</Text>
       </View>
-      <Text style={styles.line}>
-        {model.amountLabel}: <Text style={styles.strong}>{model.amount}</Text>
-      </Text>
-      {model.extraLines.map((line) => (
+      {model.lines.map((line) => (
         <Text key={line.label} style={styles.line}>
-          {line.label}: <Text style={styles.strong}>{line.value}</Text>
+          {line.label}:{' '}
+          <Text style={[styles.strong, line.struck && styles.struck]}>{line.value}</Text>
         </Text>
       ))}
       {model.fundamentos ? (
         <Text style={styles.fundamentos}>Fundamentos: {model.fundamentos}</Text>
       ) : null}
+      {model.notice ? <Text style={styles.notice}>{model.notice}</Text> : null}
       {model.footnote ? <Text style={styles.footnote}>{model.footnote}</Text> : null}
       {model.showActions ? (
         <View style={styles.actions}>
@@ -112,7 +108,13 @@ const styles = StyleSheet.create({
   },
   line: { fontSize: 14, color: colors.text, lineHeight: 20 },
   strong: { fontWeight: '900' },
+  struck: {
+    fontWeight: '700',
+    color: colors.textSecondary,
+    textDecorationLine: 'line-through',
+  },
   fundamentos: { fontSize: 14, color: colors.text, lineHeight: 20 },
+  notice: { fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
   footnote: { fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
   actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs },
   btn: {

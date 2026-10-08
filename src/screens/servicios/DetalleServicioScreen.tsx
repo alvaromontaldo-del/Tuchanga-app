@@ -49,6 +49,7 @@ import {
   clienteResponderConformidad,
   fetchContratacionById,
   fetchDisponibilidadOpciones,
+  fetchRecotizaciones,
   fetchWorkerAgendaBusySlots,
   obtenerDireccionCliente,
   obtenerPinCliente,
@@ -60,6 +61,7 @@ import {
   trabajadorConfirmarRecepcionOffline,
   trabajadorMarcarTrabajoReparado,
   verificarPin,
+  type RecotizacionHistorial,
 } from '../../services/contratacionesSupabase';
 import {
   computeSaldoPendiente,
@@ -78,6 +80,7 @@ import {
   resultadoVerificacionPin,
 } from '../../utils/pinBloqueo';
 import { formatArs, formatMoneyCeilAr } from '../../utils/formatMoney';
+import { recotizacionStatusForRow } from '../../utils/recotizarUi';
 import {
   AGENDA_DEFAULT_DURATION_MINUTES,
   agendaPickerFieldForOverlap,
@@ -208,6 +211,7 @@ export function DetalleServicioScreen() {
   const { user } = useAuth();
   const toast = useAppToast();
   const [row, setRow] = useState<Contratacion | null>(null);
+  const [recotizaciones, setRecotizaciones] = useState<RecotizacionHistorial[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [pinVisible, setPinVisible] = useState<string | null>(null);
@@ -306,6 +310,11 @@ export function DetalleServicioScreen() {
     try {
       const data = await fetchContratacionById(contratacionId);
       setRow(data);
+      try {
+        setRecotizaciones(await fetchRecotizaciones(contratacionId));
+      } catch {
+        /* se mantiene el historial ya cargado */
+      }
       if (data?.estado_trabajo === 'precio_aceptado') {
         const ops = await fetchDisponibilidadOpciones(contratacionId);
         setOpcionesAgenda(ops);
@@ -800,27 +809,54 @@ export function DetalleServicioScreen() {
           </View>
         ) : null}
 
-        {row.estado_trabajo === 'pendiente_pago_diferencia' &&
-        row.recotizacion_precio_trabajador != null ? (
-          <View style={styles.section}>
-          <RecotizacionCard
-            fill
-            role={myRole}
-            status="pendiente"
-            precioTrabajador={row.recotizacion_precio_trabajador}
-            precioFinal={row.recotizacion_precio_final}
-            comision={row.recotizacion_comision_app}
-            fundamentos={row.recotizacion_fundamentos ?? ''}
-            busy={busy}
-            onAccept={() =>
-              void runAction(() => aceptarRecotizacion(row.id), 'Recotización aceptada')
-            }
-            onReject={() =>
-              void runAction(() => rechazarRecotizacion(row.id), 'Recotización rechazada')
-            }
-          />
-          </View>
-        ) : null}
+        {myRole && recotizaciones.length > 0
+          ? recotizaciones.map((item) => {
+              const status = recotizacionStatusForRow({
+                rowEstado: item.estado,
+                rowId: item.id,
+                jobEstado: row.estado_trabajo,
+                jobRecotizacionId: row.recotizacion_id,
+              });
+              return (
+                <View key={item.id} style={styles.section}>
+                  <RecotizacionCard
+                    fill
+                    role={myRole}
+                    status={status}
+                    precioTrabajador={item.precioTrabajadorNuevo}
+                    precioTrabajadorAnterior={item.precioTrabajadorAnterior}
+                    fundamentos={item.fundamentos}
+                    busy={busy}
+                    onAccept={() =>
+                      void runAction(() => aceptarRecotizacion(row.id), 'Recotización aceptada')
+                    }
+                    onReject={() =>
+                      void runAction(() => rechazarRecotizacion(row.id), 'Recotización rechazada')
+                    }
+                  />
+                </View>
+              );
+            })
+          : myRole &&
+              row.estado_trabajo === 'pendiente_pago_diferencia' &&
+              row.recotizacion_precio_trabajador != null ? (
+            <View style={styles.section}>
+              <RecotizacionCard
+                fill
+                role={myRole}
+                status="pendiente"
+                precioTrabajador={row.recotizacion_precio_trabajador}
+                fundamentos={row.recotizacion_fundamentos ?? ''}
+                busy={busy}
+                onAccept={() =>
+                  void runAction(() => aceptarRecotizacion(row.id), 'Recotización aceptada')
+                }
+                onReject={() =>
+                  void runAction(() => rechazarRecotizacion(row.id), 'Recotización rechazada')
+                }
+              />
+            </View>
+          ) : null}
 
         {row.offline_pago_notificado_at && myRole === 'trabajador' && row.estado_pago !== 'totalmente_pagado' ? (
           <Pressable
