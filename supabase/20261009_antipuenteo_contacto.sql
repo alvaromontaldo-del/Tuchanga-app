@@ -438,32 +438,112 @@ BEGIN
     pos := e;
   END LOOP;
 
-  -- Calle con altura, sin prefijo.
-  pos := 1;
-  pat := '\y((?:[a-z]{4,}|[a-z]{3,}\s+[a-z]{3,})(?:\s+[a-z]{3,}){0,2})\s+[0-9]{3,5}\y(?!\s*(?:' || unit_after || ')\y)';
-  LOOP
-    s := regexp_instr(folded, pat, pos, 1, 0);
-    EXIT WHEN s = 0;
-    e := regexp_instr(folded, pat, pos, 1, 1);
-    EXIT WHEN e <= s;
-    frag := substring(folded from s for e - s);
-    name := regexp_replace(frag, '\s+[0-9]{3,5}$', '');
-    words := regexp_split_to_array(name, '\s+');
-    ok := false;
-    FOREACH word IN ARRAY words LOOP
-      IF length(word) >= 3 AND NOT (word = ANY (stop_words)) THEN
-        ok := true;
+  -- Calle con altura, sin prefijo. El número tiene que ir pegado a un nombre
+  -- propio (mayúscula en el texto original). Un verbo de precio, «modelo»,
+  -- «año» o «código de producto» no arma una calle. «buscarla por Volta 1140»
+  -- tapa solo «Volta 1140». street_block tiene que coincidir con el cliente.
+  DECLARE
+    bw text[] := '{}';
+    bs int[] := '{}';
+    cur int;
+    wend int;
+    gap int;
+    wtxt text;
+    wstart int;
+    name_start int;
+    wi int;
+    upper_letters text := 'ABCDEFGHIJKLMNOPQRSTUVWXYZÁÀÄÂÃÅÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑ';
+    street_block text[] := ARRAY[
+      'cobro','cobra','cobramos','cobran','cobras','cobren',
+      'sale','salen','salio','cuesta','cuestan','son','sos',
+      'dejame','dejamelo','deja','dejenme',
+      'pago','paga','pagan','pagame','pagas','sena','senia',
+      'presupuesto','presupuestos','modelo','modelos',
+      'ano','anio','anos','codigo','codigos','producto','productos',
+      'hora','horas','adelanto','item','items','total','precio','precios',
+      'mano','obra',
+      'tarugo','tarugos','llave','griferia','inodoro','mesada','puerta','ventana',
+      'vidrio','membrana','durlock','yeso','enduido','revestimiento','porcelanato',
+      'ceramica','zocalo','perfil','hierro','alambre','clavo','clavos','cantidad',
+      'dale','que','por','para','con','sin','este','esta','hay','mas','muy','bien',
+      'ahi','aca','ya','hoy','manana','despues','cuando','donde','setiembre',
+      'queda','salen','llevan','necesito','quiero','piso','depto','dpto','dto',
+      'departamento','esquina','entre','calle','avenida','barrio','lote','manzana',
+      'altura','casa','country','las','los','del','una','uno','celular'
+    ];
+    not_name text[];
+    connectors text[] := ARRAY['de','del','la','las','los','y'];
+  BEGIN
+    not_name := stop_words || street_block;
+    pos := 1;
+    pat := '(?<![0-9])[0-9]{3,5}(?![0-9])(?!\s*(?:' || unit_after || ')\y)';
+    LOOP
+      s := regexp_instr(folded, pat, pos, 1, 0);
+      EXIT WHEN s = 0;
+      e := regexp_instr(folded, pat, pos, 1, 1);
+      EXIT WHEN e <= s;
+      bw := '{}';
+      bs := '{}';
+      cur := s;
+      WHILE cur > 1 AND substring(folded from cur - 1 for 1) ~ '\s' LOOP
+        cur := cur - 1;
+      END LOOP;
+      WHILE coalesce(array_length(bw, 1), 0) < 4
+            AND cur > 1
+            AND substring(folded from cur - 1 for 1) ~ '[a-z]' LOOP
+        wend := cur;
+        WHILE cur > 1 AND substring(folded from cur - 1 for 1) ~ '[a-z]' LOOP
+          cur := cur - 1;
+        END LOOP;
+        bw := ARRAY[substring(folded from cur for wend - cur)] || bw;
+        bs := ARRAY[cur] || bs;
+        gap := cur;
+        WHILE gap > 1 AND substring(folded from gap - 1 for 1) ~ '\s' LOOP
+          gap := gap - 1;
+        END LOOP;
+        IF gap > 1 AND substring(folded from gap - 1 for 1) ~ '[a-z]' THEN
+          cur := gap;
+        ELSE
+          EXIT;
+        END IF;
+      END LOOP;
+
+      IF coalesce(array_length(bw, 1), 0) > 0 THEN
+        wtxt := bw[array_length(bw, 1)];
+        wstart := bs[array_length(bs, 1)];
+        IF length(wtxt) >= 3
+           AND NOT (wtxt = ANY (not_name))
+           AND position(substring(src from wstart for 1) in upper_letters) > 0 THEN
+          name_start := wstart;
+          wi := array_length(bw, 1) - 1;
+          WHILE wi >= 1 LOOP
+            IF bw[wi] = ANY (connectors)
+               AND wi >= 2
+               AND length(bw[wi - 1]) >= 3
+               AND NOT (bw[wi - 1] = ANY (not_name))
+               AND position(substring(src from bs[wi - 1] for 1) in upper_letters) > 0 THEN
+              name_start := bs[wi - 1];
+              wi := wi - 2;
+            ELSIF length(bw[wi]) >= 3
+               AND NOT (bw[wi] = ANY (not_name))
+               AND position(substring(src from bs[wi] for 1) in upper_letters) > 0 THEN
+              name_start := bs[wi];
+              wi := wi - 1;
+            ELSE
+              EXIT;
+            END IF;
+          END LOOP;
+          IF NOT public._offplatform_overlaps(name_start, e, ig_s, ig_e)
+             AND NOT public._offplatform_overlaps(name_start, e, sp_s, sp_e) THEN
+            sp_s := sp_s || name_start;
+            sp_e := sp_e || e;
+            sp_k := sp_k || ARRAY['direccion'];
+          END IF;
+        END IF;
       END IF;
+      pos := e;
     END LOOP;
-    IF ok
-       AND NOT public._offplatform_overlaps(s, e, ig_s, ig_e)
-       AND NOT public._offplatform_overlaps(s, e, sp_s, sp_e) THEN
-      sp_s := sp_s || s;
-      sp_e := sp_e || e;
-      sp_k := sp_k || ARRAY['direccion'];
-    END IF;
-    pos := e;
-  END LOOP;
+  END;
 
   out_text := '';
   cursor_pos := 1;
@@ -971,6 +1051,9 @@ BEGIN
     FROM public.conversations c
     WHERE c.id = p_conversation;
 
+    -- Teléfono y dirección se leen solo acá, dentro de SECURITY DEFINER.
+    -- No se devuelven ni se escriben en el log: el otro participante ve el
+    -- texto ya enmascarado, nunca el dato cargado.
     IF v_client IS NOT NULL THEN
       SELECT p.telefono, p.direccion_texto, p.direccion_completa
         INTO v_phone, v_addr, v_addr2

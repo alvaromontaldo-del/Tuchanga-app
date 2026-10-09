@@ -361,6 +361,63 @@ const NAME_STOP = new Set([
   'contacto',
 ]);
 
+/**
+ * Palabra pegada a un número que no es una calle: verbo de precio, o
+ * modelo / año / código de producto. Aunque arranque en mayúscula.
+ * Tiene que coincidir con street_block en el SQL.
+ */
+const STREET_BLOCK = new Set([
+  'cobro',
+  'cobra',
+  'cobramos',
+  'cobran',
+  'cobras',
+  'cobren',
+  'sale',
+  'salen',
+  'salio',
+  'cuesta',
+  'cuestan',
+  'son',
+  'sos',
+  'dejame',
+  'dejamelo',
+  'deja',
+  'dejenme',
+  'pago',
+  'paga',
+  'pagan',
+  'pagame',
+  'pagas',
+  'sena',
+  'senia',
+  'presupuesto',
+  'presupuestos',
+  'modelo',
+  'modelos',
+  'ano',
+  'anio',
+  'anos',
+  'codigo',
+  'codigos',
+  'producto',
+  'productos',
+  'hora',
+  'horas',
+  'adelanto',
+  'item',
+  'items',
+  'total',
+  'precio',
+  'precios',
+  'mano',
+  'obra',
+]);
+
+const STREET_CONNECTOR = new Set(['de', 'del', 'la', 'las', 'los', 'y']);
+
+const UPPER_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZÁÀÄÂÃÅÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑ';
+
 const ALIAS_DENY = new Set([
   'www',
   'com',
@@ -622,19 +679,77 @@ function collectOffplatformIntent(folded: string, spans: Span[], ignored: Span[]
   }
 }
 
-function nameRejected(name: string): boolean {
-  const words = name.split(/\s+/).filter(Boolean);
-  if (words.length === 0) return true;
-  return words.every((word) => NAME_STOP.has(word) || word.length < 3);
-}
-
 function sideRejected(name: string): boolean {
   const words = name.split(/\s+/).filter((word) => word.length >= 3);
   if (words.length === 0) return true;
   return words.every((word) => NAME_STOP.has(word));
 }
 
-function collectAddresses(folded: string, spans: Span[], ignored: Span[]) {
+type StreetWord = { start: number; end: number; text: string };
+
+function wordsBeforeNumber(folded: string, numStart: number): StreetWord[] {
+  const words: StreetWord[] = [];
+  let cursor = numStart;
+  while (cursor > 0 && /\s/.test(folded[cursor - 1] ?? '')) cursor--;
+  while (words.length < 4 && cursor > 0 && /[a-z]/.test(folded[cursor - 1] ?? '')) {
+    const end = cursor;
+    while (cursor > 0 && /[a-z]/.test(folded[cursor - 1] ?? '')) cursor--;
+    words.unshift({ start: cursor, end, text: folded.slice(cursor, end) });
+    let gap = cursor;
+    while (gap > 0 && /\s/.test(folded[gap - 1] ?? '')) gap--;
+    if (gap > 0 && /[a-z]/.test(folded[gap - 1] ?? '')) {
+      cursor = gap;
+      continue;
+    }
+    break;
+  }
+  return words;
+}
+
+function isStreetName(raw: string, word: StreetWord): boolean {
+  if (word.text.length < 3) return false;
+  if (STREET_BLOCK.has(word.text) || NAME_STOP.has(word.text)) return false;
+  return UPPER_LETTERS.includes(raw.charAt(word.start));
+}
+
+/** Calle y altura sin «calle»/«av.»: solo el nombre propio pegado al número. */
+function collectBareStreets(raw: string, folded: string, spans: Span[], ignored: Span[]) {
+  const re = new RegExp(`(?<!\\d)(\\d{3,5})(?!\\d)(?!\\s*${UNIT_AFTER}\\b)`, 'g');
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(folded))) {
+    const numStart = match.index;
+    const numEnd = numStart + (match[1]?.length ?? 0);
+    const words = wordsBeforeNumber(folded, numStart);
+    if (words.length === 0) continue;
+    const head = words[words.length - 1];
+    if (!head || !isStreetName(raw, head)) continue;
+    let start = head.start;
+    let i = words.length - 2;
+    while (i >= 0) {
+      const word = words[i];
+      if (!word) break;
+      if (STREET_CONNECTOR.has(word.text) && i >= 1) {
+        const prev = words[i - 1];
+        if (prev && isStreetName(raw, prev)) {
+          start = prev.start;
+          i -= 2;
+          continue;
+        }
+        break;
+      }
+      if (isStreetName(raw, word)) {
+        start = word.start;
+        i -= 1;
+        continue;
+      }
+      break;
+    }
+    const span: Span = { start, end: numEnd, kind: 'direccion' };
+    if (!overlapsAny(span, ignored) && !overlapsAny(span, spans)) spans.push(span);
+  }
+}
+
+function collectAddresses(raw: string, folded: string, spans: Span[], ignored: Span[]) {
   const streetPrefix =
     '(?:av\\.?|avenida|calle|bv\\.?|bulevar|boulevard|pje\\.?|pasaje|diag\\.?|diagonal|ruta|camino)';
   const patterns: RegExp[] = [
@@ -662,20 +777,7 @@ function collectAddresses(folded: string, spans: Span[], ignored: Span[]) {
     });
   }
 
-  pushMatches(
-    folded,
-    new RegExp(
-      `\\b((?:[a-z]{4,}|[a-z]{3,}\\s+[a-z]{3,})(?:\\s+[a-z]{3,}){0,2})\\s+(\\d{3,5})\\b(?!\\s*${UNIT_AFTER}\\b)`,
-      'g',
-    ),
-    'direccion',
-    spans,
-    (text, start) => {
-      const name = text.replace(/\s+\d{3,5}$/, '');
-      if (nameRejected(name)) return false;
-      return !overlapsAny({ start, end: start + text.length, kind: 'direccion' }, ignored);
-    },
-  );
+  collectBareStreets(raw, folded, spans, ignored);
 
   const intersections = [
     /\b(?:esquina(?:\s+de)?|entre)\s+([a-z]{3,}(?:\s+[a-z]{3,}){0,2})\s+y\s+([a-z]{3,}(?:\s+[a-z]{3,}){0,2})\b/g,
@@ -700,7 +802,7 @@ function collectAddresses(folded: string, spans: Span[], ignored: Span[]) {
   }
 }
 
-function collect(folded: string): Span[] {
+function collect(raw: string, folded: string): Span[] {
   const ignored: Span[] = [];
   for (const pattern of IGNORE_RES) {
     pushMatches(folded, pattern, 'ignore', ignored);
@@ -778,7 +880,7 @@ function collect(folded: string): Span[] {
     (text) => /\d/.test(text) && !/\bpostal\b/.test(text),
   );
 
-  collectAddresses(folded, spans, ignored);
+  collectAddresses(raw, folded, spans, ignored);
 
   return spans.filter((span) => span.kind !== 'ignore');
 }
@@ -820,7 +922,7 @@ export function redactOffplatformContact(raw: string | null | undefined): Offpla
   const text = raw ?? '';
   if (!text) return { text, kinds: [], changed: false, notice: null };
   const folded = foldOffplatformText(text);
-  return applySpans(text, collect(folded));
+  return applySpans(text, collect(text, folded));
 }
 
 export function offplatformNoticeFor(raw: string | null | undefined): string | null {

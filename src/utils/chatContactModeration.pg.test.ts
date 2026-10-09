@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
+import { OFFPLATFORM_PARITY_CASES } from './offplatformParityCases';
+import { redactOffplatformContact } from './offplatformContact';
 
 const DB = 'chat_contact_moderation_test';
 const SQL = readFileSync(
@@ -610,5 +612,77 @@ describe.skipIf(!postgresAvailable())('moderación de chat y bucket privado', ()
     expect(
       psqlError(`SET ROLE authenticated; SELECT public.redact_offplatform_contextual('570', 'x', NULL, 'body', '${CLIENT}', '${CONV}', true);`),
     ).toMatch(/permission denied/i);
+
+    expect(
+      psql(`
+        SELECT (
+          prosecdef
+          AND NOT has_function_privilege(
+            'authenticated',
+            'public.redact_offplatform_contextual(text,text,uuid,text,uuid,uuid,boolean)',
+            'EXECUTE'
+          )
+        )::text
+        FROM pg_proc
+        WHERE proname = 'redact_offplatform_contextual'
+          AND pg_get_function_identity_arguments(oid) = 'p_text text, p_source text, p_source_id uuid, p_field text, p_actor uuid, p_conversation uuid, p_history boolean';
+      `),
+    ).toBe('true');
+    expect(
+      psql(`
+        SELECT count(*)::text
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public'
+          AND p.proname LIKE '%offplatform%'
+          AND pg_get_functiondef(p.oid) ~ 'FROM public.profiles'
+          AND (
+            NOT p.prosecdef
+            OR has_function_privilege('authenticated', p.oid, 'EXECUTE')
+          );
+      `),
+    ).toBe('0');
+  });
+
+  it('el cliente y el servidor enmascaran los mismos textos', () => {
+    const payload = JSON.stringify([...OFFPLATFORM_PARITY_CASES]);
+    const fromSql = psql(`
+      SELECT string_agg(public.redact_offplatform_contact(t)->>'text', E'\\x1e' ORDER BY ord)
+      FROM jsonb_array_elements_text($parity$${payload}$parity$::jsonb) WITH ORDINALITY AS x(t, ord);
+    `);
+    const fromClient = OFFPLATFORM_PARITY_CASES.map((text) => redactOffplatformContact(text).text).join(
+      '\x1e',
+    );
+    expect(fromSql).toBe(fromClient);
+  });
+
+  it('el otro participante no recibe el teléfono ni la dirección cargados', () => {
+    const asWorker = (sql: string) =>
+      psql(`
+        BEGIN;
+        SELECT set_config('request.jwt.claim.sub', '${WORKER}', true);
+        SET LOCAL ROLE authenticated;
+        ${sql}
+        COMMIT;
+      `);
+    expect(
+      asWorker(`
+        INSERT INTO public.messages (conversation_id, sender_id, body, type)
+        VALUES ('${CONV}', '${WORKER}', 'listo, mañana arranco', 'text')
+        RETURNING body;
+      `),
+    ).toBe('listo, mañana arranco');
+    expect(
+      psql(`
+        SELECT count(*)::text
+        FROM public.messages
+        WHERE sender_id = '${WORKER}'
+          AND (
+            body LIKE '%3364312302%'
+            OR body ILIKE '%pellegrini%'
+            OR body LIKE '%1112345678%'
+          );
+      `),
+    ).toBe('0');
   });
 });

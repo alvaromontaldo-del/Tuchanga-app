@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { OFFPLATFORM_PARITY_CASES } from './offplatformParityCases';
 import {
   OFFPLATFORM_NOTICE,
   OFFPLATFORM_REDACTION,
@@ -179,6 +180,30 @@ describe('direcciones y ubicaciones', () => {
     keeps('en la esquina de la obra');
     keeps('cinta y cable de 2.5');
   });
+
+  it('no toma un verbo de precio ni un modelo como calle y altura', () => {
+    keeps('te cobro 15000');
+    keeps('sale 25000 la mano de obra');
+    keeps('cobro 1500 la hora');
+    keeps('dejame 2500 de adelanto');
+    keeps('modelo 2024');
+    keeps('Cobro 15000 al terminar');
+    keeps('Año 2024');
+  });
+
+  it('tapa el código del portón y solo la calle, no el verbo de al lado', () => {
+    const code = redactOffplatformContact('código 1234 del portón');
+    expect(code.text).toBe(`••• del portón`);
+    expect(code.kinds).toContain('codigo');
+    expect(code.text).not.toContain('1234');
+
+    const pickUp = redactOffplatformContact('Pasa a buscarla por Volta 1140');
+    expect(pickUp.text).toBe(`Pasa a buscarla por ${OFFPLATFORM_REDACTION}`);
+    expect(pickUp.kinds).toEqual(['direccion']);
+    expect(pickUp.text).toContain('buscarla');
+    expect(pickUp.text.toLowerCase()).not.toContain('volta');
+    expect(pickUp.text).not.toContain('1140');
+  });
 });
 
 describe('mensajes de sistema y metadata', () => {
@@ -206,6 +231,41 @@ describe('mensajes de sistema y metadata', () => {
     expect(dirty.kinds).toContain('direccion');
     expect((dirty.metadata as { service_detail: string }).service_detail).toContain(OFFPLATFORM_REDACTION);
     expect((dirty.metadata as { warranty_days: number }).warranty_days).toBe(15);
+  });
+});
+
+describe('paridad con el SQL', () => {
+  it('cada caso del fixture tiene un resultado estable en el cliente', () => {
+    expect(OFFPLATFORM_PARITY_CASES.map((text) => redactOffplatformContact(text).text)).toEqual([
+      'te cobro 15000',
+      'sale 25000 la mano de obra',
+      'cobro 1500 la hora',
+      'dejame 2500 de adelanto',
+      'modelo 2024',
+      'Cobro 15000 al terminar',
+      'Año 2024',
+      '••• del portón',
+      'Pasa a buscarla por •••',
+      'Te paso mi dirección',
+      '•••, •••',
+      'estoy en •••',
+      '•••',
+      '•••',
+      '•••',
+      '•••',
+      '$300.000',
+      'veinte mil',
+      '25 lucas',
+      'las 15:30',
+      '•••',
+      '•••',
+      '•••',
+      'La ubicación te la paso ••• •••',
+      '¿me pasás el teléfono?',
+      'hablamos por whatsapp en la obra',
+      'Cinta 1234',
+      'Llegá a •••, te espero en la vereda',
+    ]);
   });
 });
 
