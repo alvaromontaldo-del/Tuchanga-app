@@ -5,6 +5,7 @@ import {
 } from '../utils/formatAddress';
 import { fetchGeorefAddressHits } from './georef';
 import {
+  completeAddressForHit,
   enrichPositionedHits,
   fallbackStreetNames,
   hitsIncludeNearbyStreet,
@@ -17,12 +18,13 @@ import {
   tagStreetHeightRanges,
   type GeocodeHit,
 } from '../utils/streetAddressQuery';
-
 export type NominatimSuggestion = {
   id: string;
   address: string;
   /** Calle OSM sin la altura tipeada. La UI vuelve a armar el rótulo con el texto del campo. */
   plainAddress: string;
+  /** Localidad, partido y provincia. Se guarda; la ficha sigue mostrando `address`. */
+  completeAddress?: string;
   lat: number;
   lng: number;
 };
@@ -116,21 +118,21 @@ async function fetchGeocodeHits(params: URLSearchParams): Promise<GeocodeHit[]> 
     return [];
   }
 
-  return (data ?? [])
-    .map((item) => {
-      const lat = numOrNull(item.lat);
-      const lng = numOrNull(item.lon);
-      if (!item.display_name || lat === null || lng === null) return null;
-      return {
-        id: String(item.place_id ?? `${lat},${lng}`),
-        lat,
-        lng,
-        displayName: item.display_name,
-        parts: { ...(item.address ?? {}) },
-        osmClass: item.class,
-      } satisfies GeocodeHit;
-    })
-    .filter((item): item is GeocodeHit => Boolean(item));
+  const hits: GeocodeHit[] = [];
+  for (const item of data ?? []) {
+    const lat = numOrNull(item.lat);
+    const lng = numOrNull(item.lon);
+    if (!item.display_name || lat === null || lng === null) continue;
+    hits.push({
+      id: String(item.place_id ?? `${lat},${lng}`),
+      lat,
+      lng,
+      displayName: item.display_name,
+      parts: { ...(item.address ?? {}) },
+      osmClass: item.class,
+    });
+  }
+  return hits;
 }
 
 function mergeHits(primary: GeocodeHit[], extra: GeocodeHit[]): GeocodeHit[] {
@@ -214,6 +216,7 @@ export async function fetchNominatimSuggestions(
       id: item.id,
       address: item.address,
       plainAddress: item.plainAddress?.trim() || item.address,
+      completeAddress: item.completeAddress?.trim() || undefined,
       lat: item.lat,
       lng: item.lng,
     })),
@@ -247,7 +250,16 @@ export async function reverseNominatim(lat: number, lng: number): Promise<string
   }
 }
 
-export async function reverseNominatimStreet(lat: number, lng: number): Promise<string | null> {
+export type ReversedPlace = {
+  short: string;
+  complete: string;
+};
+
+/** Reverso: la ficha usa la calle corta y el perfil guarda la dirección completa. */
+export async function reverseNominatimPlace(
+  lat: number,
+  lng: number,
+): Promise<ReversedPlace | null> {
   const url =
     `https://nominatim.openstreetmap.org/reverse?` +
     `format=json&lat=${encodeURIComponent(String(lat))}` +
@@ -262,27 +274,33 @@ export async function reverseNominatimStreet(lat: number, lng: number): Promise<
     });
     if (!res.ok) return null;
     const data = (await res.json()) as {
-      address?: {
-        road?: string;
-        house_number?: string;
-        pedestrian?: string;
-        neighbourhood?: string;
-        suburb?: string;
-        city?: string;
-        town?: string;
-        village?: string;
-        state?: string;
-      };
+      address?: NominatimAddressParts;
       display_name?: string;
     };
-
-    const a = data.address;
-    const short = buildShortAddressFromParts(a ?? {});
-    if (short) return short;
-    return data.display_name?.trim() ? formatShortAddress(data.display_name.trim()) : null;
+    const parts = data.address ?? {};
+    const short =
+      buildShortAddressFromParts(parts) ||
+      (data.display_name?.trim() ? formatShortAddress(data.display_name.trim()) : '');
+    if (!short) return null;
+    const complete = completeAddressForHit(
+      {
+        id: 'reverse',
+        lat,
+        lng,
+        displayName: data.display_name?.trim() || short,
+        parts,
+      },
+      short,
+    );
+    return { short, complete: complete || short };
   } catch {
     return null;
   }
+}
+
+export async function reverseNominatimStreet(lat: number, lng: number): Promise<string | null> {
+  const place = await reverseNominatimPlace(lat, lng);
+  return place?.short ?? null;
 }
 
 export function osmTileUrlTemplate() {

@@ -34,11 +34,12 @@ import { TextLink } from '../../components/common/TextLink';
 import { TermsAndConditionsModal } from '../../components/legal/TermsAndConditionsModal';
 import { TERMS_VERSION } from '../../constants/terms';
 import { useAppToast } from '../../components/toast/toast';
-import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/nominatim';
+import { fetchNominatimSuggestions, reverseNominatimPlace } from '../../config/nominatim';
 import {
   activeStreetQuery,
   addressToPersist,
   emptyAddressSearchMessage,
+  exactAddressToSave,
   isIgnorableAddressEcho,
   isNegligiblePinMove,
   rejectedAddressMessage,
@@ -97,7 +98,13 @@ import { normalizeLocalImageUri } from '../../utils/normalizeLocalImage';
 
 type Props = AuthStackScreenProps<'Register'>;
 
-type GeoPoint = { lat: number; lng: number; address: string; plainAddress?: string };
+type GeoPoint = {
+  lat: number;
+  lng: number;
+  address: string;
+  plainAddress?: string;
+  completeAddress?: string;
+};
 
 type DraftErrors = Partial<Record<
   | 'firstName'
@@ -574,6 +581,7 @@ export function RegisterScreen({ navigation, route }: Props) {
       const mapped: GeoPoint[] = suggestions.map((s) => ({
         address: s.address,
         plainAddress: s.plainAddress,
+        completeAddress: s.completeAddress,
         lat: s.lat,
         lng: s.lng,
       }));
@@ -618,19 +626,23 @@ export function RegisterScreen({ navigation, route }: Props) {
   async function runReverseGeocode(lat: number, lng: number) {
     const reqId = ++reverseReqRef.current;
     try {
-      const addr = await reverseNominatimStreet(lat, lng);
+      const place = await reverseNominatimPlace(lat, lng);
       if (reqId !== reverseReqRef.current) return;
-      if (!addr) return;
+      if (!place?.short) return;
       if (!pinMovedRef.current && confirmedLabelRef.current) return;
       const source =
         confirmedLabelRef.current ||
         activeStreetQuery(addressQuery, typedQueryRef.current) ||
         selectedAddressRef.current ||
         '';
-      const kept = source ? retainHouseNumber(source, addr) : addr;
+      const kept = source ? retainHouseNumber(source, place.short) : place.short;
       selectedAddressRef.current = kept;
       if (pinMovedRef.current) confirmedLabelRef.current = kept;
-      setGeo((prev) => (prev ? { ...prev, address: kept, lat, lng } : { address: kept, lat, lng }));
+      setGeo((prev) =>
+        prev
+          ? { ...prev, address: kept, lat, lng, completeAddress: place.complete || prev.completeAddress }
+          : { address: kept, lat, lng, completeAddress: place.complete },
+      );
       commitAddressQuery(kept);
     } catch {
       // silencioso: si Nominatim falla, mantenemos coords
@@ -789,7 +801,12 @@ export function RegisterScreen({ navigation, route }: Props) {
       currentLabel: geo.address,
       pinMoved: pinMovedRef.current,
     });
-    const baseLocation = { address: savedAddress, lat: geo.lat, lng: geo.lng };
+    const baseLocation = {
+      address: savedAddress,
+      lat: geo.lat,
+      lng: geo.lng,
+      completeAddress: exactAddressToSave(savedAddress, geo.completeAddress),
+    };
     const commerceDraft =
       storeLat != null && storeLng != null && storeAvatarUri
         ? {
@@ -1330,7 +1347,12 @@ export function RegisterScreen({ navigation, route }: Props) {
                       pickedPointRef.current = { lat: r.lat, lng: r.lng };
                       reverseReqRef.current += 1;
                       commitAddressQuery(label);
-                      setGeo({ address: label, lat: r.lat, lng: r.lng });
+                      setGeo({
+                        address: label,
+                        lat: r.lat,
+                        lng: r.lng,
+                        completeAddress: exactAddressToSave(label, r.completeAddress) ?? undefined,
+                      });
                       setAddressResults([]);
                       setSettledAddressQuery('');
                     }}

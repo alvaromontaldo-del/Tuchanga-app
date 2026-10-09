@@ -41,6 +41,7 @@ type GeorefDireccion = {
   calle?: { id?: string; nombre?: string; categoria?: string | null };
   localidad_censal?: { nombre?: string };
   departamento?: { nombre?: string };
+  provincia?: { nombre?: string };
   ubicacion?: { lat?: number; lon?: number };
 };
 
@@ -149,7 +150,11 @@ export function probeHeightsNear(houseNumber: number, ranges: StreetHeightRange[
     .slice(0, 6);
 }
 
-function direccionToHit(row: GeorefDireccion, quality: 'interpolated' | 'anchored'): GeocodeHit | null {
+function direccionToHit(
+  row: GeorefDireccion,
+  quality: 'interpolated' | 'anchored',
+  provincia?: string,
+): GeocodeHit | null {
   const lat = row.ubicacion?.lat;
   const lng = row.ubicacion?.lon;
   if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) {
@@ -158,15 +163,21 @@ function direccionToHit(row: GeorefDireccion, quality: 'interpolated' | 'anchore
   const streetId = row.calle?.id?.trim() ?? '';
   const road = prettyGeorefStreet(row.calle?.nombre ?? '', row.calle?.categoria);
   if (!road) return null;
-  const locality = row.localidad_censal?.nombre?.trim() || row.departamento?.nombre?.trim() || '';
+  const partido = row.departamento?.nombre?.trim() || '';
+  const state = row.provincia?.nombre?.trim() || provincia?.trim() || '';
+  const locality = row.localidad_censal?.nombre?.trim() || partido;
   return {
     id: `georef-${streetId || 'calle'}-${lat.toFixed(5)}-${lng.toFixed(5)}`,
     lat,
     lng,
-    displayName: row.nomenclatura?.trim() || [road, locality].filter(Boolean).join(', '),
+    displayName:
+      row.nomenclatura?.trim() ||
+      [road, locality, partido, state].filter(Boolean).join(', '),
     parts: {
       road,
       city: locality || undefined,
+      county: partido || undefined,
+      state: state || undefined,
     },
     osmClass: 'place',
     positionQuality: quality,
@@ -174,13 +185,18 @@ function direccionToHit(row: GeorefDireccion, quality: 'interpolated' | 'anchore
   };
 }
 
-export function parseDirecciones(payload: unknown, street: string, quality: 'interpolated' | 'anchored'): GeocodeHit[] {
+export function parseDirecciones(
+  payload: unknown,
+  street: string,
+  quality: 'interpolated' | 'anchored',
+  provincia?: string,
+): GeocodeHit[] {
   const rows = (payload as { direcciones?: GeorefDireccion[] } | null)?.direcciones ?? [];
   const hits: GeocodeHit[] = [];
   for (const row of rows) {
     const nombre = row.calle?.nombre ?? '';
     if (roadMatchScore(nombre, street) < 1) continue;
-    const hit = direccionToHit(row, quality);
+    const hit = direccionToHit(row, quality, provincia);
     if (hit) hits.push(hit);
   }
   return hits;
@@ -292,7 +308,7 @@ async function searchDirecciones(
     `${GEOREF_BASE}/direcciones?${direccionParams(street, digits, scope, 10).toString()}`,
   );
   if (!payload) return null;
-  return parseDirecciones(payload, street, 'interpolated');
+  return parseDirecciones(payload, street, 'interpolated', scope.provincia);
 }
 
 async function searchCalles(street: string, scope: GeorefScope): Promise<LocalityStreetRange[] | null> {
@@ -337,7 +353,7 @@ async function searchAnchor(
     if (!Number.isFinite(probed)) continue;
     const delta = Math.abs(probed - houseNumber);
     if (delta > MAX_ANCHOR_DELTA) continue;
-    const hits = parseDirecciones(block, street, 'anchored');
+    const hits = parseDirecciones(block, street, 'anchored', scope.provincia);
     if (!hits.length) continue;
     if (!best || delta < best.delta) best = { delta, hits };
   }
