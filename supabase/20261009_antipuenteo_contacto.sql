@@ -1,4 +1,5 @@
--- Antipuenteo. NO APLICADO.
+-- Antipuenteo. Aplicado en producción el 2026-10-09
+-- (schema_migrations version 20261010020000, name antipuenteo_capa1).
 -- Reemplaza el rechazo por palabra y por message_blocked_contact:
 -- el dato se cambia por ••• y el envío sigue.
 -- Además, en el servidor (SECURITY DEFINER), compara el texto contra el
