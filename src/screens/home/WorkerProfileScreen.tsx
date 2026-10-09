@@ -27,6 +27,7 @@ import { openAuthModal } from '../../navigation/openAuthModal';
 import { openOrCreateChat } from '../../services/messaging';
 import { fetchWorkerPublicProfileFromSupabase } from '../../services/workerProfileSupabase';
 import { IntroVideoPlayer } from '../../components/profile/IntroVideoPlayer';
+import { AntecedentesPenalesBadge } from '../../components/profile/AntecedentesPenalesBadge';
 import { UrgenciasBadge } from '../../components/search/UrgenciasBadge';
 import { StarRating } from '../../components/profile/StarRating';
 import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
@@ -397,6 +398,7 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
             <UrgenciasBadge />
           </View>
         ) : null}
+        {worker.antecedentesPenales ? <AntecedentesPenalesBadge /> : null}
         {worker.introVideoUrl ? <IntroVideoPlayer uri={worker.introVideoUrl} /> : null}
         {ageLabel ? <Text style={styles.age}>{ageLabel}</Text> : null}
 

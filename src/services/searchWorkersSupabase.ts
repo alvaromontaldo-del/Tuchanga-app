@@ -3,6 +3,7 @@ import type { SearchWorkerHit, SearchableWorker } from '../data/mockSearchWorker
 import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
 import { coarseCoord } from '../utils/publicWorkerSearch';
 import { completedJobsFromPayload } from '../utils/workerReputation';
+import { approvedAntecedentesIds } from '../utils/antecedentesPenales';
 import { readAtiendeUrgencias } from '../utils/urgencias';
 import { fetchCompletedJobsByProfileIds } from './workerCompletedJobs';
 
@@ -87,6 +88,19 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
   });
 
   hits.sort((a, b) => a.distanceKm - b.distanceKm);
+
+  let approved = new Set<string>();
+  try {
+    const badge = await sb.rpc('list_public_antecedentes_aprobados', {
+      p_worker_ids: hits.map((h) => h.worker.id),
+    });
+    if (!badge.error) approved = approvedAntecedentesIds(badge.data);
+  } catch {
+    approved = new Set();
+  }
+  for (const hit of hits) {
+    hit.worker.antecedentesPenales = approved.has(hit.worker.id);
+  }
 
   const missing = hits.filter((h) => h.worker.totalJobsDone == null).map((h) => h.worker.id);
   if (missing.length === 0) return hits;

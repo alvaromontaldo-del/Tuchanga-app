@@ -145,6 +145,7 @@ export function mapPublicWorkerRpcPayload(raw: unknown): WorkerPublicProfile | n
     reviewCount: Math.max(0, Math.floor(Number(profile.resenas_count) || 0)),
     totalJobsDone: completedJobsFromPayload(profile, 'total_jobs_done') ?? 0,
     trades,
+    antecedentesPenales: profile.antecedentes_penales === true,
   };
 }
 

@@ -37,6 +37,11 @@ verify_jwt = false
 [functions.notify_trabajo_no_conforme]
 verify_jwt = false
 
+# #110. Rechazo de antecedentes penales. El SQL llama con x-function-secret (Vault).
+# El deploy por API no lee este archivo: hay que pasar verify_jwt = false en el deploy.
+[functions.push_on_antecedentes]
+verify_jwt = false
+
 # Reporte de chat. En producción verify_jwt = false: la función valida el access token.
 [functions.report_user]
 verify_jwt = false

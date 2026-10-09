@@ -111,6 +111,16 @@ async function handleNotificationResponse(
 
     if (data.type === 'store_board' || data.eventType === 'nueva_solicitud') {
       await openStoreBoardFromPush(data);
+      return;
+    }
+
+    if (data.type === 'antecedentes_penales') {
+      const ready = await waitForNavigation();
+      if (!ready) return;
+      navigationRef.navigate('Main', {
+        screen: 'Perfil',
+        params: { screen: 'WorkerABM' },
+      });
     }
   } catch (e) {
     console.warn('[push routing]', e);

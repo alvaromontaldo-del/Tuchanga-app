@@ -20,6 +20,7 @@ import { ModeratedTextField } from '../../components/common/ModeratedTextField';
 import { useAppToast } from '../../components/toast/toast';
 import { TradeSearchModal } from '../../components/search/TradeSearchModal';
 import { ImagePickerComponent } from '../../components/common/ImagePickerComponent';
+import { AntecedentesPenalesCard } from '../../components/profile/AntecedentesPenalesCard';
 import { IntroVideoEditor } from '../../components/profile/IntroVideoEditor';
 import { colors, radii, spacing } from '../../constants/theme';
 import { isSupabaseConfigured } from '../../config/supabase';
@@ -881,6 +882,8 @@ export function WorkerABMScreen({ navigation }: Props) {
                 thumbColor={atiendeUrgencias ? '#E65100' : '#F3F4F6'}
               />
             </View>
+
+            {isSupabaseConfigured() && userId ? <AntecedentesPenalesCard /> : null}
 
             {isSupabaseConfigured() && userId ? <IntroVideoEditor userId={userId} /> : null}
 

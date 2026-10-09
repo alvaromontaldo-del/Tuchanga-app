@@ -4,6 +4,7 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 import { ChangaCard } from '../feed/ChangaCard';
 import { StarRating } from '../profile/StarRating';
 import { colors, radii, spacing, typography } from '../../constants/theme';
+import { AntecedentesPenalesBadge } from '../profile/AntecedentesPenalesBadge';
 import { UrgenciasBadge } from './UrgenciasBadge';
 import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { asText, isRenderableUri } from '../../utils/safeAsync';
@@ -19,6 +20,7 @@ export type WorkerResultCardModel = {
   totalJobsDone?: number;
   distanceLabel?: string;
   atiendeUrgencias?: boolean;
+  antecedentesPenales?: boolean;
 };
 
 function escapeRegExp(s: string) {
@@ -77,6 +79,7 @@ export function WorkerResultCard({
           )}
         </Text>
         {urgenciasBadgeView(worker.atiendeUrgencias) ? <UrgenciasBadge /> : null}
+        {worker.antecedentesPenales ? <AntecedentesPenalesBadge compact /> : null}
         <Text style={styles.resultSummary} numberOfLines={1}>
           {summaryParts.map((p, i) =>
             p.h ? (
