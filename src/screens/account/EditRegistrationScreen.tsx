@@ -66,6 +66,11 @@ import {
   validateNationalPhone,
 } from '../../utils/validation';
 import {
+  documentNumberIsLocked,
+  formatArgentineCuit,
+  type AccountDocumentType,
+} from '../../utils/argentineCuit';
+import {
   birthDateIsoFromDate,
   calcAgeFromBirthDate,
   dateFromBirthDateIso,
@@ -136,6 +141,8 @@ export function EditRegistrationScreen({ navigation }: Props) {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [dni, setDni] = useState('');
+  const [dniLocked, setDniLocked] = useState(false);
+  const [documentType, setDocumentType] = useState<AccountDocumentType>('dni');
   const [birthDate, setBirthDate] = useState('');
   const [birthPickerOpen, setBirthPickerOpen] = useState(false);
   const [birthPickerDraft, setBirthPickerDraft] = useState<Date>(new Date(2000, 0, 1, 12, 0, 0, 0));
@@ -198,7 +205,10 @@ export function EditRegistrationScreen({ navigation }: Props) {
   const applyProfile = useCallback((u: AuthUser) => {
     setFirstName(u.firstName?.trim() ?? '');
     setLastName(u.lastName?.trim() ?? '');
-    setDni((u.dni ?? '').trim());
+    const dniDigits = normalizeDigitsOnly(u.dni ?? '');
+    setDni(dniDigits);
+    setDniLocked(documentNumberIsLocked(dniDigits));
+    setDocumentType(u.documentType === 'cuit' ? 'cuit' : 'dni');
     setBirthDate((u.birthDate ?? '').trim());
     setAvatarUri((u.avatarUri ?? '').trim());
     setEmailDisplay(u.email.trim());
@@ -380,8 +390,10 @@ export function EditRegistrationScreen({ navigation }: Props) {
     if (!firstName.trim()) next.firstName = 'El nombre es obligatorio.';
     if (!lastName.trim()) next.lastName = 'El apellido es obligatorio.';
     const dniDigits = normalizeDigitsOnly(dni);
-    if (!dniDigits) next.dni = 'El DNI es obligatorio.';
-    else if (dniDigits.length < 7 || dniDigits.length > 9) next.dni = 'Ingresá un DNI válido.';
+    if (!dniLocked) {
+      if (!dniDigits) next.dni = 'El DNI es obligatorio.';
+      else if (dniDigits.length < 7 || dniDigits.length > 8) next.dni = 'Ingresá un DNI válido.';
+    }
     const bd = birthDate.trim();
     if (bd) {
       if (!parseBirthDateParts(bd)) next.birthDate = 'Formato esperado: AAAA-MM-DD.';
@@ -428,6 +440,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           dni: normalizeDigitsOnly(dni),
+          documentType,
           birthDate: birthDate.trim(),
           phone: phoneIntl,
           baseLocation,
@@ -458,6 +471,7 @@ export function EditRegistrationScreen({ navigation }: Props) {
             lastName: lastName.trim(),
             fullName: `${firstName.trim()} ${lastName.trim()}`.trim(),
             dni: normalizeDigitsOnly(dni),
+            documentType,
             phone: phoneIntl,
             baseLocation,
             location: savedAddress,
@@ -608,16 +622,33 @@ export function EditRegistrationScreen({ navigation }: Props) {
               </View>
             </View>
             <AppTextInput
-              label="DNI *"
-              value={dni}
-              onChangeText={(t) => {
-                setDni(normalizeDigitsOnly(t));
-                setErrors((p) => ({ ...p, dni: undefined }));
-              }}
+              label={
+                dniLocked
+                  ? documentType === 'cuit'
+                    ? 'CUIT'
+                    : 'DNI'
+                  : 'DNI *'
+              }
+              value={dniLocked && documentType === 'cuit' ? formatArgentineCuit(dni) : dni}
+              onChangeText={
+                dniLocked
+                  ? undefined
+                  : (t) => {
+                      setDni(normalizeDigitsOnly(t).slice(0, 8));
+                      setErrors((p) => ({ ...p, dni: undefined }));
+                    }
+              }
+              editable={!dniLocked}
+              style={dniLocked ? styles.lockedInput : undefined}
               keyboardType="number-pad"
+              maxLength={dniLocked && documentType === 'cuit' ? 13 : 8}
               placeholder="Ej.: 12345678"
               error={errors.dni}
+              accessibilityState={{ disabled: dniLocked }}
             />
+            {dniLocked ? (
+              <Text style={styles.lockedHint}>El documento no se puede modificar.</Text>
+            ) : null}
 
             <View style={styles.birthWrap}>
               <Text style={styles.birthLabel}>Fecha de nacimiento</Text>
@@ -1242,6 +1273,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.text,
     minHeight: 52,
+  },
+  lockedInput: {
+    color: colors.textSecondary,
+  },
+  lockedHint: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    marginTop: -8,
+    marginBottom: spacing.md,
+    marginLeft: 4,
   },
   birthError: {
     color: colors.error,

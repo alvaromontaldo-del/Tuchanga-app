@@ -42,6 +42,7 @@ export function mergeAuthUserProfile(
     lastName: pickStr(fresh.lastName, ctx.lastName),
     fullName: pickStr(fresh.fullName, ctx.fullName),
     dni: pickStr(fresh.dni, ctx.dni),
+    documentType: fresh.documentType ?? ctx.documentType,
     phone: pickStr(fresh.phone, ctx.phone),
     avatarUri: fresh.avatarUri?.trim() || ctx.avatarUri?.trim() || undefined,
     location: pickStr(fresh.location, ctx.location),

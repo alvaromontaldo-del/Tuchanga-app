@@ -7,12 +7,14 @@ import { normalizeDisplayAddress } from '../utils/formatAddress';
 import { storageOwnerFolder, userAuthDisplayName } from '../utils/storageOwnerFolder';
 import { resolveProfessionalDescription } from '../utils/professionalDescription';
 import { completedJobsFromPayload } from '../utils/workerReputation';
+import { onlyDigits, type AccountDocumentType } from '../utils/argentineCuit';
 
 /**
  * Mapeo registro (app) → Supabase `public.profiles` (vía RPC `insert_profile_with_location`):
  * firstName → p_nombre → nombre
  * lastName → p_apellido → apellido
  * dni → p_dni → dni
+ * documentType → p_document_type → document_type ('dni' | 'cuit')
  * phone → p_telefono → telefono
  * baseLocation.address → p_direccion → direccion_texto
  * baseLocation.lat/lng → p_lat / p_lng → location (POINT, SRID 4326; eje X = lng, eje Y = lat)
@@ -28,7 +30,7 @@ import { completedJobsFromPayload } from '../utils/workerReputation';
  * get_my_profile_private; apellido y ubicación exacta, de get_my_profile_identity (#120).
  */
 const PROFILE_PUBLIC_CORE =
-  'id,nombre,avatar_url,coverage_km,created_at,rating_average,review_count,total_jobs_done,professional_description' as const;
+  'id,nombre,document_type,avatar_url,coverage_km,created_at,rating_average,review_count,total_jobs_done,professional_description' as const;
 
 export type MyProfilePrivate = {
   dni: string | null;
@@ -81,6 +83,7 @@ type ProfileRow = {
   nombre?: string | null;
   apellido?: string | null;
   dni?: string | null;
+  document_type?: string | null;
   telefono?: string | null;
   direccion_texto?: string | null;
   detalles_ubicacion?: string | null;
@@ -321,6 +324,7 @@ type InsertProfileRpcBase = {
   p_lng: number;
   p_avatar_url: string;
   p_coverage_km: number | null;
+  p_document_type: AccountDocumentType;
 };
 
 function isProfileDuplicateError(err: PostgrestError): boolean {
@@ -328,6 +332,13 @@ function isProfileDuplicateError(err: PostgrestError): boolean {
   return (
     err.code === '23505' || /duplicate key|unique constraint/i.test(msg)
   );
+}
+
+function dniLockedMessage(message: string | undefined): string | null {
+  if (/dni_locked/i.test(message ?? '')) {
+    return 'El DNI no se puede modificar una vez cargado.';
+  }
+  return null;
 }
 
 function duplicateIdentityMessage(err: PostgrestError): string {
@@ -477,6 +488,8 @@ export type ProfileRegistrationUpdatePayload = {
   birthDate?: string;
   /** Referencias opcionales para ubicar el domicilio. Usá '' para limpiar. */
   locationDetails?: string;
+  /** Si se omite, el RPC full usa su default (`dni`). */
+  documentType?: AccountDocumentType;
 };
 
 async function updateProfileRegistrationRpc(
@@ -549,7 +562,7 @@ export async function updateProfileRegistrationInSupabase(
   const { error: fullErr } = await supabase.rpc('update_profile_registration_full', {
     p_nombre: payload.firstName.trim(),
     p_apellido: payload.lastName.trim(),
-    p_dni: payload.dni.trim(),
+    p_dni: onlyDigits(payload.dni),
     p_telefono: payload.phone.trim(),
     p_direccion: normalizeDisplayAddress(payload.baseLocation.address),
     p_lat: lat,
@@ -559,6 +572,7 @@ export async function updateProfileRegistrationInSupabase(
     p_birth_date: touchBirth ? (payload.birthDate?.trim() ?? '') : null,
     p_touch_detalles: touchDetalles,
     p_touch_birth_date: touchBirth,
+    p_document_type: payload.documentType === 'cuit' ? 'cuit' : 'dni',
   });
 
   const fullMissing =
@@ -566,6 +580,8 @@ export async function updateProfileRegistrationInSupabase(
     /could not find the function|pgrst202|does not exist|404/i.test(fullErr.message ?? '');
 
   if (fullErr && !fullMissing) {
+    const locked = dniLockedMessage(fullErr.message);
+    if (locked) throw new Error(locked);
     throw new Error(`No se pudo guardar el perfil (${fullErr.message}).`);
   }
 
@@ -574,7 +590,7 @@ export async function updateProfileRegistrationInSupabase(
     const base: UpdateProfileRpcBase = {
       p_nombre: payload.firstName.trim(),
       p_apellido: payload.lastName.trim(),
-      p_dni: payload.dni.trim(),
+      p_dni: onlyDigits(payload.dni),
       p_telefono: payload.phone.trim(),
       p_direccion: normalizeDisplayAddress(payload.baseLocation.address),
       p_lat: lat,
@@ -593,6 +609,8 @@ export async function updateProfileRegistrationInSupabase(
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      const locked = dniLockedMessage(msg);
+      if (locked) throw new Error(locked);
       throw new Error(`No se pudo guardar el perfil (${msg}).`);
     }
 
@@ -822,6 +840,7 @@ export async function fetchAuthUserFromSupabase(user: User): Promise<AuthUser> {
     lastName: apellido.trim() || undefined,
     fullName: `${nombre} ${apellido}`.trim() || undefined,
     dni: profile.dni?.trim() || undefined,
+    documentType: profile.document_type === 'cuit' ? 'cuit' : 'dni',
     avatarUri: profile.avatar_url ?? undefined,
     phone: profile.telefono?.trim() || undefined,
     baseLocation: {
@@ -884,13 +903,14 @@ export async function persistSignUpToSupabase(
     await updateProfileRegistrationInSupabase({
       firstName: payload.firstName,
       lastName: payload.lastName,
-      dni: payload.dni,
+      dni: onlyDigits(payload.dni),
       phone: payload.phone,
       baseLocation: payload.baseLocation,
       avatarUri: payload.avatarUri,
       professionalDescription: payload.professionalDescription,
       birthDate: payload.birthDate?.trim() ?? '',
       locationDetails: payload.locationDetails?.trim() ?? '',
+      documentType: payload.documentType === 'cuit' ? 'cuit' : 'dni',
     });
 
     if (payload.offerServices && payload.trades?.length) {
@@ -906,13 +926,14 @@ export async function persistSignUpToSupabase(
   const rpcBase: InsertProfileRpcBase = {
     p_nombre: payload.firstName.trim(),
     p_apellido: payload.lastName.trim(),
-    p_dni: payload.dni.trim(),
+    p_dni: onlyDigits(payload.dni),
     p_telefono: payload.phone.trim(),
     p_direccion: normalizeDisplayAddress(payload.baseLocation.address),
     p_lat: lat,
     p_lng: lng,
     p_avatar_url: '',
     p_coverage_km: payload.offerServices ? Math.floor(Number(payload.coverageKm) || 0) : null,
+    p_document_type: payload.documentType === 'cuit' ? 'cuit' : 'dni',
   };
 
   try {
@@ -924,13 +945,14 @@ export async function persistSignUpToSupabase(
       await updateProfileRegistrationInSupabase({
         firstName: payload.firstName,
         lastName: payload.lastName,
-        dni: payload.dni,
+        dni: onlyDigits(payload.dni),
         phone: payload.phone,
         baseLocation: payload.baseLocation,
         avatarUri: payload.avatarUri,
         professionalDescription: payload.professionalDescription,
         birthDate: payload.birthDate?.trim() ?? '',
         locationDetails: payload.locationDetails?.trim() ?? '',
+        documentType: payload.documentType === 'cuit' ? 'cuit' : 'dni',
       });
       if (payload.offerServices && payload.trades?.length) {
         await persistSignUpTrades(supabase, folder, userId, payload);

@@ -95,6 +95,11 @@ import {
 import type { StoreRubro } from '../../types/materials';
 import { getHighAccuracyPosition } from '../../utils/deviceGeolocation';
 import { normalizeLocalImageUri } from '../../utils/normalizeLocalImage';
+import {
+  formatArgentineCuit,
+  isValidArgentineCuit,
+  type AccountDocumentType,
+} from '../../utils/argentineCuit';
 
 type Props = AuthStackScreenProps<'Register'>;
 
@@ -183,6 +188,7 @@ export function RegisterScreen({ navigation, route }: Props) {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [dni, setDni] = useState('');
+  const [documentType, setDocumentType] = useState<AccountDocumentType>('dni');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [birthDate, setBirthDate] = useState('');
   const [birthPickerOpen, setBirthPickerOpen] = useState(false);
@@ -326,13 +332,28 @@ export function RegisterScreen({ navigation, route }: Props) {
     }
   }
 
+  function documentTakenMessage() {
+    return documentType === 'cuit' ? 'Este CUIT ya está registrado.' : MSG_IDENTITY_FIELD.dni;
+  }
+
   function blurDni() {
     const dniDigits = normalizeDigitsOnly(dni);
-    if (!dniDigits) {
+    if (documentType === 'cuit') {
+      if (!dniDigits) {
+        setErrors((p) => ({ ...p, dni: 'El CUIT es obligatorio.' }));
+        return;
+      }
+      if (!isValidArgentineCuit(dniDigits)) {
+        setErrors((p) => ({
+          ...p,
+          dni: 'El CUIT debe tener 11 dígitos y un dígito verificador válido.',
+        }));
+        return;
+      }
+    } else if (!dniDigits) {
       setErrors((p) => ({ ...p, dni: 'El DNI es obligatorio.' }));
       return;
-    }
-    if (dniDigits.length < 7 || dniDigits.length > 8) {
+    } else if (dniDigits.length < 7 || dniDigits.length > 8) {
       setErrors((p) => ({ ...p, dni: 'El DNI debe tener 7 u 8 dígitos.' }));
       return;
     }
@@ -340,7 +361,7 @@ export function RegisterScreen({ navigation, route }: Props) {
     void (async () => {
       const conflict = await checkIdentityConflicts({ dni: dniDigits });
       if (conflict?.field === 'dni') {
-        setErrors((p) => ({ ...p, dni: MSG_IDENTITY_FIELD.dni }));
+        setErrors((p) => ({ ...p, dni: documentTakenMessage() }));
       }
     })();
   }
@@ -691,7 +712,12 @@ export function RegisterScreen({ navigation, route }: Props) {
     if (!lastName.trim()) next.lastName = 'El apellido es obligatorio.';
 
     const dniDigits = normalizeDigitsOnly(dni);
-    if (!dniDigits) next.dni = 'El DNI es obligatorio.';
+    if (documentType === 'cuit') {
+      if (!dniDigits) next.dni = 'El CUIT es obligatorio.';
+      else if (!isValidArgentineCuit(dniDigits)) {
+        next.dni = 'El CUIT debe tener 11 dígitos y un dígito verificador válido.';
+      }
+    } else if (!dniDigits) next.dni = 'El DNI es obligatorio.';
     else if (dniDigits.length < 7 || dniDigits.length > 8) {
       next.dni = 'El DNI debe tener 7 u 8 dígitos.';
     }
@@ -716,7 +742,7 @@ export function RegisterScreen({ navigation, route }: Props) {
     else if (errors.phone === MSG_IDENTITY_FIELD.phone) next.phone = MSG_IDENTITY_FIELD.phone;
 
     const dniDigitsCheck = normalizeDigitsOnly(dni);
-    if (dniDigitsCheck && errors.dni === MSG_IDENTITY_FIELD.dni) next.dni = MSG_IDENTITY_FIELD.dni;
+    if (dniDigitsCheck && errors.dni === documentTakenMessage()) next.dni = documentTakenMessage();
 
     const pwdErr = getPasswordRegistrationError(password);
     if (pwdErr) next.password = pwdErr;
@@ -836,6 +862,7 @@ export function RegisterScreen({ navigation, route }: Props) {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         dni: normalizeDigitsOnly(dni),
+        documentType: documentType === 'cuit' ? 'cuit' : 'dni',
         avatarUri,
         birthDate: birthDate.trim(),
         email: email.trim(),
@@ -862,10 +889,16 @@ export function RegisterScreen({ navigation, route }: Props) {
           if (field) {
             setErrors((p) => ({
               ...p,
-              [field]: MSG_IDENTITY_FIELD[field],
+              [field]: field === 'dni' ? documentTakenMessage() : MSG_IDENTITY_FIELD[field],
             }));
           }
-          toast.error(result.message, 'No se pudo crear la cuenta', { durationMs: 5500 });
+          toast.error(
+            documentType === 'cuit' && result.field === 'dni'
+              ? 'No se pudo crear la cuenta: este CUIT ya está registrado.'
+              : result.message,
+            'No se pudo crear la cuenta',
+            { durationMs: 5500 },
+          );
           return;
         }
         toast.error(result.message, 'No se pudo crear la cuenta', { durationMs: 4500 });
@@ -1138,17 +1171,43 @@ export function RegisterScreen({ navigation, route }: Props) {
                 />
               </View>
             </View>
+            <Text style={styles.birthLabel}>Documento *</Text>
+            <View style={styles.docTypeRow}>
+              {(['dni', 'cuit'] as const).map((option) => {
+                const selected = documentType === option;
+                return (
+                  <Pressable
+                    key={option}
+                    onPress={() => {
+                      if (option === documentType) return;
+                      setDocumentType(option);
+                      setDni('');
+                      setErrors((p) => ({ ...p, dni: undefined }));
+                    }}
+                    style={[styles.rubroChip, selected && styles.rubroChipOn]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={option === 'dni' ? 'Registrar con DNI' : 'Registrar con CUIT'}
+                  >
+                    <Text style={[styles.rubroChipText, selected && styles.rubroChipTextOn]}>
+                      {option === 'dni' ? 'DNI' : 'CUIT'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
             <AppTextInput
-              label="DNI *"
-              value={dni}
+              label={documentType === 'cuit' ? 'CUIT *' : 'DNI *'}
+              value={documentType === 'cuit' ? formatArgentineCuit(dni) : dni}
               onChangeText={(t) => {
-                setDni(normalizeDigitsOnly(t).slice(0, 8));
+                const digits = normalizeDigitsOnly(t).slice(0, documentType === 'cuit' ? 11 : 8);
+                setDni(digits);
                 setErrors((p) => ({ ...p, dni: undefined }));
               }}
               onBlur={blurDni}
               keyboardType="number-pad"
-              maxLength={8}
-              placeholder="Ej.: 12345678"
+              maxLength={documentType === 'cuit' ? 13 : 8}
+              placeholder={documentType === 'cuit' ? '20-12345678-6' : 'Ej.: 12345678'}
               error={errors.dni}
             />
             <View style={styles.birthWrap}>
@@ -2102,6 +2161,11 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 4,
     marginBottom: 4,
+  },
+  docTypeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: spacing.sm,
   },
   rubroChip: {
     paddingHorizontal: 12,
