@@ -21,7 +21,7 @@ import { completarOrdenMaterialConPin, formatMoneyAr } from '../../services/clie
 import { listKey } from '../../utils/safeAsync';
 import { storeCanReceiveQuotes, storeStatusLabel } from '../../services/storeRegistrationSupabase';
 import type { StoreBoardCard, StoreBoardColumn } from '../../types/materials';
-import { normalizeOrderCodeInput } from '../../utils/orderCode';
+import { normalizeOrderCodeInput, PIN_LENGTH } from '../../utils/orderCode';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 type Props = NativeStackScreenProps<CommerceStackParamList, 'StoreMaterialRequests'>;
@@ -544,12 +544,15 @@ function KanbanCard({
           <Text style={styles.closeLabel}>PIN del cliente</Text>
           <TextInput
             value={pin}
-            onChangeText={(t) => onChangePin(t.replace(/\D/g, '').slice(0, 4))}
-            placeholder="••••"
+            onChangeText={(t) => onChangePin(t.replace(/\D/g, '').slice(0, PIN_LENGTH))}
+            placeholder="0000"
             placeholderTextColor={colors.textSecondary}
             keyboardType="number-pad"
-            secureTextEntry
-            maxLength={4}
+            maxLength={PIN_LENGTH}
+            autoCorrect={false}
+            autoComplete="off"
+            textContentType="none"
+            importantForAutofill="no"
             style={styles.pinInput}
           />
           <Pressable
@@ -779,12 +782,14 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radii.input,
     backgroundColor: colors.background,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    fontSize: 16,
-    fontWeight: '700',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    fontSize: 22,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
     color: colors.text,
-    letterSpacing: 4,
+    letterSpacing: 8,
+    textAlign: 'center',
   },
   closeBtn: {
     marginTop: 2,
