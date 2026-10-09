@@ -6,7 +6,7 @@ import { useAppToast } from '../../components/toast/toast';
 import { colors, radii, spacing } from '../../constants/theme';
 import { completarOrdenMaterialConPin } from '../../services/clientQuotesSupabase';
 import type { CommerceStackParamList } from '../../navigation/mainTypes';
-import { normalizeOrderCodeInput } from '../../utils/orderCode';
+import { normalizeOrderCodeInput, PIN_LENGTH } from '../../utils/orderCode';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 type Props = NativeStackScreenProps<CommerceStackParamList, 'StoreCloseOrder'>;
@@ -59,13 +59,16 @@ export function StoreCloseOrderScreen({ navigation, route }: Props) {
         <Text style={styles.label}>PIN</Text>
         <TextInput
           value={pin}
-          onChangeText={(t) => setPin(t.replace(/\D/g, '').slice(0, 4))}
-          placeholder="PIN"
+          onChangeText={(t) => setPin(t.replace(/\D/g, '').slice(0, PIN_LENGTH))}
+          placeholder="0000"
           placeholderTextColor={colors.textSecondary}
           keyboardType="number-pad"
-          secureTextEntry
-          style={styles.input}
-          maxLength={4}
+          maxLength={PIN_LENGTH}
+          autoCorrect={false}
+          autoComplete="off"
+          textContentType="none"
+          importantForAutofill="no"
+          style={styles.pinInput}
         />
 
         <AppButton title="Confirmar entrega / cierre" onPress={() => void onSubmit()} loading={loading} />
@@ -97,5 +100,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: colors.text,
+  },
+  pinInput: {
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radii.input,
+    backgroundColor: colors.background,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    fontSize: 22,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+    color: colors.text,
+    letterSpacing: 8,
+    textAlign: 'center',
   },
 });

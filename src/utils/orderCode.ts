@@ -9,8 +9,11 @@ export function formatOrderCodeDisplay(code: string | null | undefined): string 
   return digits || '—';
 }
 
+/** Dígitos del PIN de retiro de materiales (y del PIN de trabajo). */
+export const PIN_LENGTH = 4;
+
 export function normalizePinInput(raw: string): string {
-  const digits = String(raw ?? '').replace(/\D/g, '').slice(0, 4);
+  const digits = String(raw ?? '').replace(/\D/g, '').slice(0, PIN_LENGTH);
   if (!digits) return '';
-  return digits.padStart(4, '0');
+  return digits.padStart(PIN_LENGTH, '0');
 }
