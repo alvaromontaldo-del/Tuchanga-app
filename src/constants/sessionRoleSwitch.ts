@@ -36,11 +36,12 @@ export function availableSessionRoles(input: {
 
 /**
  * Un toque, sin «¿Cómo querés ingresar?».
- * Con local habilitado el cambio es entre particular y comercio:
+ * El botón solo existe si la cuenta tiene comercio habilitado (`stores.user_id`
+ * en trial, active, unpaid o paused). El cambio es entre particular y comercio:
  * - comercio → profesional si la cuenta es trabajador, si no cliente;
  * - profesional o cliente → comercio.
- * Sin local habilitado se mantiene profesional ↔ cliente.
- * Un solo rol: null (no hay botón).
+ * Cliente y profesional sin comercio no se alternan: null (no hay botón).
+ * Un solo rol: null.
  */
 export function nextSessionRoleOnSwitch(
   current: SessionRole | null,
@@ -50,12 +51,7 @@ export function nextSessionRoleOnSwitch(
   if (ordered.length < 2) return null;
 
   const hasCommerce = ordered.includes('commerce');
-  if (!hasCommerce) {
-    if (current && ordered.includes(current)) {
-      return ordered.find((role) => role !== current) ?? null;
-    }
-    return ordered[0] ?? null;
-  }
+  if (!hasCommerce) return null;
 
   if (current === 'commerce') {
     return ordered.includes('professional') ? 'professional' : 'client';
@@ -69,7 +65,7 @@ export function nextSessionRoleOnSwitch(
 
 /**
  * Con comercio el botón dice a dónde va (comercio o particular).
- * Sin comercio sigue el texto de hoy: «Cambiar de rol» y el destino concreto.
+ * Sin comercio el botón no se muestra; el texto de respaldo no llega a la UI.
  */
 export function sessionRoleSwitchButtonCopy(
   next: SessionRole,
