@@ -113,7 +113,10 @@ describe('antecedentes penales', () => {
       resolve(ROOT, 'src/components/profile/AntecedentesPenalesCard.tsx'),
       'utf8',
     );
-    expect(card).toContain(ANTECEDENTES_GOB_URL);
+    expect(ANTECEDENTES_GOB_URL).toBe(
+      'https://www.argentina.gob.ar/justicia/reincidencia/antecedentespenales',
+    );
+    expect(card).toContain('{ANTECEDENTES_GOB_URL}');
     expect(card).toContain('más trabajos');
     expect(card).toContain('Antecedentes penales');
 

@@ -62,7 +62,7 @@ export async function compressAntecedentesImage(uri: string): Promise<Uint8Array
   let working = meta.uri;
   let width = Math.max(1, Math.floor(Number(meta.width) || 1));
   let height = Math.max(1, Math.floor(Number(meta.height) || 1));
-  let bytes = new Uint8Array();
+  let bytes: Uint8Array<ArrayBufferLike> = new Uint8Array();
 
   const edges = [ANTECEDENTES_IMAGE_MAX_EDGE_PX, ANTECEDENTES_IMAGE_FALLBACK_EDGE_PX];
   for (const edge of edges) {
