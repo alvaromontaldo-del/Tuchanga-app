@@ -180,6 +180,54 @@ BEGIN
 END;
 $$;
 
+CREATE TABLE public.profiles (
+  id uuid PRIMARY KEY,
+  telefono text,
+  direccion_texto text,
+  direccion_completa text
+);
+
+CREATE TABLE public.material_requests (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id uuid,
+  client_id uuid,
+  professional_id uuid,
+  title text
+);
+
+CREATE TABLE public.quotes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id uuid,
+  notes text
+);
+
+CREATE TABLE public.quote_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  quote_id uuid,
+  item_note text,
+  alternative_description text,
+  variant_label text
+);
+
+CREATE TABLE public.request_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id uuid,
+  description text
+);
+
+CREATE TABLE public.contrataciones (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id uuid,
+  service_detail text,
+  recotizacion_fundamentos text
+);
+
+CREATE TABLE public.recotizaciones (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contratacion_id uuid,
+  fundamentos text
+);
+
 GRANT USAGE ON SCHEMA public TO authenticated;
 GRANT SELECT, INSERT ON public.messages TO authenticated;
 GRANT SELECT ON public.conversations TO authenticated;
@@ -407,5 +455,160 @@ describe.skipIf(!postgresAvailable())('moderación de chat y bucket privado', ()
     ).toBe(`${IMAGE_PATH}|chat`);
 
     expect(psql(`SELECT public FROM storage.buckets WHERE id = 'chat';`)).toBe('f');
+  });
+
+  it('enmascara los cinco mensajes que se colaron', () => {
+    const rows = psql(`
+      SELECT (public.redact_offplatform_contact('Te paso mi dirección')->>'text')
+        || '|' || (public.redact_offplatform_contact('Pellegrini 570, piso 2')->>'text')
+        || '|' || (public.redact_offplatform_contact('La ubicación te la paso por Whatsapp pásame tu telefono')->>'text')
+        || '|' || (public.redact_offplatform_contact('3364312302')->>'text')
+        || '|' || (public.redact_offplatform_contact('11 cero 2 veinte nueve 67')->>'text')
+        || '|' || (public.redact_offplatform_contact('Tres tres 6 y van más 4 trentaiuno 23 02')->>'text')
+        || '|' || (public.redact_offplatform_contact('veinte mil')->>'text')
+        || '|' || (public.redact_offplatform_contact('25 lucas')->>'text')
+        || '|' || (public.redact_offplatform_contact('las 15:30')->>'text')
+        || '|' || (public.redact_offplatform_contact('¿me pasás el teléfono?')->>'text')
+        || '|' || (public.redact_offplatform_contact('hablamos por whatsapp en la obra')->>'text');
+    `);
+    expect(rows).toBe(
+      'Te paso mi dirección|•••, •••|La ubicación te la paso ••• •••|•••|•••|•••|veinte mil|25 lucas|las 15:30|¿me pasás el teléfono?|hablamos por whatsapp en la obra',
+    );
+  });
+
+  it('compara contra el perfil cargado y no loguea el dato', () => {
+    const req = '44444444-4444-4444-8444-444444444444';
+    const quote = '55555555-5555-4555-8555-555555555555';
+    psql(`
+      INSERT INTO public.profiles (id, telefono, direccion_texto, direccion_completa)
+      VALUES
+        ('${CLIENT}', '5493364312302', 'Pellegrini 570 piso 2', 'Pellegrini 570, Rosario'),
+        ('${WORKER}', '5491112345678', NULL, NULL);
+      INSERT INTO public.material_requests (id, conversation_id, client_id, professional_id, title)
+      VALUES ('${req}', '${CONV}', '${CLIENT}', '${WORKER}', 'cemento');
+    `);
+
+    expect(
+      psql(`
+        SELECT public.redact_offplatform_contextual(
+          '$300.000', 'probe_fp', NULL, 'body', '${CLIENT}', '${CONV}', false
+        );
+      `),
+    ).toBe('$300.000');
+    expect(
+      psql(`
+        SELECT public.redact_offplatform_contextual(
+          'veinte mil', 'probe_fp', NULL, 'body', '${CLIENT}', '${CONV}', false
+        );
+      `),
+    ).toBe('veinte mil');
+    expect(
+      psql(`
+        SELECT public.redact_offplatform_contextual(
+          '25 lucas', 'probe_fp', NULL, 'body', '${CLIENT}', '${CONV}', false
+        );
+      `),
+    ).toBe('25 lucas');
+    expect(
+      psql(`
+        SELECT public.redact_offplatform_contextual(
+          'las 15:30', 'probe_fp', NULL, 'body', '${CLIENT}', '${CONV}', false
+        );
+      `),
+    ).toBe('las 15:30');
+    expect(
+      psql(`
+        SELECT public.redact_offplatform_contextual(
+          'piso 2', 'probe_fp', NULL, 'body', '${CLIENT}', '${CONV}', false
+        );
+      `),
+    ).toBe('•••');
+    expect(
+      psql(`
+        SELECT kinds::text
+        FROM public.offplatform_contact_detections
+        WHERE source = 'probe_fp'
+        ORDER BY created_at DESC
+        LIMIT 1;
+      `),
+    ).toBe('{direccion}');
+
+    expect(
+      asRole(`
+        INSERT INTO public.messages (conversation_id, sender_id, body, type)
+        VALUES ('${CONV}', '${CLIENT}', 'Pellegrini', 'text')
+        RETURNING body;
+      `),
+    ).toBe('Pellegrini');
+    expect(
+      asRole(`
+        INSERT INTO public.messages (conversation_id, sender_id, body, type)
+        VALUES ('${CONV}', '${CLIENT}', '570', 'text')
+        RETURNING body;
+      `),
+    ).toBe('•••');
+    expect(
+      psql(`
+        SELECT (kinds @> ARRAY['match_perfil']::text[])::text
+        FROM public.offplatform_contact_detections
+        WHERE field_name = 'body'
+        ORDER BY created_at DESC
+        LIMIT 1;
+      `),
+    ).toBe('true');
+
+    const asWorker = (sql: string) =>
+      psql(`
+        BEGIN;
+        SELECT set_config('request.jwt.claim.sub', '${WORKER}', true);
+        SET LOCAL ROLE authenticated;
+        ${sql}
+        COMMIT;
+      `);
+    expect(
+      asWorker(`
+        INSERT INTO public.messages (conversation_id, sender_id, body, type)
+        VALUES ('${CONV}', '${WORKER}', '1234', 'text')
+        RETURNING body;
+      `),
+    ).toBe('1234');
+    expect(
+      asWorker(`
+        INSERT INTO public.messages (conversation_id, sender_id, body, type)
+        VALUES ('${CONV}', '${WORKER}', '5678', 'text')
+        RETURNING body;
+      `),
+    ).toBe('•••');
+
+    expect(
+      psql(`
+        INSERT INTO public.quotes (id, request_id, notes)
+        VALUES ('${quote}', '${req}', 'Pellegrini 570')
+        RETURNING notes;
+      `),
+    ).toBe('•••');
+    expect(
+      psql(`
+        SELECT (kinds @> ARRAY['match_perfil']::text[])::text
+        FROM public.offplatform_contact_detections
+        WHERE source = 'quote' AND field_name = 'notes'
+        ORDER BY created_at DESC
+        LIMIT 1;
+      `),
+    ).toBe('true');
+
+    expect(
+      psql(`
+        SELECT count(*)::text
+        FROM public.offplatform_contact_detections
+        WHERE source = 'probe_fp' AND kinds @> ARRAY['match_perfil']::text[];
+      `),
+    ).toBe('0');
+    expect(
+      psqlError(`SET ROLE anon; SELECT public._offplatform_phone_tails('5493364312302');`),
+    ).toMatch(/permission denied/i);
+    expect(
+      psqlError(`SET ROLE authenticated; SELECT public.redact_offplatform_contextual('570', 'x', NULL, 'body', '${CLIENT}', '${CONV}', true);`),
+    ).toMatch(/permission denied/i);
   });
 });

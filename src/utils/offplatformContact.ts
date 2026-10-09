@@ -5,6 +5,9 @@
  * «whatsapp», «mail», «calle»…). Se detecta el dato y se reemplaza por «•••».
  * El envío sigue. La misma regla vive en el cliente y en
  * public.redact_offplatform_contact (SQL).
+ *
+ * La comparación contra el teléfono y la dirección cargados en el perfil
+ * (match_perfil) vive solo en el servidor. Este archivo no la hace.
  */
 
 export const OFFPLATFORM_REDACTION = '•••';
@@ -20,7 +23,8 @@ export type OffplatformKind =
   | 'alias'
   | 'usuario'
   | 'codigo'
-  | 'direccion';
+  | 'direccion'
+  | 'canal';
 
 export type OffplatformResult = {
   text: string;
@@ -84,13 +88,82 @@ const NUM_WORD_DIGITS: Record<string, string> = {
   veintiocho: '28',
   veintinueve: '29',
   treinta: '30',
+  trenta: '30',
   cuarenta: '40',
   cincuenta: '50',
   sesenta: '60',
   setenta: '70',
   ochenta: '80',
   noventa: '90',
+  sero: '0',
+  cuato: '4',
+  sinco: '5',
+  sies: '6',
+  nuebe: '9',
+  beinte: '20',
 };
+
+const DECADE_BASE: Record<string, number> = {
+  veinte: 20,
+  beinte: 20,
+  treinta: 30,
+  trenta: 30,
+  cuarenta: 40,
+  cincuenta: 50,
+  sesenta: 60,
+  setenta: 70,
+  ochenta: 80,
+  noventa: 90,
+};
+
+const UNIT_VALUE: Record<string, number> = {
+  uno: 1,
+  una: 1,
+  un: 1,
+  dos: 2,
+  tres: 3,
+  cuatro: 4,
+  cuato: 4,
+  cinco: 5,
+  sinco: 5,
+  seis: 6,
+  sies: 6,
+  siete: 7,
+  ocho: 8,
+  nueve: 9,
+  nuebe: 9,
+};
+
+/** «trentaiuno», «treinta y uno» escrito pegado, «veintiuno». */
+function fusedDecadeDigits(word: string): string | null {
+  const veinti = /^(?:veinti|beinti)(uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)$/.exec(word);
+  if (veinti) {
+    const unit = UNIT_VALUE[veinti[1] ?? ''];
+    if (unit != null) return String(20 + unit);
+  }
+  const fused =
+    /^(trenta|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|beinte|veinte)(?:i|y)(uno|un|dos|tres|cuatro|cuato|cinco|sinco|seis|sies|siete|ocho|nueve|nuebe)$/.exec(
+      word,
+    );
+  if (!fused) return null;
+  const base = DECADE_BASE[fused[1] ?? ''];
+  const unit = UNIT_VALUE[fused[2] ?? ''];
+  if (base == null || unit == null) return null;
+  return String(base + unit);
+}
+
+function tokenDigits(word: string): string | null {
+  const fused = fusedDecadeDigits(word);
+  if (fused) return fused;
+  const mapped = NUM_WORD_DIGITS[word];
+  if (mapped) return mapped;
+  if (/^\d{1,4}$/.test(word)) return word;
+  return null;
+}
+
+function spokenNumber(word: string): boolean {
+  return fusedDecadeDigits(word) != null || NUM_WORD_DIGITS[word] != null;
+}
 
 const UNIT_WORDS = new Set([
   'mm',
@@ -143,9 +216,13 @@ const UNIT_WORDS = new Set([
   'cano',
   'canos',
   'mil',
+  'miles',
   'millones',
+  'millon',
   'peso',
   'pesos',
+  'lucas',
+  'luca',
   'ars',
   'hs',
   'hora',
@@ -302,7 +379,8 @@ const IGNORE_RES = [
   /\$\s*\d{1,3}(?:[.\s]\d{3})+(?:[.,]\d{1,2})?/g,
   /\$\s*\d+(?:[.,]\d{1,2})?/g,
   /\b\d{1,3}(?:\.\d{3})+(?:[.,]\d{1,2})?\b/g,
-  /\b\d+(?:[.,]\d+)?\s*(?:mil|millones|pesos|peso|ars)\b/g,
+  /\b\d+(?:[.,]\d+)?\s*(?:mil|millones|pesos|peso|ars|lucas|luca)\b/g,
+  /\b(?:cero|sero|uno|una|dos|tres|cuatro|cuato|cinco|sinco|seis|sies|siete|ocho|nueve|nuebe|diez|once|doce|trece|catorce|quince|veinte|beinte|treinta|trenta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)\s+(?:mil|lucas|luca|pesos|peso)\b/g,
   /\b\d+(?:[.,]\d+)?\s*[x×]\s*\d+(?:[.,]\d+)?(?:\s*(?:m|mm|cm|mts?|metros?|m2))?/g,
   /\b\d+(?:[.,]\d+)?\s*(?:mm|cm|mts|mt|metros|metro|kg|kgs|kilos|kilo|grs?|gramos|lts|litros|litro|pulg|unidades|unidad|bolsas|bolsa|cajones|cajon|cajas|caja|chapas|chapa|baldosas|baldosa|ladrillos|ladrillo|rollos|rollo|varillas|varilla|tiras|tira|placas|placa|tubos|tubo|canos|cano)\b/g,
   /\b\d{1,2}:\d{2}\b/g,
@@ -364,25 +442,62 @@ function collectDigitPhones(folded: string, spans: Span[], ignored: Span[]) {
   }
 }
 
+const PHONE_FILLERS = new Set([
+  'y',
+  'e',
+  'o',
+  'van',
+  'mas',
+  'que',
+  'eh',
+  'va',
+  'hay',
+  'son',
+  'es',
+  'el',
+  'la',
+  'los',
+  'las',
+  'de',
+  'del',
+  'al',
+  'por',
+  'con',
+]);
+
+const AMOUNT_BREAK = new Set([
+  'mil',
+  'miles',
+  'millones',
+  'millon',
+  'peso',
+  'pesos',
+  'lucas',
+  'luca',
+  'ars',
+]);
+
+function softGap(folded: string, prevEnd: number, nextStart: number): boolean {
+  return /^[\s,]*$/.test(folded.slice(prevEnd, nextStart));
+}
+
 function collectWordPhones(folded: string, spans: Span[], ignored: Span[]) {
   const tokenRe = /\b([a-z]+|\d{1,4})\b/g;
   const tokens: { word: string; start: number; end: number }[] = [];
   let match: RegExpExecArray | null;
   while ((match = tokenRe.exec(folded))) {
-    tokens.push({
-      word: match[1] ?? '',
-      start: match.index,
-      end: match.index + (match[1]?.length ?? 0),
-    });
+    const word = match[1] ?? '';
+    const start = match.index;
+    const end = match.index + word.length;
+    const span = { start, end, kind: 'ignore' as const };
+    if (overlapsAny(span, ignored)) continue;
+    tokens.push({ word, start, end });
   }
 
   let i = 0;
   while (i < tokens.length) {
     const token = tokens[i];
-    if (!token) break;
-    const contributes =
-      NUM_WORD_DIGITS[token.word] != null || /^\d{1,4}$/.test(token.word);
-    if (!contributes) {
+    if (!token || tokenDigits(token.word) == null) {
       i += 1;
       continue;
     }
@@ -390,37 +505,67 @@ function collectWordPhones(folded: string, spans: Span[], ignored: Span[]) {
     let digits = '';
     let words = 0;
     let sawWord = false;
+    let aborted = false;
+    let prevEnd = token.start;
     while (j < tokens.length) {
       const current = tokens[j];
       if (!current) break;
-      if (current.word === 'y' && words > 0) {
-        const next = tokens[j + 1];
-        if (next && (NUM_WORD_DIGITS[next.word] != null || /^\d{1,4}$/.test(next.word))) {
-          j += 1;
-          continue;
-        }
+      if (words > 0 && !softGap(folded, prevEnd, current.start)) break;
+      if (words > 0 && AMOUNT_BREAK.has(current.word)) {
+        aborted = true;
         break;
       }
-      if (UNIT_WORDS.has(current.word) && !NUM_WORD_DIGITS[current.word]) break;
-      const piece = NUM_WORD_DIGITS[current.word];
-      if (piece) {
-        digits += piece;
+      const decade = DECADE_BASE[current.word];
+      const joiner = tokens[j + 1];
+      const unitTok = tokens[j + 2];
+      if (
+        decade != null &&
+        joiner?.word === 'y' &&
+        unitTok &&
+        UNIT_VALUE[unitTok.word] != null &&
+        softGap(folded, current.end, joiner.start) &&
+        softGap(folded, joiner.end, unitTok.start)
+      ) {
+        digits += String(decade + (UNIT_VALUE[unitTok.word] ?? 0));
         sawWord = true;
         words += 1;
+        prevEnd = unitTok.end;
+        j += 3;
+        continue;
+      }
+      const piece = tokenDigits(current.word);
+      if (piece) {
+        digits += piece;
+        if (spokenNumber(current.word)) sawWord = true;
+        words += 1;
+        prevEnd = current.end;
         j += 1;
         continue;
       }
-      if (/^\d{1,4}$/.test(current.word)) {
-        digits += current.word;
-        words += 1;
-        j += 1;
-        continue;
+      if (words > 0 && PHONE_FILLERS.has(current.word)) {
+        let k = j;
+        let fillers = 0;
+        let end = prevEnd;
+        while (k < tokens.length && fillers < 3 && PHONE_FILLERS.has(tokens[k]?.word ?? '')) {
+          const filler = tokens[k];
+          if (!filler || !softGap(folded, end, filler.start)) break;
+          end = filler.end;
+          k += 1;
+          fillers += 1;
+        }
+        const next = tokens[k];
+        if (fillers > 0 && next && tokenDigits(next.word) != null && softGap(folded, end, next.start)) {
+          prevEnd = end;
+          j = k;
+          continue;
+        }
       }
       break;
     }
     const first = tokens[i];
     const last = tokens[j - 1];
     if (
+      !aborted &&
       first &&
       last &&
       sawWord &&
@@ -431,7 +576,49 @@ function collectWordPhones(folded: string, spans: Span[], ignored: Span[]) {
       const span: Span = { start: first.start, end: last.end, kind: 'telefono' };
       if (!overlapsAny(span, ignored) && !overlapsAny(span, spans)) spans.push(span);
     }
-    i = Math.max(j, i + 1);
+    i = aborted ? j + 1 : Math.max(j, i + 1);
+  }
+}
+
+const PASS_VERBS =
+  'pasame|pasar|pasamos|paso|mandame|agregame|escribime|anotame|tirame|manda|agrega|pasa';
+const OFF_CHANNELS = 'whatsapp|wsp|wp|instagram|insta|facebook|telegram';
+
+function collectOffplatformIntent(folded: string, spans: Span[], ignored: Span[]) {
+  const verbRe = new RegExp(`\\b(?:${PASS_VERBS})\\b`);
+  const channelRe = new RegExp(`\\b(?:por|al)\\s+(?:${OFF_CHANNELS})\\b`, 'g');
+  let match: RegExpExecArray | null;
+  while ((match = channelRe.exec(folded))) {
+    const before = folded.slice(Math.max(0, match.index - 60), match.index);
+    if (!verbRe.test(before)) continue;
+    const span: Span = {
+      start: match.index,
+      end: match.index + match[0].length,
+      kind: 'canal',
+    };
+    if (!overlapsAny(span, ignored) && !overlapsAny(span, spans)) spans.push(span);
+  }
+
+  const imperativeRe =
+    /\b(?:pasame|mandame|agregame|escribime|anotame|tirame|manda|agrega|pasa)\s+(?:(?:tu|el|la|un|una|mi|su)\s+)?(?:telefono|telefonos|celular|celu|numero|nro|whatsapp|wsp|wp|instagram|insta)\b/g;
+  while ((match = imperativeRe.exec(folded))) {
+    const span: Span = {
+      start: match.index,
+      end: match.index + match[0].length,
+      kind: 'canal',
+    };
+    if (!overlapsAny(span, ignored) && !overlapsAny(span, spans)) spans.push(span);
+  }
+
+  const offerRe =
+    /\b(?:te\s+|me\s+|le\s+)?(?:paso|pasar|pasamos)\s+(?:(?:la|el|mi|tu|un|una|su)\s+){0,2}(?:telefono|telefonos|celular|celu|numero|nro)\b/g;
+  while ((match = offerRe.exec(folded))) {
+    const span: Span = {
+      start: match.index,
+      end: match.index + match[0].length,
+      kind: 'canal',
+    };
+    if (!overlapsAny(span, ignored) && !overlapsAny(span, spans)) spans.push(span);
   }
 }
 
@@ -566,6 +753,7 @@ function collect(folded: string): Span[] {
 
   collectDigitPhones(folded, spans, ignored);
   collectWordPhones(folded, spans, ignored);
+  collectOffplatformIntent(folded, spans, ignored);
 
   pushMatches(
     folded,

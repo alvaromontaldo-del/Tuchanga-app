@@ -61,7 +61,58 @@ describe('antipuenteo: no bloquea la palabra, detecta el dato', () => {
     'nos vemos 17:16',
     'el 23/06/2026 arrancamos',
     '12 de junio de 2026',
+    'veinte mil',
+    '25 lucas',
+    'las 15:30',
+    'Te paso mi dirección',
   ])('deja pasar montos, medidas, horarios y fechas «%s»', keeps);
+});
+
+describe('mensajes que se colaron en el chat', () => {
+  it('deja «Te paso mi dirección» y tapa la calle con piso', () => {
+    keeps('Te paso mi dirección');
+    const result = redactOffplatformContact('Pellegrini 570, piso 2');
+    expect(result.text).toBe(`${OFFPLATFORM_REDACTION}, ${OFFPLATFORM_REDACTION}`);
+    expect(result.kinds).toContain('direccion');
+    expect(result.text.toLowerCase()).not.toContain('pellegrini');
+    expect(result.text).not.toContain('570');
+    expect(result.notice).toBe(OFFPLATFORM_NOTICE);
+  });
+
+  it('tapa el pedido de seguir por Whatsapp y de pasar el teléfono', () => {
+    const result = redactOffplatformContact(
+      'La ubicación te la paso por Whatsapp pásame tu telefono',
+    );
+    expect(result.text).toBe(`La ubicación te la paso ${OFFPLATFORM_REDACTION} ${OFFPLATFORM_REDACTION}`);
+    expect(result.kinds).toContain('canal');
+    expect(result.text.toLowerCase()).not.toContain('whatsapp');
+    expect(result.text.toLowerCase()).not.toContain('telefono');
+    expect(result.notice).toBe(OFFPLATFORM_NOTICE);
+  });
+
+  it('tapa un celular de 10 dígitos pegados', () => {
+    hides('3364312302', 'telefono', '3364312302');
+  });
+
+  it('junta dígitos y números en palabras', () => {
+    const result = redactOffplatformContact('11 cero 2 veinte nueve 67');
+    expect(result.text).toBe(OFFPLATFORM_REDACTION);
+    expect(result.kinds).toEqual(['telefono']);
+  });
+
+  it('tolera relleno corto y «trentaiuno» entre los fragmentos', () => {
+    const result = redactOffplatformContact('Tres tres 6 y van más 4 trentaiuno 23 02');
+    expect(result.text).toBe(OFFPLATFORM_REDACTION);
+    expect(result.kinds).toEqual(['telefono']);
+  });
+
+  it('no arma un teléfono con un monto en palabras', () => {
+    keeps('son veinte mil pesos');
+    keeps('sale 25 lucas');
+    keeps('llegamos tipo las 15:30');
+    keeps('¿me pasás el teléfono?');
+    keeps('hablamos por whatsapp en la obra');
+  });
 });
 
 describe('teléfonos argentinos', () => {
