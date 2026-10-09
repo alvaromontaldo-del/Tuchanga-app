@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../lib/supabase';
+import { redactOffplatformMessage } from '../utils/offplatformContact';
 import { removeSupabaseRealtimeTopic, removeSupabaseRealtimeTopicAsync } from '../lib/supabaseRealtime';
 import { jobKeepsChatOpen } from '../utils/claimChatVisibility';
 import { claimInboxRowLabel, warrantyClaimEventFecha } from '../utils/warrantyClaimChat';
@@ -405,14 +406,19 @@ export async function sendMessageSupabase(
   } = await sb.auth.getUser();
   if (!user) throw new Error('No autenticado');
 
+  const safe =
+    type === 'system'
+      ? { body: text, metadata }
+      : redactOffplatformMessage(type, text, metadata);
+
   const { data, error } = await sb
     .from('messages')
     .insert({
       conversation_id: conversationId,
       sender_id: user.id,
-      body: text,
+      body: safe.body,
       type,
-      metadata,
+      metadata: (safe.metadata ?? {}) as Record<string, unknown>,
     })
     .select('id,conversation_id,sender_id,body,type,metadata,created_at')
     .single();

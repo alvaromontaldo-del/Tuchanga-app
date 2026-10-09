@@ -13,6 +13,7 @@ import type {
   StoreRequestDetail,
 } from '../types/materials';
 import { maskArsInput, parseArsInput } from '../utils/formatMoney';
+import { offplatformSubmitOptional, offplatformSubmitText } from '../utils/offplatformContact';
 import { formatOrderCodeDisplay } from '../utils/orderCode';
 import { isLegacyQuoteItemInsertError } from '../utils/quoteItemInsert';
 import {
@@ -1059,7 +1060,7 @@ export async function submitStoreQuote(
       client_id: input.clientId ?? null,
       freight_type: input.freightType,
       freight_cost: freightCost,
-      notes: input.notes.trim(),
+      notes: offplatformSubmitText(input.notes),
       status: 'sent',
     })
     .select('id')
@@ -1080,10 +1081,11 @@ export async function submitStoreQuote(
     in_stock: item.inStock,
     alternative_description: item.inStock
       ? null
-      : item.alternativeDescription?.trim() || item.variantLabel?.trim() || null,
-    item_note: item.itemNote?.trim() || null,
+      : offplatformSubmitOptional(item.alternativeDescription) ||
+        offplatformSubmitOptional(item.variantLabel),
+    item_note: offplatformSubmitOptional(item.itemNote),
     variant_index: item.variantIndex ?? 1,
-    variant_label: item.variantLabel?.trim() || null,
+    variant_label: offplatformSubmitOptional(item.variantLabel),
   }));
   const itemRowsLegacy = input.items.map((item) => ({
     quote_id: quoteId,

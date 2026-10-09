@@ -437,7 +437,7 @@ describe.skipIf(!postgresAvailable())('iniciar_reclamo_garantia en Postgres', ()
          warranty_days, finalizado_at, service_detail
        ) VALUES (
          '${job}', '${deleted}', '${CLIENT}', '${worker}', 'finalizado',
-         30, '2026-09-02T02:30:00Z', 'Gasista'
+         30, now() - interval '2 days', 'Gasista'
        );
        INSERT INTO public.contrataciones (
          id, conversation_id, client_id, worker_id, estado_trabajo,
@@ -462,10 +462,15 @@ describe.skipIf(!postgresAvailable())('iniciar_reclamo_garantia en Postgres', ()
            AND metadata->>'event' = 'reclamo_garantia_iniciado';`,
       ),
     ).toBe('0');
+    const fecha = psql(
+      DB,
+      `SELECT to_char((finalizado_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date, 'DD/MM/YYYY')
+       FROM public.contrataciones WHERE id = '${job}';`,
+    );
     expect(
       psql(DB, `SELECT body FROM public.messages WHERE conversation_id = '${created}';`),
     ).toBe(
-      'El cliente inició un reclamo de garantía por «Gasista» del 01/09/2026. Coordinen la revisión por este chat. La garantía sigue su curso.',
+      `El cliente inició un reclamo de garantía por «Gasista» del ${fecha}. Coordinen la revisión por este chat. La garantía sigue su curso.`,
     );
   });
 

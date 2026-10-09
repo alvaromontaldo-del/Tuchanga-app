@@ -1,13 +1,11 @@
 /**
- * Moderación anti-contacto relajada para el chat (card #67).
- *
- * La versión anterior (#85) bloqueaba palabras del oficio (cinta, cable, calor,
- * mail, whatsapp, calle, meta). Acá solo se rechazan teléfonos reales y emails.
- * Perfiles, publicaciones y pedidos de materiales siguen sin ese filtro.
+ * El envío no se rechaza. El dato de contacto se reemplaza en
+ * `offplatformContact` (cliente y SQL). Estas funciones quedan para no
+ * revivir el bloqueo por palabra de #85 ni el rechazo `message_blocked_contact`.
+ * Perfiles y publicaciones siguen sin ese filtro.
  */
 
-export const CONTACT_MODERATION_POLICY_MESSAGE =
-  'Por políticas de seguridad, no está permitido compartir datos de contacto fuera de la plataforma.';
+export { OFFPLATFORM_NOTICE as CONTACT_MODERATION_POLICY_MESSAGE } from './offplatformContact';
 
 export type ContactModerationMatch = {
   code: string;
@@ -44,61 +42,13 @@ export function normalizeModerationText(raw: string): string {
   return folded.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
-const EMAIL_RE = /[a-z0-9._%+\-]+@[a-z0-9][a-z0-9.\-]*\.[a-z]{2,}/;
-const CURRENCY_RES = [
-  /[$] *\d{1,3}(?:[. ]\d{3})+(?:[.,]\d{1,2})?/g,
-  /[$] *\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?/g,
-  /[$] *\d+(?:[.,]\d{1,2})?/g,
-];
-const CONSECUTIVE_PHONE_RE = /(^|[^0-9])([0-9]{8,15})([^0-9]|$)/;
-const GROUPED_PHONE_RE =
-  /((?:\+ *)?(?:\(\d{1,4}\) *|\d{1,4}[ -]+){1,6}\d{2,4})/g;
-const DOTTED_PHONE_RE = /(^|[^0-9])(\d{1,4}(?:\.\d{2,4}){1,4})([^0-9]|$)/g;
-const THOUSANDS_RE = /^\d{1,3}(?:\.\d{3})+$/;
-
-function digitCount(value: string): number {
-  return value.replace(/[^0-9]/g, '').length;
-}
-
-/**
- * `email` o `telefono_num` si el texto trae un mail o un teléfono real.
- * Importes, fechas, medidas y palabras del oficio devuelven null.
- */
-export function contactBlockedReason(textRaw: string): string | null {
-  let t = normalizeModerationText(textRaw ?? '');
-  if (!t) return null;
-
-  if (EMAIL_RE.test(t)) return 'email';
-
-  for (const re of CURRENCY_RES) {
-    t = t.replace(re, ' ');
-  }
-
-  if (CONSECUTIVE_PHONE_RE.test(t)) return 'telefono_num';
-
-  for (const match of t.matchAll(GROUPED_PHONE_RE)) {
-    const digits = digitCount(match[1] ?? '');
-    if (digits >= 8 && digits <= 15) return 'telefono_num';
-  }
-
-  for (const match of t.matchAll(DOTTED_PHONE_RE)) {
-    const token = match[2] ?? '';
-    if (THOUSANDS_RE.test(token)) continue;
-    const digits = digitCount(token);
-    if (digits >= 8 && digits <= 15) return 'telefono_num';
-  }
-
+/** Ya no rechaza el texto. El reemplazo vive en `redactOffplatformContact`. */
+export function contactBlockedReason(_textRaw: string): string | null {
   return null;
 }
 
-export function validateContactInfo(textRaw: string): ContactModerationResult {
-  const code = contactBlockedReason(textRaw);
-  if (!code) return ALLOWED;
-  return {
-    blocked: true,
-    match: { code },
-    message: CONTACT_MODERATION_POLICY_MESSAGE,
-  };
+export function validateContactInfo(_textRaw: string): ContactModerationResult {
+  return ALLOWED;
 }
 
 export function detectBlockedContact(textRaw: string): BlockedContactMatch | null {
@@ -174,18 +124,13 @@ export function collectMessageFreeTexts(
 }
 
 /**
- * Misma regla para text, image (epígrafe), budget y quotation.
- * `system` no se filtra: lo escriben funciones del servidor (pago, PIN, reclamo).
+ * Ya no rechaza text, image, budget ni quotation.
+ * `system` tampoco: lo escriben las funciones del servidor.
  */
 export function messageContactBlockedReason(
-  type: string | null | undefined,
-  body: string | null | undefined,
-  metadata?: unknown,
+  _type: string | null | undefined,
+  _body: string | null | undefined,
+  _metadata?: unknown,
 ): string | null {
-  if ((type ?? 'text') === 'system') return null;
-  for (const text of collectMessageFreeTexts(body, metadata)) {
-    const reason = contactBlockedReason(text);
-    if (reason) return reason;
-  }
   return null;
 }

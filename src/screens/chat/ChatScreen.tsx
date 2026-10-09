@@ -37,6 +37,7 @@ import {
   sendChatImageMessageSupabase,
 } from '../../services/chatMediaSupabase';
 import { ChatStoredImage } from '../../components/chat/ChatStoredImage';
+import { OffplatformNotice } from '../../components/chat/OffplatformNotice';
 import { ChatReportUserModal } from '../../components/chat/ChatReportUserModal';
 import { ChatSafetyOptionsModal } from '../../components/chat/ChatSafetyOptionsModal';
 import {
@@ -142,6 +143,7 @@ import { materialQuoteChatCard } from '../../utils/materialQuoteVisibility';
 import { fetchMaterialQuoteStatuses } from '../../services/clientQuotesSupabase';
 import { newRandomUserId } from '../../utils/stableUserId';
 import { mapChatSendError } from '../../utils/chatErrors';
+import { offplatformSubmitText } from '../../utils/offplatformContact';
 import {
   CHAT_MESSAGE_LIST_MIN_HEIGHT,
   shouldMountChatMessageList,
@@ -1531,7 +1533,7 @@ export function ChatScreen({
   }, [myId, conversationId, loading, messages, markConversationRead]);
 
   function send() {
-    const text = input.trim();
+    const text = offplatformSubmitText(input);
     if (!text || !myId) return;
     if (chatBlocked || chatClosedByClaim) return;
 
@@ -2747,6 +2749,9 @@ export function ChatScreen({
             </Pressable>
           </View>
         ) : null}
+        <View style={styles.offplatformComposerNotice}>
+          <OffplatformNotice text={composerDisabled ? '' : input} />
+        </View>
         <View style={styles.composer}>
           {showClientAttach ? (
             <Pressable
@@ -2952,6 +2957,7 @@ export function ChatScreen({
                       multiline
                       maxLength={1200}
                     />
+                    <OffplatformNotice text={quoteDetail} />
 
                     <Pressable
                       onPress={() => setIncluyeGarantia((on) => !on)}
@@ -3131,6 +3137,7 @@ export function ChatScreen({
                       maxLength={1000}
                       accessibilityLabel="Fundamentos de la recotización"
                     />
+                    <OffplatformNotice text={recotizarFundamentos} />
                     <View style={styles.modalActions}>
                       <Pressable
                         style={({ pressed }) => [
@@ -3179,7 +3186,7 @@ export function ChatScreen({
                               await recotizarEnCurso(
                                 job.id,
                                 recotizarAmount,
-                                recotizarFundamentos.trim(),
+                                offplatformSubmitText(recotizarFundamentos, 10),
                               );
                               setRecotizarModalOpen(false);
                               setRecotizarAmount(0);
@@ -3731,6 +3738,9 @@ const styles = StyleSheet.create({
   tick: { fontSize: 12, fontWeight: '900' },
   tickMine: { color: 'rgba(255,255,255,0.85)' },
   tickSeen: { color: '#34B7F1' },
+  offplatformComposerNotice: {
+    paddingHorizontal: spacing.md,
+  },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
