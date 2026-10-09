@@ -1,6 +1,35 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+describe('PIN que tipea el comercio', () => {
+  const files = [
+    'src/screens/store/StoreMaterialRequestsScreen.tsx',
+    'src/screens/store/StoreCloseOrderScreen.tsx',
+  ];
+
+  it('muestra los dígitos en claro, con teclado numérico y el largo del PIN', () => {
+    const orderCode = readFileSync('src/utils/orderCode.ts', 'utf8');
+    expect(orderCode).toContain('export const PIN_LENGTH = 4');
+    expect(orderCode).toContain('slice(0, PIN_LENGTH)');
+    expect(orderCode).toContain("padStart(PIN_LENGTH, '0')");
+
+    for (const file of files) {
+      const src = readFileSync(file, 'utf8');
+      const pinStart = src.indexOf(file.endsWith('StoreCloseOrderScreen.tsx') ? '>PIN<' : 'PIN del cliente');
+      const pinBlock = src.slice(pinStart, src.indexOf('style={styles.pinInput}', pinStart));
+      expect(pinBlock, file).not.toContain('secureTextEntry');
+      expect(pinBlock, file).toContain('keyboardType="number-pad"');
+      expect(pinBlock, file).toContain('maxLength={PIN_LENGTH}');
+      expect(pinBlock, file).toContain('placeholder="0000"');
+      expect(src, file).toContain('letterSpacing: 8');
+      expect(src, file).toContain('fontSize: 22');
+      expect(src, file).not.toMatch(/\bverification_pin\b/);
+      expect(src, file).not.toMatch(/\bverificationPin\b/);
+      expect(src, file).toContain('completarOrdenMaterialConPin');
+    }
+  });
+});
+
 describe('PIN visible para el profesional que retira', () => {
   it('la comparación muestra el PIN cuando el RPC lo devuelve, también en solo lectura', () => {
     const compare = readFileSync('src/screens/client/ClientCompareQuotesScreen.tsx', 'utf8');

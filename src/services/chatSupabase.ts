@@ -723,3 +723,27 @@ export function subscribeToUserInboxEvents(
     channel = null;
   };
 }
+
+const ROUNDED_KM = /^\d+(,\d)?$/;
+
+/**
+ * Km ya redondeados por `distancia_aprox_chat`. NULL si la RPC no está,
+ * el que llama no es el profesional, o falta una ubicación. No trae coordenadas.
+ */
+export async function fetchApproxChatDistanceKm(conversationId: string): Promise<string | null> {
+  const id = conversationId.trim();
+  if (!id) return null;
+  try {
+    const sb = getSupabaseClient();
+    const { data, error } = await sb.rpc('distancia_aprox_chat', {
+      p_conversation_id: id,
+    });
+    if (error || typeof data !== 'string') return null;
+    const value = data.trim();
+    if (!value) return null;
+    if (value === 'menos de 1 km' || ROUNDED_KM.test(value)) return value;
+    return null;
+  } catch {
+    return null;
+  }
+}

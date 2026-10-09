@@ -15,8 +15,8 @@ type Props =
     };
 
 /**
- * Montos del presupuesto: el precio que importa va grande y el resto en dos
- * columnas. El profesional solo ve lo que cobra.
+ * Montos del presupuesto: el precio que importa va grande.
+ * El profesional solo ve lo que cobra. El cliente ve el desglose debajo, en columna.
  */
 export function QuoteMoneySummary(props: Props) {
   if (props.variant === 'worker') {
@@ -36,13 +36,12 @@ export function QuoteMoneySummary(props: Props) {
     >
       <Text style={styles.primaryLabel}>Precio final</Text>
       <Text style={styles.primaryAmount}>{props.finalAmount}</Text>
-      <View style={styles.split}>
-        <View style={styles.cell}>
+      <View style={styles.stack}>
+        <View style={styles.stackRow}>
           <Text style={styles.secondaryLabel}>{COSTO_SERVICIO_LABEL}</Text>
           <Text style={styles.secondaryAmount}>{props.serviceFee}</Text>
         </View>
-        <View style={styles.rule} />
-        <View style={styles.cell}>
+        <View style={styles.stackRow}>
           <Text style={styles.secondaryLabel}>Saldo pendiente</Text>
           <Text style={styles.secondaryAmount}>{props.balance}</Text>
         </View>
@@ -71,17 +70,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.text,
   },
-  split: {
+  stack: {
     marginTop: spacing.sm,
-    flexDirection: 'row',
-    alignItems: 'stretch',
+    gap: spacing.sm,
   },
-  cell: { flex: 1, paddingRight: spacing.sm },
-  rule: {
-    width: StyleSheet.hairlineWidth,
-    backgroundColor: colors.border,
-    marginRight: spacing.sm,
-  },
+  stackRow: { alignItems: 'flex-start' },
   secondaryLabel: {
     fontSize: 12,
     lineHeight: 16,

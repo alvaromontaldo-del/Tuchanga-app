@@ -56,7 +56,7 @@ describe('cotizar del profesional sin desglose de costo de servicio', () => {
   it('en el chat el profesional ve su monto y el cliente sigue viendo el desglose', () => {
     const card = sliceBetween(
       chat,
-      '<Text style={styles.quoteTitle}>Presupuesto</Text>',
+      'numberOfLines={1} ellipsizeMode="tail">Presupuesto</Text>',
       'Cargando presupuesto',
     );
     const money = readFileSync('src/components/jobs/QuoteMoneySummary.tsx', 'utf8');

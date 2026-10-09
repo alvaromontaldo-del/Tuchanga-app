@@ -37,15 +37,21 @@ export function RecotizacionCard({
   return (
     <View style={[styles.card, fill && styles.cardFill]}>
       <View style={styles.top}>
-        <Text style={styles.title}>{model.title}</Text>
-        <Text style={styles.badge}>{model.badge}</Text>
-      </View>
-      {model.lines.map((line) => (
-        <Text key={line.label} style={styles.line}>
-          {line.label}:{' '}
-          <Text style={[styles.strong, line.struck && styles.struck]}>{line.value}</Text>
+        <Text style={styles.title} numberOfLines={1}>
+          {model.title}
         </Text>
-      ))}
+        <Text style={styles.badge} numberOfLines={1}>
+          {model.badge}
+        </Text>
+      </View>
+      <View style={styles.money}>
+        {model.lines.map((line) => (
+          <View key={line.label} style={styles.moneyRow}>
+            <Text style={styles.moneyLabel}>{line.label}</Text>
+            <Text style={[styles.moneyValue, line.struck && styles.struck]}>{line.value}</Text>
+          </View>
+        ))}
+      </View>
       {model.fundamentos ? (
         <Text style={styles.fundamentos}>Fundamentos: {model.fundamentos}</Text>
       ) : null}
@@ -79,36 +85,73 @@ export function RecotizacionCard({
 
 const styles = StyleSheet.create({
   card: {
-    width: '92%',
+    width: '100%',
     maxWidth: 420,
     backgroundColor: colors.surface,
-    borderRadius: radii.card,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: colors.border,
     padding: spacing.md,
-    gap: 6,
+    gap: 10,
   },
   cardFill: { width: '100%', maxWidth: '100%', alignSelf: 'stretch' },
   top: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
+    justifyContent: 'flex-start',
+    columnGap: spacing.sm,
+    rowGap: spacing.xs,
   },
-  title: { fontSize: 16, fontWeight: '900', color: colors.text },
+  title: {
+    flexGrow: 0,
+    flexShrink: 0,
+    maxWidth: '100%',
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+    color: colors.text,
+  },
   badge: {
+    flexGrow: 0,
+    flexShrink: 0,
+    maxWidth: '100%',
     fontSize: 12,
-    fontWeight: '800',
+    lineHeight: 16,
+    fontWeight: '700',
     color: colors.text,
     paddingVertical: 4,
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     borderRadius: 999,
     backgroundColor: colors.background,
     overflow: 'hidden',
   },
-  line: { fontSize: 14, color: colors.text, lineHeight: 20 },
-  strong: { fontWeight: '900' },
+  money: {
+    alignSelf: 'stretch',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.input,
+    backgroundColor: colors.background,
+    gap: spacing.sm,
+  },
+  moneyRow: { alignItems: 'flex-start' },
+  moneyLabel: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  moneyValue: {
+    marginTop: 2,
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: '800',
+    color: colors.text,
+  },
   struck: {
+    fontSize: 16,
+    lineHeight: 22,
     fontWeight: '700',
     color: colors.textSecondary,
     textDecorationLine: 'line-through',
