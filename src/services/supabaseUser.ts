@@ -16,6 +16,7 @@ import { completedJobsFromPayload } from '../utils/workerReputation';
  * phone → p_telefono → telefono
  * baseLocation.address → p_direccion → direccion_texto
  * baseLocation.lat/lng → p_lat / p_lng → location (POINT, SRID 4326; eje X = lng, eje Y = lat)
+ * baseLocation.completeAddress + lat/lng → set_my_direccion_exacta → direccion_completa / direccion_lat / direccion_lng
  * avatarUri (subida a bucket avatars) → p_avatar_url → avatar_url
  * offerServices + coverageKm → p_coverage_km → coverage_km
  * professionalDescription → p_bio del RPC → professional_description
@@ -340,6 +341,32 @@ function duplicateIdentityMessage(err: PostgrestError): string {
   return 'No se pudo crear la cuenta: este correo o DNI ya está registrado.';
 }
 
+/**
+ * Guarda el pin y la dirección completa del propio usuario.
+ * No cambia direccion_texto (la ficha sigue mostrando la calle corta).
+ * Si el SQL todavía no está aplicado, no corta el alta.
+ */
+async function saveExactDireccion(
+  supabase: ReturnType<typeof getSupabaseClient>,
+  base: { lat: number; lng: number; completeAddress?: string | null },
+): Promise<void> {
+  const lat = Number.isFinite(base.lat) ? base.lat : null;
+  const lng = Number.isFinite(base.lng) ? base.lng : null;
+  const completa = base.completeAddress?.trim() || null;
+  if ((lat == null || lng == null || (lat === 0 && lng === 0)) && !completa) return;
+  const { error } = await supabase.rpc('set_my_direccion_exacta', {
+    p_lat: lat,
+    p_lng: lng,
+    p_direccion_completa: completa,
+  });
+  if (!error) return;
+  if (isMissingRpc(error)) {
+    console.warn('[set_my_direccion_exacta] SQL todavía no aplicado');
+    return;
+  }
+  throw new Error(`No se pudo guardar la ubicación exacta (${error.message}).`);
+}
+
 function isMissingRpc(error: { message?: string; code?: string } | null): boolean {
   if (!error) return false;
   const msg = (error.message ?? '').toLowerCase();
@@ -442,7 +469,7 @@ export type ProfileRegistrationUpdatePayload = {
   lastName: string;
   dni: string;
   phone: string;
-  baseLocation: { address: string; lat: number; lng: number };
+  baseLocation: { address: string; lat: number; lng: number; completeAddress?: string | null };
   avatarUri: string;
   /** Si se omite, no se modifica la descripción profesional. */
   professionalDescription?: string;
@@ -588,6 +615,8 @@ export async function updateProfileRegistrationInSupabase(
   if (!fullMissing && !fullErr && payload.professionalDescription !== undefined && payload.professionalDescription.trim()) {
     await writeOwnProfessionalDescription(supabase, user.id, payload.professionalDescription);
   }
+
+  await saveExactDireccion(supabase, payload.baseLocation);
 
   try {
     await syncAuthUserDirectory({
@@ -888,6 +917,7 @@ export async function persistSignUpToSupabase(
 
   try {
     await insertProfileWithLocationRpc(supabase, rpcBase, (payload.professionalDescription ?? '').trim());
+    await saveExactDireccion(supabase, payload.baseLocation);
   } catch (e) {
     // Carrera con trigger: el perfil apareció entre el SELECT y el INSERT.
     if (await fetchProfileRowForUser(userId)) {
@@ -1102,7 +1132,7 @@ export async function persistProfessionalDescriptionInSupabase(desc: string): Pr
 }
 
 export async function persistWorkerGeoToSupabase(
-  baseLocation: { address: string; lat: number; lng: number },
+  baseLocation: { address: string; lat: number; lng: number; completeAddress?: string | null },
   coverageKm: number,
 ): Promise<void> {
   const supabase = getSupabaseClient();
@@ -1114,6 +1144,7 @@ export async function persistWorkerGeoToSupabase(
     p_coverage_km: km,
   });
   if (error) throw error;
+  await saveExactDireccion(supabase, baseLocation);
 }
 
 export async function persistWorkerJobsToSupabase(params: {

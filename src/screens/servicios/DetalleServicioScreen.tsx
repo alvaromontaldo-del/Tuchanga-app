@@ -199,9 +199,10 @@ function pickerFieldTitle(field: PickerField): string {
 
 type DireccionCliente = {
   direccion_texto: string;
+  direccion_completa: string | null;
   detalles_ubicacion: string | null;
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
 };
 
 export function DetalleServicioScreen() {
@@ -795,6 +796,7 @@ export function DetalleServicioScreen() {
                         lat: direccionData.lat,
                         lng: direccionData.lng,
                         direccionTexto: direccionData.direccion_texto,
+                        direccionCompleta: direccionData.direccion_completa,
                       })
                     }
                   >

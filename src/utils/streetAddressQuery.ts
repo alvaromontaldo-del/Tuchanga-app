@@ -1,5 +1,7 @@
 import {
+  buildCompleteAddress,
   buildShortAddressFromParts,
+  formatCompleteAddress,
   formatShortAddress,
   type NominatimAddressParts,
 } from './formatAddress';
@@ -58,6 +60,11 @@ export type RankedAddress = {
    * muestra el número del campo y, si lo borra, no queda inventado.
    */
   plainAddress?: string;
+  /**
+   * Calle, localidad, partido y provincia. No se muestra en la ficha:
+   * se guarda para el pin y para el fallback de Maps.
+   */
+  completeAddress?: string;
 };
 
 const NEAR_RADIUS_M = 35_000;
@@ -370,14 +377,52 @@ export function suggestionLabel(typedQuery: string, rawLabel: string): string {
   return addressFromPick(typedQuery, rawLabel);
 }
 
-export function stampSuggestions<T extends { address: string }>(query: string, items: T[]): T[] {
+export function stampSuggestions<T extends { address: string; completeAddress?: string }>(
+  query: string,
+  items: T[],
+): T[] {
   const parsed = parseStreetAddressQuery(query);
   if (!parsed || !houseNumberDigits(parsed.houseNumber)) return items;
   return items.map((item) => {
     const address = addressFromPick(query, item.address);
-    if (address === item.address) return item;
-    return { ...item, address };
+    const completeAddress = item.completeAddress
+      ? addressFromPick(query, item.completeAddress)
+      : item.completeAddress;
+    if (address === item.address && completeAddress === item.completeAddress) return item;
+    return { ...item, address, completeAddress };
   });
+}
+
+function pieceCount(value: string): number {
+  return value
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean).length;
+}
+
+/**
+ * Dirección completa del resultado elegido.
+ * Si el display_name trae partido y provincia, gana sobre un parts corto.
+ * La altura tipeada se estampa en la primera calle.
+ */
+export function completeAddressForHit(hit: GeocodeHit, streetLine?: string | null): string {
+  const fromParts = buildCompleteAddress(hit.parts);
+  const fromDisplay = formatCompleteAddress(hit.displayName);
+  const base = pieceCount(fromDisplay) >= pieceCount(fromParts) ? fromDisplay : fromParts;
+  const street = streetLine?.trim() || '';
+  const stamped = street ? addressFromPick(street, base) : base;
+  return stamped.trim();
+}
+
+/** Lo que se persiste en profiles.direccion_completa al confirmar la sugerencia. */
+export function exactAddressToSave(
+  savedAddress: string,
+  completeAddress?: string | null,
+): string | null {
+  const complete = completeAddress?.trim() ?? '';
+  if (!complete) return null;
+  const stamped = addressFromPick(savedAddress, complete).trim();
+  return stamped || null;
 }
 
 /**
@@ -736,6 +781,7 @@ export function rankGeocodeHits(
           lng: hit.lng,
           address,
           plainAddress: address,
+          completeAddress: completeAddressForHit(hit, address),
         };
       })
       .filter((hit) => hit.address.trim().length > 0)
@@ -790,6 +836,7 @@ export function rankGeocodeHits(
       cityName: hitCityName(hit.parts),
       barrioName: hitBarrioName(hit.parts),
       streetLine: composeStreetLine(road, parsed.houseNumber, parsed.unit),
+      completeAddress: completeAddressForHit(hit, address),
     });
   }
 
@@ -865,6 +912,7 @@ export function rankGeocodeHits(
       plainAddress: item.plainAddress,
       lat: item.lat,
       lng: item.lng,
+      completeAddress: item.completeAddress,
     });
     if (ranked.length >= 6) break;
   }
@@ -894,7 +942,14 @@ export function ensureTypedHeightSuggestion(
     const hit = hits.find((candidate) => candidate.id === item.id);
     if (!hit || roadMatchScore(hitStreetName(hit), parsed.street) < 1) return item;
     const address = formatNumberedHit(hit, parsed);
-    return address.trim() ? { ...item, address } : item;
+    if (!address.trim()) return item;
+    return {
+      ...item,
+      address,
+      completeAddress: item.completeAddress
+        ? addressFromPick(address, item.completeAddress)
+        : completeAddressForHit(hit, address),
+    };
   });
   if (withNumber.some((item) => labelHasHouseDigits(item.address, parsed.houseNumber))) {
     return withNumber;
@@ -934,6 +989,7 @@ export function ensureTypedHeightSuggestion(
       plainAddress: plainHitAddress(best),
       lat: best.lat,
       lng: best.lng,
+      completeAddress: completeAddressForHit(best, address),
     },
     ...withNumber,
   ].slice(0, 6);
@@ -976,7 +1032,9 @@ export function enrichPositionedHits(positioned: GeocodeHit[], osmHits: GeocodeH
         road: useOsmRoad ? osmRoad : hit.parts.road,
         neighbourhood: picked.osm.parts.neighbourhood ?? hit.parts.neighbourhood,
         suburb: picked.osm.parts.suburb ?? picked.osm.parts.neighbourhood ?? hit.parts.suburb,
-        city: hit.parts.city || picked.osm.parts.city || picked.osm.parts.town,
+        city: hit.parts.city || picked.osm.parts.city || picked.osm.parts.town || picked.osm.parts.village,
+        county: hit.parts.county || picked.osm.parts.county,
+        state: hit.parts.state || picked.osm.parts.state,
       },
     };
   });

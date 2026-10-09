@@ -738,11 +738,19 @@ export async function verificarPin(contratacionId: string, pin: string): Promise
   return Boolean(data);
 }
 
+function coordOrNull(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  if (!Number.isFinite(n)) return null;
+  if (n === 0) return n;
+  return n;
+}
+
 export async function obtenerDireccionCliente(contratacionId: string): Promise<{
   direccion_texto: string;
+  direccion_completa: string | null;
   detalles_ubicacion: string | null;
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
 }> {
   const sb = getSupabaseClient();
   const { data, error } = await sb.rpc('obtener_direccion_cliente', {
@@ -751,14 +759,19 @@ export async function obtenerDireccionCliente(contratacionId: string): Promise<{
   if (error) throw error;
   const row = (Array.isArray(data) ? data[0] : data) as {
     direccion_texto: string;
+    direccion_completa?: string | null;
     detalles_ubicacion?: string | null;
-    lat: number;
-    lng: number;
+    lat: number | null;
+    lng: number | null;
   };
+  const lat = coordOrNull(row.lat);
+  const lng = coordOrNull(row.lng);
   return {
-    ...row,
     direccion_texto: normalizeDisplayAddress(row.direccion_texto),
+    direccion_completa: row.direccion_completa?.trim() || null,
     detalles_ubicacion: row.detalles_ubicacion?.trim() || null,
+    lat: lat === 0 && lng === 0 ? null : lat,
+    lng: lat === 0 && lng === 0 ? null : lng,
   };
 }
 

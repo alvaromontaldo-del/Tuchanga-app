@@ -8,11 +8,12 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { fetchNominatimSuggestions, reverseNominatimStreet } from '../../config/nominatim';
+import { fetchNominatimSuggestions, reverseNominatimPlace } from '../../config/nominatim';
 import {
   activeStreetQuery,
   addressToPersist,
   emptyAddressSearchMessage,
+  exactAddressToSave,
   isIgnorableAddressEcho,
   isNegligiblePinMove,
   visibleSuggestionAddress,
@@ -27,6 +28,8 @@ export type DeliveryGeoPoint = {
   lng: number;
   /** Calle OSM sin altura inyectada. No se persiste: solo rotula el listado. */
   plainAddress?: string;
+  /** Localidad, partido y provincia. El perfil lo guarda; el comercio no. */
+  completeAddress?: string;
 };
 
 type Props = {
@@ -119,6 +122,7 @@ export function AddressDeliveryField({
           suggestions.map((s) => ({
             address: s.address,
             plainAddress: s.plainAddress,
+            completeAddress: s.completeAddress,
             lat: s.lat,
             lng: s.lng,
           })),
@@ -149,18 +153,23 @@ export function AddressDeliveryField({
     async (lat: number, lng: number) => {
       const reqId = ++reverseReqRef.current;
       try {
-        const addr = await reverseNominatimStreet(lat, lng);
-        if (reqId !== reverseReqRef.current || !addr) return;
+        const place = await reverseNominatimPlace(lat, lng);
+        if (reqId !== reverseReqRef.current || !place?.short) return;
         const typed = typedQueryRef.current;
         const kept = addressToPersist({
           typedQuery: typed,
           confirmedLabel: confirmedLabelRef.current,
-          currentLabel: addr,
+          currentLabel: place.short,
           pinMoved: pinMovedRef.current,
         });
         confirmedLabelRef.current = kept;
         commitText(kept);
-        onGeoChange({ address: kept, lat, lng });
+        onGeoChange({
+          address: kept,
+          lat,
+          lng,
+          completeAddress: exactAddressToSave(kept, place.complete) ?? undefined,
+        });
       } catch {
         /* si Nominatim falla, quedan las coordenadas del pin */
       }
@@ -199,18 +208,25 @@ export function AddressDeliveryField({
       pinMovedRef.current = false;
       pickedPointRef.current = { lat, lng };
       let address = value.trim();
+      let completeAddress: string | undefined;
       try {
-        const rev = await reverseNominatimStreet(lat, lng);
-        if (rev) {
-          address = rev;
-          commitText(rev);
+        const rev = await reverseNominatimPlace(lat, lng);
+        if (rev?.short) {
+          address = rev.short;
+          completeAddress = rev.complete;
+          commitText(rev.short);
         }
       } catch {
         /* keep text */
       }
       const resolved = address || 'Ubicación actual';
       confirmedLabelRef.current = resolved;
-      onGeoChange({ address: resolved, lat, lng });
+      onGeoChange({
+        address: resolved,
+        lat,
+        lng,
+        completeAddress: exactAddressToSave(resolved, completeAddress) ?? undefined,
+      });
       setResults([]);
       setSettledQuery('');
     } finally {
@@ -303,7 +319,12 @@ export function AddressDeliveryField({
                 pinMovedRef.current = false;
                 pickedPointRef.current = { lat: r.lat, lng: r.lng };
                 commitText(label);
-                onGeoChange({ address: label, lat: r.lat, lng: r.lng });
+                onGeoChange({
+                  address: label,
+                  lat: r.lat,
+                  lng: r.lng,
+                  completeAddress: exactAddressToSave(label, r.completeAddress) ?? undefined,
+                });
                 setResults([]);
                 setSettledQuery('');
               }}

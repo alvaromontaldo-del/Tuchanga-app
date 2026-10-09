@@ -237,6 +237,8 @@ export type AuthUser = {
     address: string;
     lat: number;
     lng: number;
+    /** Localidad, partido y provincia. No se muestra en la ficha. */
+    completeAddress?: string | null;
   };
 
   /** Referencias opcionales para ubicar el domicilio (rejas, color de pared, etc.). */
@@ -300,7 +302,12 @@ export type SignUpPayload = {
   email: string;
   password: string;
   phone: string;
-  baseLocation: { address: string; lat: number; lng: number };
+  baseLocation: {
+    address: string;
+    lat: number;
+    lng: number;
+    completeAddress?: string | null;
+  };
   /** Referencias opcionales para ubicar el domicilio. */
   locationDetails?: string;
   /** YYYY-MM-DD */
@@ -437,6 +444,7 @@ function buildAuthUserFromSignUpPayload(
       address: persistPayload.baseLocation.address.trim(),
       lat: persistPayload.baseLocation.lat,
       lng: persistPayload.baseLocation.lng,
+      completeAddress: persistPayload.baseLocation.completeAddress?.trim() || undefined,
     },
     professionalDescription,
     worker,
@@ -743,6 +751,7 @@ export async function signUp(payload: SignUpPayload): Promise<AuthResult> {
         address,
         lat: payload.baseLocation.lat,
         lng: payload.baseLocation.lng,
+        completeAddress: payload.baseLocation.completeAddress?.trim() || undefined,
       },
       worker,
       location: address,

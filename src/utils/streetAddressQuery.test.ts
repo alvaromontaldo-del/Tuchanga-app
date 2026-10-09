@@ -562,6 +562,19 @@ describe('sugerencias Volta 1140 como en Mis datos', () => {
     'Alejandro Volta, Parque Sarmiento',
   ];
 
+  it('la fila corta no muestra el partido, pero la dirección completa sí', () => {
+    const ranked = rankGeocodeHits(hits, 'Volta 1140', sanNicolas);
+    const sarmiento = ranked.find((item) => item.id === 'sarmiento');
+    expect(sarmiento?.address).toMatch(/Parque Sarmiento/);
+    expect(sarmiento?.address).not.toMatch(/Partido de San Nicolás/);
+    expect(sarmiento?.completeAddress).toMatch(/\b1140\b/);
+    expect(sarmiento?.completeAddress).toMatch(/Parque Sarmiento/);
+    expect(sarmiento?.completeAddress).toMatch(/San Nicolás de los Arroyos/);
+    expect(sarmiento?.completeAddress).toMatch(/Partido de San Nicolás/);
+    expect(sarmiento?.completeAddress).toMatch(/Buenos Aires/);
+    expect(sarmiento?.completeAddress).not.toMatch(/Argentina|B2900/);
+  });
+
   it('cada sugerencia visible de Volta 1140 muestra la altura', () => {
     const ranked = rankGeocodeHits(hits, 'Volta 1140', sanNicolas);
     expect(ranked.length).toBeGreaterThan(0);
