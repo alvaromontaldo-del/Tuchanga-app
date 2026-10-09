@@ -64,9 +64,10 @@ describe('un toque cambia entre particular y comercio', () => {
     expect(nextSessionRoleOnSwitch('professional', comercioYCliente)).toBe('commerce');
   });
 
-  it('sin comercio se mantiene profesional ↔ cliente', () => {
-    expect(nextSessionRoleOnSwitch('professional', soloProfesional)).toBe('client');
-    expect(nextSessionRoleOnSwitch('client', soloProfesional)).toBe('professional');
+  it('cliente y profesional sin comercio no tienen botón', () => {
+    expect(nextSessionRoleOnSwitch('professional', soloProfesional)).toBeNull();
+    expect(nextSessionRoleOnSwitch('client', soloProfesional)).toBeNull();
+    expect(nextSessionRoleOnSwitch(null, soloProfesional)).toBeNull();
   });
 
   it('solo cliente no cambia', () => {
@@ -74,10 +75,9 @@ describe('un toque cambia entre particular y comercio', () => {
     expect(nextSessionRoleOnSwitch(null, soloCliente)).toBeNull();
   });
 
-  it('con current null toma el primero del orden', () => {
+  it('con current null y comercio toma el primero del orden', () => {
     expect(nextSessionRoleOnSwitch(null, comercioYProfesional)).toBe('commerce');
     expect(nextSessionRoleOnSwitch(null, comercioYCliente)).toBe('commerce');
-    expect(nextSessionRoleOnSwitch(null, soloProfesional)).toBe('professional');
   });
 });
 
@@ -104,13 +104,11 @@ describe('textos del botón', () => {
     });
   });
 
-  it('sin comercio mantiene Cambiar de rol', () => {
+  it('sin comercio el texto de respaldo no se muestra: no hay destino', () => {
     const roles = availableSessionRoles({ hasEnabledCommerce: false, isProfessional: true });
-    expect(sessionRoleSwitchButtonCopy('client', roles)).toEqual({
-      title: 'Cambiar de rol',
-      subtitle: 'Pasar a Cliente',
-    });
-    expect(sessionRoleSwitchButtonCopy('professional', roles).title).toBe('Cambiar de rol');
+    expect(nextSessionRoleOnSwitch('client', roles)).toBeNull();
+    expect(nextSessionRoleOnSwitch('professional', roles)).toBeNull();
+    expect(sessionRoleSwitchButtonCopy('client', roles).title).toBe('Cambiar de rol');
   });
 });
 
@@ -124,5 +122,17 @@ describe('el login no usa el ciclo del botón', () => {
     expect(readFileSync('src/constants/defaultLoginRole.ts', 'utf8')).toContain(
       'if (input.hasEnabledCommerce) return \'commerce\'',
     );
+    expect(readFileSync('src/constants/defaultLoginRole.ts', 'utf8')).toContain(
+      'if (input.isWorker) return \'professional\'',
+    );
+  });
+
+  it('perfil y comercio muestran el botón solo cuando hay destino', () => {
+    const account = readFileSync('src/screens/account/MyAccountScreen.tsx', 'utf8');
+    const commerce = readFileSync('src/screens/store/CommerceAccountScreen.tsx', 'utf8');
+    expect(account).toContain('{nextRole && switchCopy ? (');
+    expect(commerce).toContain('{nextRole && switchCopy ? (');
+    expect(account).toContain('hasEnabledCommerce: hasCommerceStore');
+    expect(commerce).toContain('hasEnabledCommerce: hasCommerceStore');
   });
 });
