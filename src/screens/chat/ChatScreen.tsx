@@ -24,6 +24,7 @@ import { ExpandableText } from '../../components/common/ExpandableText';
 import { useAppToast } from '../../components/toast/toast';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { colors, radii, spacing } from '../../constants/theme';
+import { approxDistanceCaption, showChatHeaderSubtitle } from '../../utils/approxDistanceLabel';
 import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { fetchPeerAvatarUrl } from '../../services/profileIdentitySupabase';
 import { useAuth } from '../../context/AuthContext';
@@ -31,7 +32,7 @@ import { useFeed } from '../../context/FeedContext';
 import { useSocket } from '../../context/SocketContext';
 import { useUnreadMessages } from '../../context/UnreadMessagesContext';
 import { fetchConversationReads } from '../../services/conversationReadsSupabase';
-import { sendMessageSupabase } from '../../services/chatSupabase';
+import { fetchApproxChatDistanceKm, sendMessageSupabase } from '../../services/chatSupabase';
 import {
   IMAGE_BODY_PREVIEW,
   sendChatImageMessageSupabase,
@@ -332,6 +333,7 @@ export function ChatScreen({
     workerId: string;
     myRole: 'cliente' | 'trabajador';
   } | null>(null);
+  const [approxDistanceKm, setApproxDistanceKm] = useState<string | null>(null);
   const [peerAvatarUrl, setPeerAvatarUrl] = useState<string | null>(
     otherAvatarUrl?.trim() || null,
   );
@@ -351,6 +353,11 @@ export function ChatScreen({
     if (viewingProfessional) return professionalDisplayNameForClient(otherDisplayName);
     return firstNameOnly(otherDisplayName);
   }, [otherDisplayName, viewingProfessional]);
+  const distanceCaption = useMemo(() => {
+    if (participants?.myRole !== 'trabajador') return null;
+    return approxDistanceCaption(approxDistanceKm);
+  }, [approxDistanceKm, participants?.myRole]);
+  const headerSubtitleVisible = showChatHeaderSubtitle(headerSubtitle, distanceCaption);
 
   const otherUserId = useMemo(() => {
     if (!participants) return null;
@@ -862,6 +869,20 @@ export function ChatScreen({
       cancelled = true;
     };
   }, [conversationId, leaveChat, myId, otherAvatarUrl, toast]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !conversationId || participants?.myRole !== 'trabajador') {
+      setApproxDistanceKm(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchApproxChatDistanceKm(conversationId).then((value) => {
+      if (!cancelled) setApproxDistanceKm(value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, participants?.myRole]);
 
   useEffect(() => {
     if (!isSupabaseConfigured() || !conversationId) return;
@@ -3350,7 +3371,7 @@ export function ChatScreen({
                     {displayName}
                   </Text>
                 )}
-                {headerSubtitle ? (
+                {headerSubtitleVisible ? (
                   <Text style={styles.headerTrade} numberOfLines={1} ellipsizeMode="tail">
                     {headerSubtitle}
                   </Text>
@@ -3448,6 +3469,21 @@ export function ChatScreen({
               </Pressable>
             </View>
           </View>
+          {distanceCaption ? (
+            <View style={styles.headerDistanceRow}>
+              <View
+                style={styles.headerDistance}
+                accessible
+                accessibilityRole="text"
+                accessibilityLabel={distanceCaption}
+              >
+                <Ionicons name="location-outline" size={11} color={colors.textSecondary} />
+                <Text style={styles.headerDistanceText} numberOfLines={1} ellipsizeMode="tail">
+                  {distanceCaption}
+                </Text>
+              </View>
+            </View>
+          ) : null}
         </View>
 
         <KeyboardAvoidingView
@@ -3619,6 +3655,31 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.textSecondary,
     marginTop: 1,
+  },
+  /**
+   * Debajo del nombre, alineada con él: el back (40) + margen de la identidad
+   * + el avatar. No entra en la fila de Cotizar/Materiales, así el nombre
+   * conserva el ancho del rediseño.
+   */
+  headerDistanceRow: {
+    marginTop: 1,
+    paddingLeft: 40 + spacing.xs + 36 + 8,
+    paddingRight: spacing.xs,
+  },
+  headerDistance: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    gap: 3,
+  },
+  headerDistanceText: {
+    flexShrink: 1,
+    fontSize: 11,
+    lineHeight: 13,
+    fontWeight: '500',
+    letterSpacing: 0.1,
+    color: colors.textSecondary,
   },
   headerWarn: { fontSize: 12, fontWeight: '700', color: colors.primary, marginTop: 2 },
   /**
