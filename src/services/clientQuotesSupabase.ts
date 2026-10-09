@@ -23,6 +23,10 @@ import {
   parseIncludeFreightFlag,
   quoteFreightDisplay,
 } from '../utils/quoteFreightTotal';
+import {
+  activeMaterialRequestQuoteCount,
+  isRejectedMaterialQuote,
+} from '../utils/materialQuoteVisibility';
 
 function formatClientStoreAddress(address: string | null | undefined): string {
   const raw = (address ?? '').trim();
@@ -96,7 +100,7 @@ export async function fetchClientMaterialRequests(): Promise<ClientMaterialReque
       created_at,
       client_lat,
       client_lng,
-      quotes ( id )
+      quotes ( id, status )
     `,
     )
     .eq('client_id', user.id)
@@ -107,13 +111,15 @@ export async function fetchClientMaterialRequests(): Promise<ClientMaterialReque
 
   const map = new Map<string, ClientMaterialRequestSummary>();
   for (const row of byRequest ?? []) {
-    const quotes = (row.quotes ?? []) as { id: string }[];
+    const quotes = (row.quotes ?? []) as { id: string; status?: string | null }[];
+    const quoteCount = activeMaterialRequestQuoteCount(quotes);
+    if (quoteCount == null) continue;
     map.set(row.id as string, {
       requestId: row.id as string,
       title: (row.title as string) || 'Pedido',
       status: row.status as MaterialRequestStatus,
       createdAt: row.created_at as string,
-      quoteCount: quotes.length,
+      quoteCount,
       clientLat: row.client_lat != null ? Number(row.client_lat) : null,
       clientLng: row.client_lng != null ? Number(row.client_lng) : null,
     });
@@ -193,6 +199,31 @@ export async function fetchClientMaterialRequests(): Promise<ClientMaterialReque
   return Array.from(map.values()).sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
+}
+
+export type MaterialQuoteStatus = {
+  requestId: string;
+  status: string;
+  storeId: string;
+};
+
+/** Estado real de las cotizaciones de uno o más pedidos, para el botón del chat. */
+export async function fetchMaterialQuoteStatuses(
+  requestIds: string[],
+): Promise<MaterialQuoteStatus[]> {
+  const ids = [...new Set(requestIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return [];
+  const sb = getSupabaseClient();
+  const { data, error } = await sb
+    .from('quotes')
+    .select('request_id, status, store_id')
+    .in('request_id', ids);
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    requestId: String((row as { request_id?: string }).request_id ?? ''),
+    status: String((row as { status?: string }).status ?? ''),
+    storeId: String((row as { store_id?: string }).store_id ?? ''),
+  }));
 }
 
 type StoreEmbed = {
@@ -676,6 +707,7 @@ export async function fetchClientQuotesForRequest(
   const distanceJobs: Array<Promise<void>> = [];
 
   for (const row of (quotesData ?? []) as QuoteRow[]) {
+    if (isRejectedMaterialQuote(row.status)) continue;
     const store = one(row.stores);
     if (!store) continue;
 
