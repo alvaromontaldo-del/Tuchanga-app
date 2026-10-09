@@ -18,11 +18,12 @@ describe('cotizar del profesional sin desglose de costo de servicio', () => {
 
   const modal = sliceBetween(
     chat,
-    '<Text style={styles.modalTitle}>Cotizar</Text>',
+    'styles.modalTitle',
     'accessibilityLabel="Enviar presupuesto"',
   );
 
   it('el modal solo muestra monto, detalle y garantía', () => {
+    expect(modal).toContain("editingQuoteId ? 'Editar presupuesto' : 'Cotizar'");
     expect(modal).toContain('Ingresá el monto que querés cobrar.');
     expect(modal).toContain('>Monto a cobrar<');
     expect(modal).toContain('accessibilityLabel="Monto a cobrar"');
@@ -61,7 +62,7 @@ describe('cotizar del profesional sin desglose de costo de servicio', () => {
     const money = readFileSync('src/components/jobs/QuoteMoneySummary.tsx', 'utf8');
     const worker = sliceBetween(card, 'variant="worker"', 'variant="client"');
     expect(worker).toContain('variant="worker"');
-    expect(worker).toContain('q.net_amount');
+    expect(worker).toContain('formatArs(q.net_amount)');
     expect(worker).not.toContain('q.final_amount');
     expect(money).toContain('Monto a cobrar');
     expect(money).toContain('Precio final');
@@ -122,5 +123,49 @@ describe('cotizar del profesional sin desglose de costo de servicio', () => {
     expect(rpc).toContain('p_warranty_days: warrantyDays');
     expect(rpc).not.toContain('p_comision');
     expect(rpc).not.toContain('p_precio_final');
+  });
+
+  it('editar un presupuesto pendiente no muestra el desglose y usa el RPC del dueño', () => {
+    expect(chat).toContain('accessibilityLabel="Editar presupuesto"');
+    expect(chat).toContain('>Editar<');
+    expect(modal).toContain('editarCotizacion');
+    expect(modal).toContain('contratacionId: editingQuoteId');
+    expect(modal).toContain('precioTrabajador: quoteNetNum');
+    expect(modal).not.toContain('Costo de servicio YaChanga');
+    expect(modal).not.toContain('Precio final');
+    expect(modal).not.toContain('q.final_amount');
+
+    const edit = sliceBetween(
+      crear,
+      'export async function editarCotizacion',
+      'export async function aceptarPrecioCotizado',
+    );
+    expect(edit).toContain("rpc('editar_cotizacion'");
+    expect(edit).toContain('p_precio_trabajador: precio');
+    expect(edit).toContain('p_service_detail: detail');
+    expect(edit).toContain('p_warranty_days: warrantyDays');
+    expect(edit).not.toContain('p_comision');
+    expect(edit).not.toContain('p_precio_final');
+
+    const sql = readFileSync('supabase/20261009_editar_cotizacion_pendiente.sql', 'utf8');
+    expect(sql).toContain('SECURITY DEFINER');
+    expect(sql).toContain("SET search_path TO 'public'");
+    expect(sql).toContain('v_row.worker_id <> auth.uid()');
+    expect(sql).toContain("v_row.estado_trabajo <> 'precio_cotizado'");
+    expect(sql).toContain('calc_precios_contratacion');
+    expect(sql).toContain("RAISE EXCEPTION 'Solo el trabajador puede editar la cotización'");
+    expect(sql).toContain("RAISE EXCEPTION 'Solo se puede editar un presupuesto pendiente'");
+    expect(sql).toContain("RAISE EXCEPTION 'El detalle del servicio es obligatorio'");
+    expect(sql).toContain("RAISE EXCEPTION 'Los días de garantía deben ser entre 1 y 60'");
+    expect(sql).toContain(
+      'REVOKE ALL ON FUNCTION public.editar_cotizacion(uuid, numeric, text, integer) FROM anon',
+    );
+    expect(sql).toContain(
+      'GRANT EXECUTE ON FUNCTION public.editar_cotizacion(uuid, numeric, text, integer) TO authenticated',
+    );
+    expect(sql).not.toMatch(/GRANT\s+EXECUTE[\s\S]*\banon\b/i);
+    expect(sql).not.toContain('_chat_notify_contratacion');
+    expect(sql).toContain('comision_app = v_precios.comision_app');
+    expect(sql).toContain('precio_final = v_precios.precio_final');
   });
 });
