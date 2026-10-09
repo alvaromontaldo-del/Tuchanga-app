@@ -53,6 +53,7 @@ import {
   pickBestQuoteId,
   variantSelectionControl,
 } from '../../utils/pickBestQuote';
+import { visibleMaterialQuotes } from '../../utils/materialQuoteVisibility';
 import type { ClientQuoteCard } from '../../types/materials';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -115,11 +116,13 @@ export function ClientCompareQuotesScreen({ navigation, route }: Props) {
 
   const sections: Section[] = useMemo(
     () =>
-      groups.map((g) => ({
-        title: g.rubroName,
-        rubroId: g.rubroId,
-        data: g.quotes,
-      })),
+      groups
+        .map((g) => ({
+          title: g.rubroName,
+          rubroId: g.rubroId,
+          data: visibleMaterialQuotes(g.quotes),
+        }))
+        .filter((section) => section.data.length > 0),
     [groups],
   );
 

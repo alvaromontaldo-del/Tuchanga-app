@@ -539,6 +539,29 @@ export async function crearCotizacion(params: {
   return String(data);
 }
 
+/** El trabajador corrige su presupuesto mientras sigue pendiente de aceptación. */
+export async function editarCotizacion(params: {
+  contratacionId: string;
+  precioTrabajador: number;
+  serviceDetail?: string;
+  /** null = sin garantía. Si viene un número, tiene que estar entre 1 y 60. */
+  warrantyDays?: number | null;
+}): Promise<void> {
+  const sb = getSupabaseClient();
+  const detail = (params.serviceDetail ?? '').trim();
+  if (!detail) throw new Error('El detalle del servicio es obligatorio.');
+  const warrantyDays = assertWarrantyDays(params.warrantyDays);
+  const precio = Math.ceil(Number(params.precioTrabajador));
+  if (!Number.isFinite(precio) || precio <= 0) throw new Error('Monto inválido');
+  const { error } = await sb.rpc('editar_cotizacion', {
+    p_contratacion_id: params.contratacionId,
+    p_precio_trabajador: precio,
+    p_service_detail: detail,
+    p_warranty_days: warrantyDays,
+  });
+  if (error) throw error;
+}
+
 export async function aceptarPrecioCotizado(contratacionId: string): Promise<void> {
   const sb = getSupabaseClient();
   const { error } = await sb.rpc('aceptar_precio_cotizado', {

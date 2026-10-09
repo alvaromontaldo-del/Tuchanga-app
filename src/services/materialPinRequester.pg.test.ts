@@ -10,7 +10,9 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest';
  * Cliente antes y después de pagar, profesional que creó la solicitud
  * (material_requests.professional_id) antes y después, incluso si ese usuario
  * es dueño del comercio que cotizó. El rol comercio (ni pagador ni creador)
- * sigue sin leer el PIN. El cierre sigue siendo completar_orden_material_con_pin.
+ * sigue sin leer el PIN. La app nueva cierra con completar_orden_material_con_pin_v2.
+ * La RPC original sigue haciendo RAISE para que la app ya publicada no tome
+ * un PIN incorrecto como orden cerrada.
  */
 
 const DB = 'material_pin_requester_test';
@@ -18,6 +20,7 @@ const SQL = resolve(process.cwd(), 'supabase/20261001_card_63_pin_requester.sql'
 const HOURS_SQL = resolve(process.cwd(), 'supabase/20261005_card_48_reveal_opening_hours.sql');
 const LIST_SQL = resolve(process.cwd(), 'supabase/20261005_card_103_client_only_material_pickups.sql');
 const OWN_STORE_SQL = resolve(process.cwd(), 'supabase/20261006_card_205_own_store_pickup_reveal.sql');
+const PIN_ATTEMPTS_SQL = resolve(process.cwd(), 'supabase/20261009_pin_retiro_materiales_intentos.sql');
 
 const CLIENT = '11111111-1111-4111-8111-111111111111';
 const PRO = '22222222-2222-4222-8222-222222222222';
@@ -494,6 +497,40 @@ describe('contrato SQL del PIN para el creador', () => {
     expect(ownStoreSql).toContain('WHEN v_revealed THEN v_store.opening_hours');
     expect(hoursSql).not.toContain('FUNCTION public.completar_orden_material_con_pin');
 
+    const pinSql = readFileSync(PIN_ATTEMPTS_SQL, 'utf8');
+    const returns = pinSql.slice(pinSql.indexOf('RETURNS TABLE'), pinSql.indexOf('LANGUAGE'));
+    expect(pinSql).toContain('FUNCTION public.completar_orden_material_con_pin_v2');
+    expect(pinSql).not.toMatch(/FUNCTION\s+public\.completar_orden_material_con_pin\s*\(/);
+    expect(pinSql).not.toContain("RAISE EXCEPTION 'invalid_pin'");
+    expect(pinSql).toContain("interval '15 minutes'");
+    expect(pinSql).toContain('v_next >= 5');
+    expect(pinSql).toContain('pin_bloqueado_hasta > now()');
+    expect(pinSql).toContain('pin_bloqueado_hasta <= now()');
+    expect(pinSql).toContain('pin_intentos_fallidos = 0');
+    expect(pinSql).toContain('pin_bloqueado_hasta = NULL');
+    expect(pinSql).toContain('#YACH-');
+    expect(pinSql).toContain('order_completed');
+    expect(returns).not.toContain('verification_pin');
+    expect(pinSql).toContain(
+      'REVOKE ALL ON FUNCTION public.completar_orden_material_con_pin_v2(text, text) FROM PUBLIC, anon',
+    );
+    for (const guard of [
+      'not_authenticated',
+      'code_or_pin_required',
+      'order_not_found',
+      'not_store_owner',
+      'deposit_not_paid',
+    ]) {
+      expect(pinSql).toContain(`'${guard}'`);
+    }
+
+    const app = readFileSync(resolve(process.cwd(), 'src/services/clientQuotesSupabase.ts'), 'utf8');
+    const cierreStart = app.indexOf('export async function completarOrdenMaterialConPin');
+    const cierre = app.slice(cierreStart, app.indexOf('\nexport function formatMoneyAr', cierreStart));
+    expect(cierre).toMatch(/rpc\('completar_orden_material_con_pin_v2'/);
+    expect(cierre).not.toMatch(/rpc\('completar_orden_material_con_pin',/);
+    expect(cierre).toContain('errorSiNoCierraOrdenMaterial');
+
     const membershipStart = ownStoreSql.indexOf('-- #103 solo cliente');
     const membership = ownStoreSql.slice(membershipStart, ownStoreSql.indexOf(') x;', membershipStart));
     expect(membership).toContain('mr.client_id = uid');
@@ -513,6 +550,7 @@ describe.skipIf(!postgresAvailable())('PIN de materiales para cliente y creador'
     psql(readFileSync(HOURS_SQL, 'utf8'));
     psql(readFileSync(LIST_SQL, 'utf8'));
     psql(readFileSync(OWN_STORE_SQL, 'utf8'));
+    psql(readFileSync(PIN_ATTEMPTS_SQL, 'utf8'));
     psql(seedSql);
   });
 
@@ -654,5 +692,95 @@ describe.skipIf(!postgresAvailable())('PIN de materiales para cliente y creador'
     expect(reveal(CLIENT, ORDER_SELF)).toBe('5757|1155550000|Av Autocompra 9|2002|true');
     expect(reveal(SELF, ORDER_SELF)).toBe('5757|1155550000|Av Autocompra 9|2002|true');
     expect(myOrder(SELF, ORDER_CLIENT_OWNS)).toBe('6464|1155550000|Av Autocompra 9');
+  });
+
+  it('v2 guarda los fallos, bloquea al quinto y no le muestra el PIN al comercio', () => {
+    const cierre = (code: string, pin: string, uid = OWNER) =>
+      lastLine(
+        asUser(
+          uid,
+          `SELECT status || '|' || pin_intentos_fallidos::text || '|' ||
+                  coalesce(pin_bloqueado_hasta::text, 'null')
+           FROM public.completar_orden_material_con_pin_v2('${code}', '${pin}');`,
+        ),
+      );
+
+    expect(
+      errorText(asUser(null, `SELECT * FROM public.completar_orden_material_con_pin_v2('1001', '4242');`)),
+    ).toMatch(/not_authenticated/);
+    expect(
+      errorText(asUser(OWNER, `SELECT * FROM public.completar_orden_material_con_pin_v2('3003', '9999');`)),
+    ).toMatch(/deposit_not_paid/);
+    expect(
+      errorText(asUser(CLIENT, `SELECT * FROM public.completar_orden_material_con_pin_v2('1001', '4242');`)),
+    ).toMatch(/not_store_owner/);
+    expect(
+      psql(
+        `SELECT has_function_privilege('anon', 'public.completar_orden_material_con_pin_v2(text, text)', 'execute');`,
+      ),
+    ).toBe('f');
+    expect(
+      psql(
+        `SELECT has_function_privilege('authenticated', 'public.completar_orden_material_con_pin_v2(text, text)', 'execute');`,
+      ),
+    ).toBe('t');
+    expect(
+      psql(
+        `SELECT pg_get_function_result('public.completar_orden_material_con_pin_v2(text,text)'::regprocedure);`,
+      ),
+    ).not.toContain('verification_pin');
+
+    const keys = lastLine(
+      asUser(
+        OWNER,
+        `SELECT string_agg(key, ',' ORDER BY key)
+         FROM (
+           SELECT jsonb_object_keys(to_jsonb(r)) AS key
+           FROM public.completar_orden_material_con_pin_v2('8181', '0000') r
+         ) s;`,
+      ),
+    );
+    expect(keys).toBe('order_code,order_id,pin_bloqueado_hasta,pin_intentos_fallidos,status');
+    expect(cierre('8181', '1111')).toBe('invalid_pin|2|null');
+    expect(cierre('8181', '2222')).toBe('invalid_pin|3|null');
+    expect(cierre('8181', '3333')).toBe('invalid_pin|4|null');
+    const fifth = cierre('8181', '4444');
+    expect(fifth.startsWith('pin_bloqueado|5|')).toBe(true);
+    expect(fifth.endsWith('|null')).toBe(false);
+    expect(cierre('8181', '8181')).toBe(fifth);
+    expect(psql(`SELECT status FROM public.orders WHERE id = '${ORDER_AS_CLIENT}';`)).toBe('deposit_paid');
+    expect(reveal(PRO, ORDER_AS_CLIENT)).toBe('8181|1144440000|Calle Falsa 123|8181|true');
+    expect(
+      errorText(asUser(OWNER, `SELECT * FROM public.get_material_order_reveal('${ORDER_AS_CLIENT}');`)),
+    ).toMatch(/not_order_client/);
+
+    psql(
+      `UPDATE public.orders
+       SET pin_bloqueado_hasta = now() - interval '1 minute'
+       WHERE id = '${ORDER_AS_CLIENT}';`,
+    );
+    expect(cierre('8181', '5555')).toBe('invalid_pin|1|null');
+    expect(cierre('8181', '8181')).toBe('completed|0|null');
+    expect(psql(`SELECT status FROM public.orders WHERE id = '${ORDER_AS_CLIENT}';`)).toBe('completed');
+    expect(reveal(PRO, ORDER_AS_CLIENT)).toBe('8181|1144440000|Calle Falsa 123|8181|true');
+    expect(
+      errorText(asUser(OWNER, `SELECT * FROM public.get_material_order_reveal('${ORDER_AS_CLIENT}');`)),
+    ).toMatch(/not_order_client/);
+
+    expect(cierre('7373', '0000')).toBe('invalid_pin|1|null');
+    expect(
+      errorText(asUser(OWNER, `SELECT * FROM public.completar_orden_material_con_pin('7373', '0000');`)),
+    ).toMatch(/invalid_pin/);
+    expect(psql(`SELECT pin_intentos_fallidos::text FROM public.orders WHERE id = '${ORDER_2_OTHER}';`)).toBe(
+      '1',
+    );
+    expect(cierre('7373', '1111')).toBe('invalid_pin|2|null');
+    expect(cierre('7373', '7373')).toBe('completed|0|null');
+    expect(
+      psql(
+        `SELECT status || '|' || pin_intentos_fallidos::text || '|' || coalesce(pin_bloqueado_hasta::text, 'null')
+         FROM public.orders WHERE id = '${ORDER_2_OTHER}';`,
+      ),
+    ).toBe('completed|0|null');
   });
 });

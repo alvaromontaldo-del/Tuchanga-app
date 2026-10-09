@@ -16,6 +16,7 @@ import {
   materialRevealOpeningHoursLabel,
 } from '../utils/clientMaterialPickups';
 import { normalizeOrderCodeInput, normalizePinInput } from '../utils/orderCode';
+import { errorSiNoCierraOrdenMaterial, PinBloqueadoError, pinBloqueadoDesdeRpc } from '../utils/pinBloqueo';
 import {
   buildMaterialCheckoutPayload,
   clientCoordinatesDelivery,
@@ -23,6 +24,10 @@ import {
   parseIncludeFreightFlag,
   quoteFreightDisplay,
 } from '../utils/quoteFreightTotal';
+import {
+  activeMaterialRequestQuoteCount,
+  isRejectedMaterialQuote,
+} from '../utils/materialQuoteVisibility';
 
 function formatClientStoreAddress(address: string | null | undefined): string {
   const raw = (address ?? '').trim();
@@ -96,7 +101,7 @@ export async function fetchClientMaterialRequests(): Promise<ClientMaterialReque
       created_at,
       client_lat,
       client_lng,
-      quotes ( id )
+      quotes ( id, status )
     `,
     )
     .eq('client_id', user.id)
@@ -107,13 +112,15 @@ export async function fetchClientMaterialRequests(): Promise<ClientMaterialReque
 
   const map = new Map<string, ClientMaterialRequestSummary>();
   for (const row of byRequest ?? []) {
-    const quotes = (row.quotes ?? []) as { id: string }[];
+    const quotes = (row.quotes ?? []) as { id: string; status?: string | null }[];
+    const quoteCount = activeMaterialRequestQuoteCount(quotes);
+    if (quoteCount == null) continue;
     map.set(row.id as string, {
       requestId: row.id as string,
       title: (row.title as string) || 'Pedido',
       status: row.status as MaterialRequestStatus,
       createdAt: row.created_at as string,
-      quoteCount: quotes.length,
+      quoteCount,
       clientLat: row.client_lat != null ? Number(row.client_lat) : null,
       clientLng: row.client_lng != null ? Number(row.client_lng) : null,
     });
@@ -193,6 +200,31 @@ export async function fetchClientMaterialRequests(): Promise<ClientMaterialReque
   return Array.from(map.values()).sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
+}
+
+export type MaterialQuoteStatus = {
+  requestId: string;
+  status: string;
+  storeId: string;
+};
+
+/** Estado real de las cotizaciones de uno o más pedidos, para el botón del chat. */
+export async function fetchMaterialQuoteStatuses(
+  requestIds: string[],
+): Promise<MaterialQuoteStatus[]> {
+  const ids = [...new Set(requestIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return [];
+  const sb = getSupabaseClient();
+  const { data, error } = await sb
+    .from('quotes')
+    .select('request_id, status, store_id')
+    .in('request_id', ids);
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    requestId: String((row as { request_id?: string }).request_id ?? ''),
+    status: String((row as { status?: string }).status ?? ''),
+    storeId: String((row as { store_id?: string }).store_id ?? ''),
+  }));
 }
 
 type StoreEmbed = {
@@ -676,6 +708,7 @@ export async function fetchClientQuotesForRequest(
   const distanceJobs: Array<Promise<void>> = [];
 
   for (const row of (quotesData ?? []) as QuoteRow[]) {
+    if (isRejectedMaterialQuote(row.status)) continue;
     const store = one(row.stores);
     if (!store) continue;
 
@@ -1324,11 +1357,16 @@ export async function completarOrdenMaterialConPin(
 
   const sb = getSupabaseClient();
   await sb.auth.getSession();
-  const { data, error } = await sb.rpc('completar_orden_material_con_pin', {
+  // v2 devuelve invalid_pin / pin_bloqueado sin RAISE para que el contador
+  // quede guardado. La RPC original sigue en RAISE: la app ya publicada
+  // tomaría esa fila como orden cerrada.
+  const { data, error } = await sb.rpc('completar_orden_material_con_pin_v2', {
     p_order_code: code,
     p_pin: pinNorm,
   });
   if (error) {
+    const bloqueo = pinBloqueadoDesdeRpc(error);
+    if (bloqueo) throw new PinBloqueadoError(bloqueo.hasta);
     const msg = String(error.message ?? error.details ?? error.hint ?? '');
     if (/invalid_pin/i.test(msg)) throw new Error('PIN incorrecto.');
     if (/order_not_found/i.test(msg)) throw new Error('No encontramos esa orden.');
@@ -1338,8 +1376,16 @@ export async function completarOrdenMaterialConPin(
     if (/not_authenticated/i.test(msg)) throw new Error('Tenés que iniciar sesión.');
     throw new Error(msg.trim() || 'No se pudo cerrar la orden.');
   }
-  const row = Array.isArray(data) ? data[0] : data;
+  const row = (Array.isArray(data) ? data[0] : data) as {
+    order_id?: unknown;
+    order_code?: unknown;
+    status?: unknown;
+    pin_intentos_fallidos?: unknown;
+    pin_bloqueado_hasta?: unknown;
+  } | null;
   if (!row) throw new Error('No se pudo completar la orden.');
+  const fallo = errorSiNoCierraOrdenMaterial(row);
+  if (fallo) throw fallo;
   return {
     orderId: String(row.order_id),
     orderCode: String(row.order_code),

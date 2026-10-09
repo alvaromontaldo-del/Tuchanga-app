@@ -112,6 +112,7 @@ import {
   rechazarDisponibilidad,
   rechazarRecotizacion,
   recotizarEnCurso,
+  editarCotizacion,
   type RecotizacionHistorial,
 } from '../../services/contratacionesSupabase';
 import type { DisponibilidadOpcion } from '../../types/contrataciones';
@@ -137,6 +138,8 @@ import {
   serviceFeePayBarCopy,
 } from '../../utils/recotizarUi';
 import { dedupeMaterialServiceFeePaidMessages } from '../../utils/materialFeePaidChat';
+import { materialQuoteChatCard } from '../../utils/materialQuoteVisibility';
+import { fetchMaterialQuoteStatuses } from '../../services/clientQuotesSupabase';
 import { newRandomUserId } from '../../utils/stableUserId';
 import { mapChatSendError } from '../../utils/chatErrors';
 import {
@@ -147,6 +150,7 @@ import {
 import { setActiveConversationForNotifications } from '../../services/chatFocus';
 import {
   amountToArsInput,
+  formatArs,
   formatMoneyCeilAr,
   maskArsInput,
   parseArsInput,
@@ -487,6 +491,12 @@ export function ChatScreen({
     [incluyeGarantia, warrantyDaysNum],
   );
   const [replacesQuoteId, setReplacesQuoteId] = useState<string | null>(null);
+  const [editingQuoteId, setEditingQuoteId] = useState<string | null>(null);
+  const [materialQuotesByRequest, setMaterialQuotesByRequest] = useState<Map<
+    string,
+    { status: string; storeId: string }[]
+  > | null>(null);
+  const [materialQuoteTick, setMaterialQuoteTick] = useState(0);
   const [job, setJob] = useState<ServiceJob | null>(null);
   const [recotizaciones, setRecotizaciones] = useState<RecotizacionHistorial[]>([]);
   const [clientPin, setClientPin] = useState<string | null>(null);
@@ -948,6 +958,54 @@ export function ChatScreen({
     };
   }, [conversationId]);
 
+  const materialRequestIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const message of messages) {
+      const parsed = isMaterialQuoteMessage(message);
+      const key = parsed?.requestKey ?? '';
+      if (!key || key.startsWith('quote:') || key.startsWith('msg:')) continue;
+      ids.add(key);
+    }
+    return [...ids].sort();
+  }, [messages]);
+
+  useFocusEffect(
+    useCallback(() => {
+      setMaterialQuoteTick((n) => n + 1);
+    }, []),
+  );
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) {
+      setMaterialQuotesByRequest(null);
+      return;
+    }
+    if (materialRequestIds.length === 0) {
+      setMaterialQuotesByRequest(new Map());
+      return;
+    }
+    let cancelled = false;
+    void fetchMaterialQuoteStatuses(materialRequestIds)
+      .then((rows) => {
+        if (cancelled) return;
+        const map = new Map<string, { status: string; storeId: string }[]>();
+        for (const id of materialRequestIds) map.set(id, []);
+        for (const row of rows) {
+          if (!row.requestId) continue;
+          const list = map.get(row.requestId) ?? [];
+          list.push({ status: row.status, storeId: row.storeId });
+          map.set(row.requestId, list);
+        }
+        setMaterialQuotesByRequest(map);
+      })
+      .catch(() => {
+        if (!cancelled) setMaterialQuotesByRequest(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [materialQuoteTick, materialRequestIds]);
+
   const visibleMessages = useMemo(() => {
     const filtered = messages.filter((m) => {
       const meta = normalizeMessageMetadata(m.metadata);
@@ -1076,7 +1134,7 @@ export function ChatScreen({
 
     const keepIds = new Set(enrichedById.keys());
 
-    return dedupeMaterialServiceFeePaidMessages(
+    const listed = dedupeMaterialServiceFeePaidMessages(
       filtered
         .filter((m) => {
           if (!isMaterialQuoteMessage(m)) return true;
@@ -1084,7 +1142,17 @@ export function ChatScreen({
         })
         .map((m) => enrichedById.get(m.id) ?? m),
     );
-  }, [messages, participants?.myRole]);
+    if (!materialQuotesByRequest) return listed;
+    return listed.filter((m) => {
+      const parsed = isMaterialQuoteMessage(m);
+      const key = parsed?.requestKey ?? '';
+      if (!parsed || !key || !materialQuotesByRequest.has(key)) return true;
+      return materialQuoteChatCard(materialQuotesByRequest.get(key) ?? [], {
+        quoteCount: 1,
+        storeCount: 1,
+      }).show;
+    });
+  }, [materialQuotesByRequest, messages, participants?.myRole]);
 
   const refreshAgendaOpciones = useCallback(async (contratacionId: string) => {
     try {
@@ -1778,14 +1846,25 @@ export function ChatScreen({
         const metaKind = String(meta.kind ?? '');
         if (metaKind === 'material_quote') {
           const requestId = materialQuoteRequestKey(meta);
-          const storeCount = Math.max(
+          const fallbackStoreCount = Math.max(
             Number(meta.storeCount ?? meta.store_count) || 0,
             1,
           );
-          const quoteCount = Math.max(
+          const fallbackQuoteCount = Math.max(
             Number(meta.quoteCount ?? meta.quote_count) || 0,
-            storeCount,
+            fallbackStoreCount,
           );
+          const knownQuotes =
+            requestId && materialQuotesByRequest?.has(requestId)
+              ? (materialQuotesByRequest.get(requestId) ?? [])
+              : null;
+          const materialCard = materialQuoteChatCard(knownQuotes, {
+            quoteCount: fallbackQuoteCount,
+            storeCount: fallbackStoreCount,
+          });
+          if (!materialCard.show) return null;
+          const storeCount = materialCard.storeCount;
+          const quoteCount = materialCard.quoteCount;
           const countLabel =
             storeCount > 1
               ? `${storeCount} comercios`
@@ -1888,7 +1967,7 @@ export function ChatScreen({
                   <Text style={styles.quoteLine}>{quoteWarrantyLabel(q.warranty_days)}</Text>
 
                   {myRole === 'trabajador' ? (
-                    <QuoteMoneySummary variant="worker" amount={formatMoneyCeilAr(q.net_amount)} />
+                    <QuoteMoneySummary variant="worker" amount={formatArs(q.net_amount)} />
                   ) : myRole === 'cliente' ? (
                     <QuoteMoneySummary
                       variant="client"
@@ -1898,6 +1977,42 @@ export function ChatScreen({
                         computeSaldoPendiente(q.final_amount, q.final_amount - q.net_amount),
                       )}
                     />
+                  ) : null}
+
+                  {participants?.myRole === 'trabajador' && q.status === 'pending' ? (
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.quoteBtn,
+                        styles.quoteBtnPrimary,
+                        { marginTop: spacing.sm },
+                        pressed && styles.pressed,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Editar presupuesto"
+                      onPress={() => {
+                        setEditingQuoteId(q.id);
+                        setReplacesQuoteId(null);
+                        setQuoteNetAmount(Math.max(0, Math.floor(Number(q.net_amount) || 0)));
+                        setQuoteNetText(
+                          amountToArsInput(Math.max(0, Math.floor(Number(q.net_amount) || 0))),
+                        );
+                        setQuoteDetail(q.service_detail ?? '');
+                        if (
+                          q.warranty_days != null &&
+                          q.warranty_days >= WARRANTY_DAYS_MIN &&
+                          q.warranty_days <= WARRANTY_DAYS_MAX
+                        ) {
+                          setIncluyeGarantia(true);
+                          setWarrantyDaysText(String(q.warranty_days));
+                        } else {
+                          setIncluyeGarantia(false);
+                          setWarrantyDaysText('');
+                        }
+                        setQuoteModalOpen(true);
+                      }}
+                    >
+                      <Text style={styles.quoteBtnPrimaryText}>Editar</Text>
+                    </Pressable>
                   ) : null}
 
                   {q.status !== 'rejected' ? (
@@ -2067,6 +2182,7 @@ export function ChatScreen({
       recotizacionesById,
       latestQuoteAny,
       latestRejected?.id,
+      materialQuotesByRequest,
       myId,
       navigation,
       participants?.myRole,
@@ -2787,10 +2903,19 @@ export function ChatScreen({
             visible={quoteModalOpen}
             transparent
             animationType="fade"
-            onRequestClose={() => setQuoteModalOpen(false)}
+            onRequestClose={() => {
+              setQuoteModalOpen(false);
+              setEditingQuoteId(null);
+            }}
           >
             <AppKeyboardAvoidingView style={styles.flex} keyboardVerticalOffset={0}>
-              <Pressable style={styles.modalBackdrop} onPress={() => setQuoteModalOpen(false)}>
+              <Pressable
+                style={styles.modalBackdrop}
+                onPress={() => {
+                  setQuoteModalOpen(false);
+                  setEditingQuoteId(null);
+                }}
+              >
                 <Pressable
                   style={[styles.modalCard, { paddingBottom: spacing.lg + Math.max(insets.bottom, 0) }]}
                   onPress={() => {}}
@@ -2799,7 +2924,9 @@ export function ChatScreen({
                     keyboardShouldPersistTaps="handled"
                     contentContainerStyle={styles.modalScrollContent}
                   >
-                    <Text style={styles.modalTitle}>Cotizar</Text>
+                    <Text style={styles.modalTitle}>
+                      {editingQuoteId ? 'Editar presupuesto' : 'Cotizar'}
+                    </Text>
                     <Text style={styles.modalText}>Ingresá el monto que querés cobrar.</Text>
 
                     <Text style={styles.fieldLabel}>Monto a cobrar</Text>
@@ -2870,7 +2997,10 @@ export function ChatScreen({
                           styles.modalBtnGhost,
                           pressed && styles.pressed,
                         ]}
-                        onPress={() => setQuoteModalOpen(false)}
+                        onPress={() => {
+                          setQuoteModalOpen(false);
+                          setEditingQuoteId(null);
+                        }}
                       >
                         <Text style={styles.modalBtnGhostText}>Cancelar</Text>
                       </Pressable>
@@ -2902,16 +3032,26 @@ export function ChatScreen({
                           setQuoteSubmitting(true);
                           void (async () => {
                             try {
-                              await createQuote({
-                                conversationId,
-                                workerId: participants.workerId,
-                                clientId: participants.clientId,
-                                netAmount: quoteNetNum,
-                                serviceDetail: quoteDetail,
-                                replacesQuoteId,
-                                warrantyDays: incluyeGarantia ? warrantyDaysNum : null,
-                              });
+                              if (editingQuoteId) {
+                                await editarCotizacion({
+                                  contratacionId: editingQuoteId,
+                                  precioTrabajador: quoteNetNum,
+                                  serviceDetail: quoteDetail,
+                                  warrantyDays: incluyeGarantia ? warrantyDaysNum : null,
+                                });
+                              } else {
+                                await createQuote({
+                                  conversationId,
+                                  workerId: participants.workerId,
+                                  clientId: participants.clientId,
+                                  netAmount: quoteNetNum,
+                                  serviceDetail: quoteDetail,
+                                  replacesQuoteId,
+                                  warrantyDays: incluyeGarantia ? warrantyDaysNum : null,
+                                });
+                              }
                               setQuoteModalOpen(false);
+                              setEditingQuoteId(null);
                               setQuoteNetAmount(0);
                               setQuoteNetText('');
                               setQuoteDetail('');
@@ -3241,6 +3381,7 @@ export function ChatScreen({
                         return;
                       }
                       setQuoteModalOpen(true);
+                      setEditingQuoteId(null);
                       setReplacesQuoteId(null);
                       setQuoteNetAmount(0);
                       setQuoteNetText('');
