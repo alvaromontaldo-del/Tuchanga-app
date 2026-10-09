@@ -8,9 +8,9 @@ import {
   validateWorkerProfileTexts,
 } from './contactModeration';
 import { mapContentModerationError } from './contentModerationErrors';
+import { OFFPLATFORM_NOTICE, redactOffplatformContact } from './offplatformContact';
 
-const POLICY =
-  'Por políticas de seguridad, no está permitido compartir datos de contacto fuera de la plataforma.';
+const POLICY = OFFPLATFORM_NOTICE;
 
 const MESSAGE_TYPES = ['text', 'image', 'budget', 'quotation'] as const;
 
@@ -33,58 +33,47 @@ const ALLOWED_TEXTS = [
 const PHONES = ['11 1234 5678', '364565566', '+54 9 11 5555-6666', '11-5555-6666', '11.5555.6666'];
 const EMAILS = ['juan@mail.com', 'Ana.Perez+obra@gmail.com'];
 
-describe('moderación anti-contacto relajada', () => {
-  it.each(ALLOWED_TEXTS)('deja pasar «%s»', (text) => {
+describe('el envío no se rechaza: el dato se reemplaza', () => {
+  it.each(ALLOWED_TEXTS)('no bloquea «%s»', (text) => {
     expect(contactBlockedReason(text)).toBeNull();
     expect(validateContactInfo(text).blocked).toBe(false);
     expect(detectBlockedContact(text)).toBeNull();
   });
 
-  it.each(PHONES)('bloquea el teléfono «%s»', (text) => {
-    expect(contactBlockedReason(text)).toBe('telefono_num');
-    const result = validateContactInfo(text);
-    expect(result.blocked).toBe(true);
-    expect(result.message).toBe(POLICY);
-    expect(detectBlockedContact(text)?.keyword).toBe('telefono_num');
+  it.each(PHONES)('no rechaza el teléfono «%s» y lo reemplaza', (text) => {
+    expect(contactBlockedReason(text)).toBeNull();
+    expect(validateContactInfo(text).blocked).toBe(false);
+    expect(detectBlockedContact(text)).toBeNull();
+    expect(redactOffplatformContact(text).changed).toBe(true);
+    expect(redactOffplatformContact(text).notice).toBe(POLICY);
   });
 
-  it.each(EMAILS)('bloquea el email «%s»', (text) => {
-    expect(contactBlockedReason(text)).toBe('email');
-    expect(validateContactInfo(text).message).toBe(POLICY);
+  it.each(EMAILS)('no rechaza el email «%s» y lo reemplaza', (text) => {
+    expect(contactBlockedReason(text)).toBeNull();
+    expect(redactOffplatformContact(text).kinds).toContain('email');
   });
 
-  it.each(MESSAGE_TYPES)('en mensajes %s deja pasar palabras de obra y bloquea contacto', (type) => {
-    for (const text of ALLOWED_TEXTS) {
+  it.each(MESSAGE_TYPES)('en mensajes %s no rechaza palabras de obra ni el contacto', (type) => {
+    for (const text of [...ALLOWED_TEXTS, ...PHONES, ...EMAILS]) {
       expect(messageContactBlockedReason(type, text, {})).toBeNull();
     }
-    for (const text of PHONES) {
-      expect(messageContactBlockedReason(type, text, {})).toBe('telefono_num');
-    }
-    for (const text of EMAILS) {
-      expect(messageContactBlockedReason(type, text, {})).toBe('email');
-    }
   });
 
-  it('modera el epígrafe de la imagen y la descripción del presupuesto', () => {
+  it('no rechaza el epígrafe ni la descripción: el dato se reemplaza aparte', () => {
     expect(
       messageContactBlockedReason('image', '📷 Foto', { caption: 'cinta aisladora y cable' }),
     ).toBeNull();
     expect(
       messageContactBlockedReason('image', '📷 Foto', { caption: '11 1234 5678' }),
-    ).toBe('telefono_num');
+    ).toBeNull();
+    expect(redactOffplatformContact('11 1234 5678').kinds).toContain('telefono');
     expect(
       messageContactBlockedReason('budget', 'Presupuesto', {
         service_detail: 'cinta y cable, se viene el calor',
       }),
     ).toBeNull();
     expect(
-      messageContactBlockedReason('budget', 'Presupuesto', { description: 'juan@mail.com' }),
-    ).toBe('email');
-    expect(
       messageContactBlockedReason('quotation', 'Cotización', { service_detail: '364565566' }),
-    ).toBe('telefono_num');
-    expect(
-      messageContactBlockedReason('quotation', 'Cotización', { title: 'cinta' }),
     ).toBeNull();
   });
 

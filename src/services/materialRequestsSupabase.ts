@@ -1,4 +1,5 @@
 import { normalizeDisplayAddress } from '../utils/formatAddress';
+import { offplatformSubmitText } from '../utils/offplatformContact';
 import {
   isMissingDeliveryAddressRpc,
   pickJobClientDelivery,
@@ -282,7 +283,7 @@ export async function createMaterialRequestWithTargets(
   const sb = getSupabaseClient();
   await sb.auth.getSession();
 
-  const title = input.title.trim();
+  const title = offplatformSubmitText(input.title);
   if (!title) throw new Error('Ingresá un título para la solicitud.');
   if (input.items.length === 0) throw new Error('Agregá al menos un ítem.');
   if (input.storeIds.length < 1) {
@@ -375,7 +376,7 @@ export async function createMaterialRequestWithTargets(
 
   const itemRows = input.items.map((item, index) => ({
     request_id: requestId,
-    description: item.description.trim(),
+    description: offplatformSubmitText(item.description),
     // Compat schema: cantidad/UM viven en la descripción; el comercio cotiza un precio total.
     quantity: 1,
     unit: 'u',

@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../lib/supabase';
+import { offplatformSubmitText } from '../utils/offplatformContact';
 import { removeSupabaseRealtimeTopic } from '../lib/supabaseRealtime';
 import {
   type Contratacion,
@@ -526,7 +527,7 @@ export async function crearCotizacion(params: {
   warrantyDays?: number | null;
 }): Promise<string> {
   const sb = getSupabaseClient();
-  const detail = (params.serviceDetail ?? '').trim();
+  const detail = offplatformSubmitText(params.serviceDetail ?? '');
   if (!detail) throw new Error('El detalle del servicio es obligatorio.');
   const warrantyDays = assertWarrantyDays(params.warrantyDays);
   const { data, error } = await sb.rpc('crear_cotizacion', {
@@ -548,7 +549,7 @@ export async function editarCotizacion(params: {
   warrantyDays?: number | null;
 }): Promise<void> {
   const sb = getSupabaseClient();
-  const detail = (params.serviceDetail ?? '').trim();
+  const detail = offplatformSubmitText(params.serviceDetail ?? '');
   if (!detail) throw new Error('El detalle del servicio es obligatorio.');
   const warrantyDays = assertWarrantyDays(params.warrantyDays);
   const precio = Math.ceil(Number(params.precioTrabajador));

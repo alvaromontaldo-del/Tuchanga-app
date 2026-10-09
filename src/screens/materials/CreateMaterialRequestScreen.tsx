@@ -13,6 +13,8 @@ import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AppButton } from '../../components/common/AppButton';
+import { OffplatformNotice } from '../../components/chat/OffplatformNotice';
+import { offplatformSubmitText } from '../../utils/offplatformContact';
 import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
 import { SingleSelectModal } from '../../components/common/SingleSelectModal';
 import { useAppToast } from '../../components/toast/toast';
@@ -141,7 +143,7 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
     }
     const cleaned: MaterialItemDraft[] = [];
     for (const it of items) {
-      const description = it.description.trim();
+      const description = offplatformSubmitText(it.description);
       if (!description) {
         toast.warning('Completá cada ítem.', 'Ítems');
         return;
@@ -156,11 +158,12 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
       return;
     }
 
-    const autoTitle =
+    const autoTitle = offplatformSubmitText(
       title.trim() ||
-      (cleaned[0]?.description
-        ? cleaned[0].description.slice(0, 60)
-        : 'Pedido de materiales');
+        (cleaned[0]?.description
+          ? cleaned[0].description.slice(0, 60)
+          : 'Pedido de materiales'),
+    );
 
     try {
       const result = await submit({
@@ -240,7 +243,8 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
 
         <Text style={styles.sectionLabel}>Ítems</Text>
         {items.map((item, index) => (
-          <View key={item.localId} style={styles.itemRow}>
+          <View key={item.localId}>
+            <View style={styles.itemRow}>
             <TextInput
               ref={(ref) => {
                 if (ref) inputRefs.current.set(item.localId, ref);
@@ -263,6 +267,8 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
                 <Ionicons name="close" size={20} color={colors.textSecondary} />
               </Pressable>
             ) : null}
+            </View>
+            <OffplatformNotice text={item.description} />
           </View>
         ))}
 

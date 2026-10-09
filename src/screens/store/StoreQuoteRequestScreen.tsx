@@ -18,6 +18,7 @@ import {
   View,
 } from 'react-native';
 import { AppButton } from '../../components/common/AppButton';
+import { OffplatformNotice } from '../../components/chat/OffplatformNotice';
 import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
 import { useAppToast } from '../../components/toast/toast';
 import { colors, radii, spacing } from '../../constants/theme';
@@ -562,6 +563,7 @@ const QuoteItemRow = memo(function QuoteItemRow({
             maxLength={120}
             accessibilityLabel="Producto alternativo"
           />
+          <OffplatformNotice text={variants[0]?.label ?? ''} />
           <View style={styles.unitPriceField}>
             <Text style={styles.fieldLabel}>Precio del alternativo $</Text>
             <TextInput
@@ -599,6 +601,7 @@ const QuoteItemRow = memo(function QuoteItemRow({
                   maxLength={120}
                   accessibilityLabel="Marca"
                 />
+                <OffplatformNotice text={v.label} />
               </View>
               <View style={styles.unitPriceField}>
                 <Text style={styles.fieldLabel}>Precio unitario $</Text>
@@ -654,6 +657,7 @@ const QuoteItemRow = memo(function QuoteItemRow({
         style={styles.itemNoteInput}
         maxLength={160}
       />
+      <OffplatformNotice text={draft.itemNote} />
     </View>
   );
 });
@@ -768,6 +772,7 @@ function NotesBlock({
         maxLength={500}
         textAlignVertical="top"
       />
+      <OffplatformNotice text={text} />
     </View>
   );
 }
