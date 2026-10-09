@@ -16,6 +16,7 @@ import {
   materialRevealOpeningHoursLabel,
 } from '../utils/clientMaterialPickups';
 import { normalizeOrderCodeInput, normalizePinInput } from '../utils/orderCode';
+import { errorSiNoCierraOrdenMaterial, PinBloqueadoError, pinBloqueadoDesdeRpc } from '../utils/pinBloqueo';
 import {
   buildMaterialCheckoutPayload,
   clientCoordinatesDelivery,
@@ -1324,11 +1325,16 @@ export async function completarOrdenMaterialConPin(
 
   const sb = getSupabaseClient();
   await sb.auth.getSession();
-  const { data, error } = await sb.rpc('completar_orden_material_con_pin', {
+  // v2 devuelve invalid_pin / pin_bloqueado sin RAISE para que el contador
+  // quede guardado. La RPC original sigue en RAISE: la app ya publicada
+  // tomaría esa fila como orden cerrada.
+  const { data, error } = await sb.rpc('completar_orden_material_con_pin_v2', {
     p_order_code: code,
     p_pin: pinNorm,
   });
   if (error) {
+    const bloqueo = pinBloqueadoDesdeRpc(error);
+    if (bloqueo) throw new PinBloqueadoError(bloqueo.hasta);
     const msg = String(error.message ?? error.details ?? error.hint ?? '');
     if (/invalid_pin/i.test(msg)) throw new Error('PIN incorrecto.');
     if (/order_not_found/i.test(msg)) throw new Error('No encontramos esa orden.');
@@ -1338,8 +1344,16 @@ export async function completarOrdenMaterialConPin(
     if (/not_authenticated/i.test(msg)) throw new Error('Tenés que iniciar sesión.');
     throw new Error(msg.trim() || 'No se pudo cerrar la orden.');
   }
-  const row = Array.isArray(data) ? data[0] : data;
+  const row = (Array.isArray(data) ? data[0] : data) as {
+    order_id?: unknown;
+    order_code?: unknown;
+    status?: unknown;
+    pin_intentos_fallidos?: unknown;
+    pin_bloqueado_hasta?: unknown;
+  } | null;
   if (!row) throw new Error('No se pudo completar la orden.');
+  const fallo = errorSiNoCierraOrdenMaterial(row);
+  if (fallo) throw fallo;
   return {
     orderId: String(row.order_id),
     orderCode: String(row.order_code),

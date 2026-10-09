@@ -127,3 +127,55 @@ export function resultadoVerificacionPin(input: {
   }
   return { type: 'incorrecto', message: 'PIN incorrecto' };
 }
+
+function intentosFila(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+/**
+ * Fila de `completar_orden_material_con_pin_v2`.
+ * `invalid_pin` y `pin_bloqueado` son error: la app vieja, si viera una fila
+ * sin excepción, mostraría la orden como cerrada.
+ */
+export function errorCierrePinMaterial(input: {
+  status: unknown;
+  pinIntentosFallidos?: unknown;
+  pinBloqueadoHasta?: unknown;
+}): Error | null {
+  const status = typeof input.status === 'string' ? input.status : '';
+  if (status === 'pin_bloqueado') {
+    return new PinBloqueadoError(parsePinBloqueadoHasta(input.pinBloqueadoHasta));
+  }
+  if (status !== 'invalid_pin') return null;
+  const resultado = resultadoVerificacionPin({
+    ok: false,
+    pinIntentosFallidos: intentosFila(input.pinIntentosFallidos),
+  });
+  if (resultado.type === 'bloqueado') return new PinBloqueadoError(resultado.hasta);
+  if (resultado.type === 'incorrecto' || resultado.type === 'error') {
+    return new Error(resultado.message);
+  }
+  return new Error('PIN incorrecto.');
+}
+
+/** null solo si la fila es un cierre real (`status = completed`). */
+export function errorSiNoCierraOrdenMaterial(row: {
+  status?: unknown;
+  pin_intentos_fallidos?: unknown;
+  pin_bloqueado_hasta?: unknown;
+}): Error | null {
+  const status = typeof row.status === 'string' ? row.status : '';
+  const fallo = errorCierrePinMaterial({
+    status,
+    pinIntentosFallidos: row.pin_intentos_fallidos,
+    pinBloqueadoHasta: row.pin_bloqueado_hasta,
+  });
+  if (fallo) return fallo;
+  if (status !== 'completed') return new Error('No se pudo cerrar la orden.');
+  return null;
+}

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   PinBloqueadoError,
+  errorCierrePinMaterial,
+  errorSiNoCierraOrdenMaterial,
   horaBuenosAires,
   mensajePinBloqueado,
   pinBloqueadoDesdeRpc,
@@ -111,5 +113,39 @@ describe('resultado de verificar el PIN', () => {
     expect(error.message).toContain('hasta las 17:04');
     const result = resultadoVerificacionPin({ ok: null, error, now: AHORA_DENTRO });
     expect(result.type).toBe('bloqueado');
+  });
+});
+
+describe('cierre de orden de materiales', () => {
+  it('un PIN incorrecto es error y dice cuántos intentos quedan', () => {
+    expect(errorCierrePinMaterial({ status: 'invalid_pin', pinIntentosFallidos: 1 })?.message).toBe(
+      'PIN incorrecto. Te quedan 4 intentos.',
+    );
+    expect(errorCierrePinMaterial({ status: 'invalid_pin', pinIntentosFallidos: '4' })?.message).toBe(
+      'PIN incorrecto. Te queda 1 intento.',
+    );
+    expect(errorSiNoCierraOrdenMaterial({ status: 'invalid_pin', pin_intentos_fallidos: 2 })).toBeInstanceOf(
+      Error,
+    );
+  });
+
+  it('el bloqueo es error con la hora y no cuenta como orden cerrada', () => {
+    const error = errorSiNoCierraOrdenMaterial({
+      status: 'pin_bloqueado',
+      pin_intentos_fallidos: 5,
+      pin_bloqueado_hasta: HASTA.toISOString(),
+    });
+    expect(error).toBeInstanceOf(PinBloqueadoError);
+    expect(error?.message).toContain('hasta las 17:04');
+  });
+
+  it('solo status completed sigue el camino de éxito', () => {
+    expect(
+      errorSiNoCierraOrdenMaterial({ status: 'completed', pin_intentos_fallidos: 0 }),
+    ).toBeNull();
+    expect(errorSiNoCierraOrdenMaterial({ status: 'deposit_paid' })?.message).toBe(
+      'No se pudo cerrar la orden.',
+    );
+    expect(errorCierrePinMaterial({ status: 'completed' })).toBeNull();
   });
 });
