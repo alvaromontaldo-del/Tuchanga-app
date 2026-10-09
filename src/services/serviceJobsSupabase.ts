@@ -27,6 +27,7 @@ export type ServiceJob = {
   description: string;
   estado_trabajo: ContratacionEstadoTrabajo;
   estado_pago: ContratacionEstadoPago;
+  fecha_trabajo: string | null;
   work_status: JobWorkStatus;
   payment_status: JobPaymentStatus;
   paid_at: string | null;
@@ -64,6 +65,7 @@ export function contratacionToServiceJob(c: Contratacion): ServiceJob {
     description: c.service_detail,
     estado_trabajo: c.estado_trabajo,
     estado_pago: c.estado_pago,
+    fecha_trabajo: c.fecha_trabajo,
     work_status,
     payment_status,
     paid_at: c.seña_pagada_at ?? c.paid_at,

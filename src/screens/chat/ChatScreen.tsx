@@ -23,8 +23,9 @@ import { ClickableAvatar } from '../../components/common/ClickableAvatar';
 import { ExpandableText } from '../../components/common/ExpandableText';
 import { useAppToast } from '../../components/toast/toast';
 import { isSupabaseConfigured } from '../../config/supabase';
-import { colors, radii, spacing } from '../../constants/theme';
+import { colors, radii, shadows, spacing } from '../../constants/theme';
 import { approxDistanceCaption, showChatHeaderSubtitle } from '../../utils/approxDistanceLabel';
+import { canShowQuoteStreet } from '../../utils/quoteCardStreet';
 import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { fetchPeerAvatarUrl } from '../../services/profileIdentitySupabase';
 import { useAuth } from '../../context/AuthContext';
@@ -109,6 +110,7 @@ import {
   fetchDisponibilidadOpciones,
   aceptarRecotizacion,
   fetchRecotizaciones,
+  obtenerDireccionCliente,
   obtenerPinCliente,
   rechazarDisponibilidad,
   rechazarRecotizacion,
@@ -505,6 +507,7 @@ export function ChatScreen({
   > | null>(null);
   const [materialQuoteTick, setMaterialQuoteTick] = useState(0);
   const [job, setJob] = useState<ServiceJob | null>(null);
+  const [quoteStreet, setQuoteStreet] = useState<string | null>(null);
   const [recotizaciones, setRecotizaciones] = useState<RecotizacionHistorial[]>([]);
   const [clientPin, setClientPin] = useState<string | null>(null);
   const [review, setReview] = useState<Awaited<ReturnType<typeof fetchReviewForJob>>>(null);
@@ -668,6 +671,33 @@ export function ChatScreen({
     () => recotizacionResponseById(messages),
     [messages],
   );
+
+  const quoteStreetGate = canShowQuoteStreet({
+    role: participants?.myRole,
+    quoteId: job?.id,
+    jobId: job?.id,
+    estadoPago: job?.estado_pago,
+    estadoTrabajo: job?.estado_trabajo,
+    fechaTrabajo: job?.fecha_trabajo,
+  });
+
+  useEffect(() => {
+    if (!quoteStreetGate || !job?.id) {
+      setQuoteStreet(null);
+      return;
+    }
+    let cancelled = false;
+    void obtenerDireccionCliente(job.id)
+      .then((direccion) => {
+        if (!cancelled) setQuoteStreet(direccion.direccion_texto.trim() || null);
+      })
+      .catch(() => {
+        if (!cancelled) setQuoteStreet(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [quoteStreetGate, job?.id]);
 
   useEffect(() => {
     if (!showClientPinBar || !job?.id) {
@@ -1942,13 +1972,26 @@ export function ChatScreen({
                 ? { label: 'Rechazado', icon: 'close-circle-outline' as const, tone: 'rejected' as const }
                 : status === 'seña_pagada'
                   ? {
-                      label: COSTO_SERVICIO_PAGADO,
+                      label: 'Servicio pagado',
                       icon: 'card-outline' as const,
                       tone: 'seña_pagada' as const,
                     }
                   : status === 'paid'
                     ? { label: 'Pagado', icon: 'card-outline' as const, tone: 'paid' as const }
                     : { label: '—', icon: 'help-circle-outline' as const, tone: 'pending' as const };
+        const detailText = q?.service_detail?.trim() ?? '';
+        const showStreet = Boolean(
+          q &&
+            quoteStreet &&
+            canShowQuoteStreet({
+              role: myRole,
+              quoteId: q.id,
+              jobId: job?.id,
+              estadoPago: job?.estado_pago,
+              estadoTrabajo: job?.estado_trabajo,
+              fechaTrabajo: job?.fecha_trabajo,
+            }),
+        );
         return (
           <View style={[styles.row, mine ? styles.rowMine : styles.rowOther]}>
             <View
@@ -1961,7 +2004,7 @@ export function ChatScreen({
               ]}
             >
               <View style={styles.quoteTopRow}>
-                <Text style={styles.quoteTitle}>Presupuesto</Text>
+                <Text style={styles.quoteTitle} numberOfLines={1} ellipsizeMode="tail">Presupuesto</Text>
                 <View
                   style={[
                     styles.quoteBadge,
@@ -1971,21 +2014,36 @@ export function ChatScreen({
                     badge.tone === 'paid' && styles.quoteBadgePaid,
                   ]}
                 >
-                  <Ionicons name={badge.icon} size={14} color={colors.text} />
-                  <Text style={styles.quoteBadgeText}>{badge.label}</Text>
+                  <Ionicons name={badge.icon} size={13} color={colors.textSecondary} />
+                  <Text style={styles.quoteBadgeText} numberOfLines={1}>
+                    {badge.label}
+                  </Text>
                 </View>
               </View>
               {q ? (
-                <>
-                  {q.service_detail?.trim() ? (
+                <View style={styles.quoteBody}>
+                  {detailText &&
+                  !(showStreet && detailText.toLowerCase() === quoteStreet?.toLowerCase()) ? (
                     <ExpandableText
-                      text={q.service_detail.trim()}
+                      text={detailText}
                       numberOfLinesCollapsed={4}
                       textStyle={styles.quoteDetail}
                     />
                   ) : null}
 
-                  <Text style={styles.quoteLine}>{quoteWarrantyLabel(q.warranty_days)}</Text>
+                  {showStreet ? (
+                    <View style={styles.quoteAddressRow}>
+                      <Ionicons
+                        name="location-outline"
+                        size={15}
+                        color={colors.textSecondary}
+                        style={styles.quoteAddressIcon}
+                      />
+                      <Text style={styles.quoteAddressText}>{quoteStreet}</Text>
+                    </View>
+                  ) : null}
+
+                  <Text style={styles.quoteWarranty}>{quoteWarrantyLabel(q.warranty_days)}</Text>
 
                   {myRole === 'trabajador' ? (
                     <QuoteMoneySummary variant="worker" amount={formatArs(q.net_amount)} />
@@ -2004,8 +2062,8 @@ export function ChatScreen({
                     <Pressable
                       style={({ pressed }) => [
                         styles.quoteBtn,
+                        styles.quoteBtnSolo,
                         styles.quoteBtnPrimary,
-                        { marginTop: spacing.sm },
                         pressed && styles.pressed,
                       ]}
                       accessibilityRole="button"
@@ -2040,8 +2098,8 @@ export function ChatScreen({
                     <Pressable
                       style={({ pressed }) => [
                         styles.quoteBtn,
+                        styles.quoteBtnSolo,
                         styles.quoteBtnGhost,
-                        { marginTop: spacing.sm },
                         pressed && styles.pressed,
                       ]}
                       onPress={() =>
@@ -2128,7 +2186,12 @@ export function ChatScreen({
                   latestRejected?.id === q.id &&
                   latestQuoteAny?.id === q.id ? (
                     <Pressable
-                      style={({ pressed }) => [styles.quoteBtn, styles.quoteBtnPrimary, pressed && styles.pressed]}
+                      style={({ pressed }) => [
+                        styles.quoteBtn,
+                        styles.quoteBtnSolo,
+                        styles.quoteBtnPrimary,
+                        pressed && styles.pressed,
+                      ]}
                       onPress={() => {
                         setQuoteModalOpen(true);
                         setQuoteNetAmount(Math.max(0, Math.floor(Number(q.net_amount) || 0)));
@@ -2153,7 +2216,7 @@ export function ChatScreen({
                       <Text style={styles.quoteBtnPrimaryText}>Recotizar</Text>
                     </Pressable>
                   ) : null}
-                </>
+                </View>
               ) : (
                 <Text style={styles.quoteLine}>Cargando presupuesto…</Text>
               )}
@@ -2196,9 +2259,12 @@ export function ChatScreen({
     [
       conversationId,
       hasActiveQuote,
+      job?.estado_pago,
       job?.estado_trabajo,
+      job?.fecha_trabajo,
       job?.id,
       job?.recotizacion_id,
+      quoteStreet,
       recotizacionResponses,
       recotizacionesById,
       latestQuoteAny,
@@ -3959,65 +4025,114 @@ const styles = StyleSheet.create({
   },
 
   quoteCard: {
-    width: '92%',
+    width: '100%',
     maxWidth: 420,
     backgroundColor: colors.surface,
-    borderRadius: radii.card,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: colors.border,
     padding: spacing.md,
+    gap: 12,
+    ...shadows.card,
   },
-  quoteTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  quoteTopRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    columnGap: spacing.sm,
+    rowGap: spacing.xs,
+  },
   quoteBadge: {
+    flexGrow: 0,
+    flexShrink: 0,
+    maxWidth: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
     paddingVertical: 4,
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(17,24,39,0.14)',
-    backgroundColor: 'rgba(17,24,39,0.06)',
+    borderColor: 'rgba(17,24,39,0.12)',
+    backgroundColor: 'rgba(17,24,39,0.05)',
   },
   quoteBadgeAccepted: { borderColor: 'rgba(13,148,136,0.35)', backgroundColor: 'rgba(13,148,136,0.10)' },
   quoteBadgeSeñaPagada: { borderColor: 'rgba(13,148,136,0.35)', backgroundColor: 'rgba(13,148,136,0.10)' },
   quoteBadgeRejected: { borderColor: 'rgba(220,38,38,0.35)', backgroundColor: 'rgba(220,38,38,0.10)' },
   quoteBadgePaid: { borderColor: 'rgba(59,130,246,0.35)', backgroundColor: 'rgba(59,130,246,0.10)' },
-  quoteBadgeText: { fontSize: 12, fontWeight: '900', color: colors.text },
+  quoteBadgeText: {
+    flexShrink: 1,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+    color: colors.text,
+  },
   quoteCardAccepted: { borderColor: 'rgba(13,148,136,0.35)' },
   quoteCardSeñaPagada: { borderColor: 'rgba(13,148,136,0.35)' },
   quoteCardRejected: { borderColor: 'rgba(220,38,38,0.35)' },
   quoteCardPaid: { borderColor: 'rgba(59,130,246,0.35)' },
   quoteTitle: {
-    flex: 1,
-    flexShrink: 1,
-    fontSize: 15,
-    fontWeight: '900',
+    flexGrow: 0,
+    flexShrink: 0,
+    maxWidth: '100%',
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '700',
+    letterSpacing: -0.2,
     color: colors.text,
-    marginRight: spacing.sm,
+  },
+  quoteBody: {
+    alignSelf: 'stretch',
+    gap: 10,
   },
   quoteDetail: {
-    marginTop: 2,
-    marginBottom: spacing.sm,
     fontSize: 14,
     lineHeight: 20,
     color: colors.text,
+    fontWeight: '500',
+  },
+  quoteAddressRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  quoteAddressIcon: { marginTop: 2 },
+  quoteAddressText: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 20,
     fontWeight: '600',
+    color: colors.text,
+  },
+  quoteWarranty: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.textSecondary,
+    fontWeight: '500',
   },
   quoteLine: { fontSize: 14, lineHeight: 20, color: colors.textSecondary, marginTop: 4 },
   quoteStrong: { color: colors.text, fontWeight: '900' },
   quoteStatus: { marginTop: spacing.sm, fontSize: 13, fontWeight: '800', color: colors.textSecondary },
   quoteStatusStrong: { color: colors.text, fontWeight: '900' },
-  quoteMeta: { marginTop: spacing.sm, fontSize: 11, fontWeight: '700', color: colors.textSecondary },
-  quoteActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  quoteMeta: { fontSize: 11, lineHeight: 14, fontWeight: '600', color: colors.textSecondary },
+  quoteActions: { flexDirection: 'row', gap: spacing.sm },
   quoteBtn: {
-    paddingVertical: 10,
+    paddingVertical: 11,
     paddingHorizontal: 12,
     borderRadius: 12,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    flex: 1,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+  },
+  quoteBtnSolo: {
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: 'auto',
+    alignSelf: 'stretch',
   },
   quoteBtnGhost: { borderColor: colors.border, backgroundColor: 'transparent' },
   quoteBtnGhostText: { color: colors.text, fontWeight: '900' },
