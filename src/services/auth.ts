@@ -8,6 +8,7 @@ import { getSupabaseClient } from '../lib/supabase';
 import { newRandomUserId, stableUserIdFromEmail } from '../utils/stableUserId';
 import { userAuthDisplayName } from '../utils/storageOwnerFolder';
 import { calcAgeFromBirthDate, parseBirthDateParts } from '../utils/birthDate';
+import { isValidArgentineCuit, onlyDigits, type AccountDocumentType } from '../utils/argentineCuit';
 import type { StoreDaySchedule, StoreHoursSlot } from '../utils/storeOpeningHours';
 import {
   clearPendingProfileSignup,
@@ -230,6 +231,8 @@ export type AuthUser = {
   lastName?: string;
   fullName?: string;
   dni?: string;
+  /** `profiles.document_type`. El número está en `dni`. */
+  documentType?: AccountDocumentType;
   avatarUri?: string;
   phone?: string;
 
@@ -298,6 +301,8 @@ export type SignUpPayload = {
   firstName: string;
   lastName: string;
   dni: string;
+  /** Por defecto DNI. CUIT guarda el número en `dni` y `document_type = cuit`. */
+  documentType?: AccountDocumentType;
   avatarUri: string;
   email: string;
   password: string;
@@ -340,7 +345,8 @@ export type SignUpPayload = {
 function validateSignUpPayload(payload: SignUpPayload): string | null {
   const first = payload.firstName.trim();
   const last = payload.lastName.trim();
-  const dni = payload.dni.trim();
+  const dni = onlyDigits(payload.dni);
+  const documentType: AccountDocumentType = payload.documentType === 'cuit' ? 'cuit' : 'dni';
   const avatarUri = payload.avatarUri.trim();
   const email = payload.email.trim().toLowerCase();
   const phone = payload.phone.trim();
@@ -359,7 +365,11 @@ function validateSignUpPayload(payload: SignUpPayload): string | null {
   const age = calcAgeFromBirthDate(birth);
   if (age == null) return 'Ingresá una fecha de nacimiento válida.';
   if (age < 18) return 'Debés ser mayor de 18 años.';
-  if (dni.length < 7 || dni.length > 9) {
+  if (documentType === 'cuit') {
+    if (!isValidArgentineCuit(dni)) {
+      return 'Ingresá un CUIT válido (11 dígitos y dígito verificador).';
+    }
+  } else if (dni.length < 7 || dni.length > 8) {
     return 'Ingresá un DNI válido.';
   }
   if (!phone) {
@@ -437,7 +447,8 @@ function buildAuthUserFromSignUpPayload(
     firstName: first,
     lastName: last,
     fullName: `${first} ${last}`.trim(),
-    dni: persistPayload.dni.trim(),
+    dni: onlyDigits(persistPayload.dni),
+    documentType: persistPayload.documentType === 'cuit' ? 'cuit' : 'dni',
     avatarUri: persistPayload.avatarUri.trim(),
     phone: persistPayload.phone.trim(),
     baseLocation: {
@@ -615,6 +626,9 @@ export async function signUp(payload: SignUpPayload): Promise<AuthResult> {
       if (payload.birthDate?.trim()) {
         meta.birth_date = payload.birthDate.trim();
       }
+      const signupDigits = onlyDigits(payload.dni);
+      if (signupDigits) meta.dni = signupDigits;
+      meta.document_type = payload.documentType === 'cuit' ? 'cuit' : 'dni';
       const { data, error } = await sb.auth.signUp({
         email,
         password: payload.password,
@@ -744,7 +758,8 @@ export async function signUp(payload: SignUpPayload): Promise<AuthResult> {
       firstName: first,
       lastName: last,
       fullName,
-      dni: payload.dni.trim(),
+      dni: onlyDigits(payload.dni),
+      documentType: payload.documentType === 'cuit' ? 'cuit' : 'dni',
       avatarUri: payload.avatarUri.trim(),
       phone: payload.phone.trim(),
       baseLocation: {
