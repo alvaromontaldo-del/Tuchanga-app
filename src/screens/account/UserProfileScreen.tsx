@@ -20,6 +20,7 @@ import { accountUi } from './accountUi';
 import { StarRating } from '../../components/profile/StarRating';
 import { useUserMode } from '../../context/UserModeContext';
 import { formatBirthDateDisplay } from '../../utils/birthDate';
+import { formatArgentineCuit } from '../../utils/argentineCuit';
 
 type Props = AccountStackScreenProps<'UserProfile'>;
 
@@ -218,7 +219,14 @@ export function UserProfileScreen({ navigation }: Props) {
             value={formatMemberSince(displayUser.profileCreatedAt)}
           />
           <Field label="Teléfono" value={displayUser.phone ?? ''} />
-          <Field label="DNI" value={displayUser.dni ?? ''} />
+          <Field
+            label={displayUser.documentType === 'cuit' ? 'CUIT' : 'DNI'}
+            value={
+              displayUser.documentType === 'cuit'
+                ? formatArgentineCuit(displayUser.dni ?? '')
+                : (displayUser.dni ?? '')
+            }
+          />
           <Field label="Fecha de nacimiento" value={birthDateLabel ?? 'Edad no disponible'} />
           <Field
             label="Ubicación"
