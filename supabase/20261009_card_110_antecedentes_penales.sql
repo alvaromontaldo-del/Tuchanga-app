@@ -388,6 +388,8 @@ BEGIN
 
   IF v_old IS NOT NULL AND v_old <> v_path THEN
     BEGIN
+      -- storage.protect_delete bloquea el DELETE salvo este setting, local a la transacción.
+      PERFORM set_config('storage.allow_delete_query', 'true', true);
       DELETE FROM storage.objects o
       WHERE o.bucket_id = 'antecedentes-penales'
         AND o.name = v_old;
@@ -619,7 +621,7 @@ SET search_path TO 'public'
 AS $function$
   SELECT coalesce(array_agg(p.id), '{}'::uuid[])
   FROM public.profiles p
-  WHERE p.id = ANY (coalesce(p_worker_ids, '{}'::uuid[])[1:80])
+  WHERE p.id = ANY ((coalesce(p_worker_ids, '{}'::uuid[]))[1:80])
     AND p.professional_status = 'accepted'
     AND p.coverage_km IS NOT NULL
     AND p.coverage_km > 0
