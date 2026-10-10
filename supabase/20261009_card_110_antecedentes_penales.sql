@@ -12,10 +12,15 @@
 --     certificado vigente. Grants iguales: postgres y service_role.
 --   * is_admin() y _admin_require() no se reemplazan. Las RPC de admin
 --     llaman a las dos.
---   * El push de rechazo NO usa invoke_vault_edge_webhook (ese helper de #65
---     puede no estar aplicado y su lista de slugs es cerrada). Esta función
---     propia lee vault.decrypted_secrets name = edge_function_secret en el
---     momento del POST y no guarda el secreto en la definición.
+--   * invoke_vault_edge_webhook(text, jsonb, integer) ya está aplicado.
+--     Este script le suma el slug push_on_antecedentes sobre el cuerpo vivo
+--     (pg_get_functiondef). No copia la anon key ni el secreto a este archivo.
+--     El POST lo hace ese helper con net.http_post y vault.decrypted_secrets
+--     name = edge_function_secret. El valor no se copia a este archivo.
+--   * search_workers_for_client es el cuerpo vivo (md5
+--     34092c74216bbf3a3a17971f1b098cbe). Solo se agrega la columna
+--     antecedentes_penales. apellido sigue en NULL. Los grants no cambian
+--     (anon ya tenía EXECUTE de la búsqueda; no gana una función nueva).
 --
 -- Orden cuando lo corra el coordinador:
 --   1. Este SQL.
@@ -23,15 +28,13 @@
 --      (autentica con x-function-secret, igual que los otros push).
 --   3. La app. Sin el SQL, la pantalla avisa que la carga no está habilitada.
 --
--- La URL firmada la arma admin_list_antecedentes_pendientes con el JWT del
--- admin (header de la request) contra Storage. Dura 10 minutos. Si el header
--- no está (SQL editor), archivo_url vuelve null y queda storage_path: el
--- panel firma con createSignedUrl. La policy SELECT deja pasar solo al
--- dueño y a is_admin(). El bucket es privado: no se arma una URL pública.
+-- El listado admin devuelve storage_path y archivo_url null. El panel firma
+-- con storage.from('antecedentes-penales').createSignedUrl(path, 600).
+-- La policy SELECT deja pasar solo al dueño y a is_admin(). El bucket es
+-- privado: no se arma una URL pública. El archivo anterior no se borra en
+-- SQL: lo borra la app con la Storage API después de un submit exitoso.
 
 BEGIN;
-
-CREATE EXTENSION IF NOT EXISTS http WITH SCHEMA extensions;
 
 CREATE TABLE IF NOT EXISTS public.antecedentes_penales (
   user_id uuid PRIMARY KEY REFERENCES public.profiles (id) ON DELETE CASCADE,
@@ -138,89 +141,25 @@ CREATE POLICY antecedentes_penales_delete_own
     AND (storage.foldername(name))[1] = auth.uid()::text
   );
 
--- Firma un objeto del bucket privado. Solo la llama el listado admin.
--- No acepta una URL arbitraria: el host y el bucket están fijos.
-CREATE OR REPLACE FUNCTION public.antecedentes_admin_signed_url(p_path text)
-RETURNS text
-LANGUAGE plpgsql
-VOLATILE
-SECURITY DEFINER
-SET search_path TO 'public', 'extensions'
-AS $function$
+-- Suma el slug al helper vivo. La anon key queda en la función de producción
+-- y no se escribe en este archivo.
+DO $webhook_slug$
 DECLARE
-  v_headers jsonb := '{}'::jsonb;
-  v_raw text;
-  v_auth text;
-  v_apikey text;
-  v_anon constant text := 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt5eGVocnhjZGVhbGJ1anZ2bnhwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU2Nzk2OTEsImV4cCI6MjA5MTI1NTY5MX0.Ef5iZCbrseW4TYxSScOiqpAP8lZrjaQi2OItzCU5W9Y';
-  v_status integer;
-  v_content text;
-  v_json jsonb;
-  v_rel text;
+  v_def text := pg_get_functiondef('public.invoke_vault_edge_webhook(text,jsonb,integer)'::regprocedure);
 BEGIN
-  IF NOT public.is_admin() THEN
-    RAISE EXCEPTION 'Forbidden: admin role required';
+  IF v_def NOT LIKE '%''push_on_antecedentes''%' THEN
+    IF v_def NOT LIKE '%''notify_trabajo_no_conforme''%' THEN
+      RAISE EXCEPTION 'invoke_vault_edge_webhook cambió: falta notify_trabajo_no_conforme.';
+    END IF;
+    v_def := replace(
+      v_def,
+      '''notify_trabajo_no_conforme''',
+      '''notify_trabajo_no_conforme'',' || chr(10) || '    ''push_on_antecedentes'''
+    );
+    EXECUTE v_def;
   END IF;
-
-  IF p_path IS NULL OR p_path !~ '^[0-9a-f-]{36}/[0-9]{13}-[a-z0-9]{6,12}\.(jpg|pdf)$' THEN
-    RETURN NULL;
-  END IF;
-
-  v_raw := current_setting('request.headers', true);
-  IF v_raw IS NOT NULL AND left(btrim(v_raw), 1) = '{' THEN
-    v_headers := v_raw::jsonb;
-  END IF;
-
-  v_auth := coalesce(v_headers->>'authorization', v_headers->>'Authorization', '');
-  v_apikey := coalesce(nullif(v_headers->>'apikey', ''), nullif(v_headers->>'Apikey', ''), v_anon);
-
-  IF btrim(v_auth) = '' THEN
-    RETURN NULL;
-  END IF;
-
-  PERFORM extensions.http_set_curlopt('CURLOPT_TIMEOUT', '8');
-
-  SELECT r.status, r.content
-    INTO v_status, v_content
-  FROM extensions.http((
-    'POST'::extensions.http_method,
-    'https://kyxehrxcdealbujvvnxp.supabase.co/storage/v1/object/sign/antecedentes-penales/' || p_path,
-    ARRAY[
-      extensions.http_header('Authorization', v_auth),
-      extensions.http_header('apikey', v_apikey),
-      extensions.http_header('Content-Type', 'application/json')
-    ]::extensions.http_header[],
-    'application/json',
-    '{"expiresIn":600}'
-  )::extensions.http_request) AS r;
-
-  IF v_status IS NULL OR v_status < 200 OR v_status >= 300 OR v_content IS NULL THEN
-    RETURN NULL;
-  END IF;
-
-  v_json := v_content::jsonb;
-  v_rel := coalesce(v_json->>'signedURL', v_json->>'signedUrl', '');
-  IF v_rel = '' THEN
-    RETURN NULL;
-  END IF;
-  IF v_rel LIKE 'https://%' THEN
-    RETURN v_rel;
-  END IF;
-  IF left(v_rel, 1) = '/' THEN
-    RETURN 'https://kyxehrxcdealbujvvnxp.supabase.co/storage/v1' || v_rel;
-  END IF;
-  RETURN NULL;
-EXCEPTION WHEN OTHERS THEN
-  RAISE WARNING 'antecedentes_admin_signed_url: %', SQLERRM;
-  RETURN NULL;
-END;
-$function$;
-
-REVOKE ALL ON FUNCTION public.antecedentes_admin_signed_url(text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.antecedentes_admin_signed_url(text) TO service_role;
-
-COMMENT ON FUNCTION public.antecedentes_admin_signed_url(text) IS
-  '#110. URL firmada de 10 minutos. Solo is_admin(). Sin JWT de request devuelve null. No es pública.';
+END
+$webhook_slug$;
 
 CREATE OR REPLACE FUNCTION public.notify_antecedentes_rechazo(
   p_user_id uuid,
@@ -232,55 +171,26 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path TO 'public'
 AS $function$
-DECLARE
-  v_secret text;
-  v_anon constant text := 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt5eGVocnhjZGVhbGJ1anZ2bnhwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU2Nzk2OTEsImV4cCI6MjA5MTI1NTY5MX0.Ef5iZCbrseW4TYxSScOiqpAP8lZrjaQi2OItzCU5W9Y';
-  v_headers jsonb;
-  v_payload jsonb;
 BEGIN
   IF p_user_id IS NULL OR btrim(coalesce(p_asunto, '')) = '' THEN
     RETURN;
   END IF;
 
-  SELECT decrypted_secret
-    INTO v_secret
-  FROM vault.decrypted_secrets
-  WHERE name = 'edge_function_secret'
-  LIMIT 1;
-
-  IF v_secret IS NULL OR btrim(v_secret) = '' THEN
-    RAISE WARNING 'notify_antecedentes_rechazo: falta vault edge_function_secret';
-    RETURN;
-  END IF;
-
-  v_headers := jsonb_build_object(
-    'apikey', v_anon,
-    'Content-type', 'application/json',
-    'Authorization', 'Bearer ' || v_anon,
-    'x-function-secret', btrim(v_secret)
-  );
-
-  v_payload := jsonb_build_object(
-    'type', 'UPDATE',
-    'table', 'antecedentes_penales',
-    'schema', 'public',
-    'record', jsonb_build_object(
-      'user_id', p_user_id,
-      'asunto', btrim(p_asunto),
-      'event_key', left(coalesce(p_event_key, ''), 240)
+  PERFORM public.invoke_vault_edge_webhook(
+    'push_on_antecedentes',
+    jsonb_build_object(
+      'type', 'UPDATE',
+      'table', 'antecedentes_penales',
+      'schema', 'public',
+      'record', jsonb_build_object(
+        'user_id', p_user_id,
+        'asunto', btrim(p_asunto),
+        'event_key', left(coalesce(p_event_key, ''), 240)
+      ),
+      'old_record', NULL
     ),
-    'old_record', NULL
-  );
-
-  PERFORM net.http_post(
-    'https://kyxehrxcdealbujvvnxp.supabase.co/functions/v1/push_on_antecedentes',
-    v_payload,
-    '{}'::jsonb,
-    v_headers,
     5000
   );
-EXCEPTION WHEN OTHERS THEN
-  RAISE WARNING 'notify_antecedentes_rechazo: %', SQLERRM;
 END;
 $function$;
 
@@ -288,7 +198,7 @@ REVOKE ALL ON FUNCTION public.notify_antecedentes_rechazo(uuid, text, text) FROM
 GRANT EXECUTE ON FUNCTION public.notify_antecedentes_rechazo(uuid, text, text) TO service_role;
 
 COMMENT ON FUNCTION public.notify_antecedentes_rechazo(uuid, text, text) IS
-  '#110. Push al profesional con el asunto del rechazo. Secreto leído de Vault (edge_function_secret), como #65. Sin EXECUTE para anon ni authenticated.';
+  '#110. Push al profesional con el asunto del rechazo. Delega en invoke_vault_edge_webhook (Vault + net.http_post). Sin EXECUTE para anon ni authenticated.';
 
 CREATE OR REPLACE FUNCTION public.get_my_antecedentes_penales()
 RETURNS jsonb
@@ -386,19 +296,6 @@ BEGIN
   FROM public.antecedentes_penales a
   WHERE a.user_id = v_uid;
 
-  IF v_old IS NOT NULL AND v_old <> v_path THEN
-    BEGIN
-      -- storage.protect_delete bloquea el DELETE salvo este setting, local a la transacción.
-      PERFORM set_config('storage.allow_delete_query', 'true', true);
-      DELETE FROM storage.objects o
-      WHERE o.bucket_id = 'antecedentes-penales'
-        AND o.name = v_old;
-    EXCEPTION WHEN OTHERS THEN
-      -- La app también borra previous_path. El reenvío no puede quedar trabado.
-      RAISE WARNING 'antecedentes borrar anterior: %', SQLERRM;
-    END;
-  END IF;
-
   INSERT INTO public.antecedentes_penales (
     user_id, status, storage_path, mime_type, rejection_reason, reviewed_at, reviewed_by, updated_at
   ) VALUES (
@@ -427,12 +324,12 @@ REVOKE ALL ON FUNCTION public.submit_my_antecedentes_penales(text, text) FROM PU
 GRANT EXECUTE ON FUNCTION public.submit_my_antecedentes_penales(text, text) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.submit_my_antecedentes_penales(text, text) IS
-  '#110. El profesional registra su archivo y queda en pendiente. Borra el archivo anterior. No puede aprobarse solo.';
+  '#110. El profesional registra su archivo y queda en pendiente. Devuelve previous_path para que la app lo borre con la Storage API. No toca storage.objects. No puede aprobarse solo.';
 
 CREATE OR REPLACE FUNCTION public.admin_list_antecedentes_pendientes()
 RETURNS jsonb
 LANGUAGE plpgsql
-VOLATILE
+STABLE
 SECURITY DEFINER
 SET search_path TO 'public'
 AS $function$
@@ -463,7 +360,7 @@ BEGIN
       'mime_type', a.mime_type,
       'storage_bucket', 'antecedentes-penales',
       'storage_path', a.storage_path,
-      'archivo_url', public.antecedentes_admin_signed_url(a.storage_path),
+      'archivo_url', NULL,
       'archivo_url_expira_en_segundos', 600,
       'updated_at', a.updated_at
     ) AS item
@@ -481,7 +378,7 @@ REVOKE ALL ON FUNCTION public.admin_list_antecedentes_pendientes() FROM PUBLIC, 
 GRANT EXECUTE ON FUNCTION public.admin_list_antecedentes_pendientes() TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.admin_list_antecedentes_pendientes() IS
-  '#110. Pendientes para el admin: nombre, apellido, oficio, DNI, mail, ruta y URL firmada (10 min). archivo_url es null si la request no trae Authorization: en ese caso usar storage_path con createSignedUrl. Nunca una URL pública.';
+  '#110. Pendientes para el admin: nombre, apellido, oficio, DNI, mail y ruta. archivo_url queda null: firmar storage_path con createSignedUrl (600 s). Nunca una URL pública.';
 
 CREATE OR REPLACE FUNCTION public.admin_aprobar_antecedentes_penales(p_user_id uuid)
 RETURNS jsonb
@@ -612,33 +509,156 @@ GRANT EXECUTE ON FUNCTION public.admin_rechazar_antecedentes_penales(uuid, text)
 COMMENT ON FUNCTION public.admin_rechazar_antecedentes_penales(uuid, text) IS
   '#110. Rechaza un pendiente con asunto, lo guarda para la app y dispara el push. El secreto sale de Vault.';
 
-CREATE OR REPLACE FUNCTION public.list_public_antecedentes_aprobados(p_worker_ids uuid[])
-RETURNS uuid[]
+-- Cuerpo vivo el 2026-10-10, md5 34092c74216bbf3a3a17971f1b098cbe.
+-- Único cambio: la columna antecedentes_penales al final. apellido sigue NULL.
+-- Cambiar el RETURNS TABLE exige DROP. Los grants quedan como hoy.
+DO $search_guard$
+BEGIN
+  IF md5(pg_get_functiondef('public.search_workers_for_client(double precision,double precision,text,text[],uuid,integer)'::regprocedure))
+     IS DISTINCT FROM '34092c74216bbf3a3a17971f1b098cbe' THEN
+    RAISE EXCEPTION 'search_workers_for_client cambió en producción. Volvé a copiar el cuerpo vivo antes de aplicar #110.';
+  END IF;
+END
+$search_guard$;
+
+DROP FUNCTION IF EXISTS public.search_workers_for_client(double precision, double precision, text, text[], uuid, integer);
+
+CREATE FUNCTION public.search_workers_for_client(
+  p_client_lat double precision,
+  p_client_lng double precision,
+  p_query text DEFAULT ''::text,
+  p_category_names text[] DEFAULT NULL::text[],
+  p_exclude_user_id uuid DEFAULT NULL::uuid,
+  p_limit integer DEFAULT 80
+)
+RETURNS TABLE(
+  profile_id uuid,
+  nombre text,
+  apellido text,
+  avatar_url text,
+  lat double precision,
+  lng double precision,
+  coverage_km integer,
+  distance_km double precision,
+  primary_trade text,
+  all_trades text[],
+  summary_jobs text,
+  rating_average numeric,
+  review_count integer,
+  total_jobs_done integer,
+  atiende_urgencias boolean,
+  antecedentes_penales boolean
+)
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
 SET search_path TO 'public'
 AS $function$
-  SELECT coalesce(array_agg(p.id), '{}'::uuid[])
-  FROM public.profiles p
-  WHERE p.id = ANY ((coalesce(p_worker_ids, '{}'::uuid[]))[1:80])
-    AND p.professional_status = 'accepted'
-    AND p.coverage_km IS NOT NULL
-    AND p.coverage_km > 0
-    AND EXISTS (SELECT 1 FROM public.jobs j WHERE j.user_id = p.id)
-    AND EXISTS (
-      SELECT 1
-      FROM public.antecedentes_penales a
-      WHERE a.user_id = p.id
-        AND a.status = 'aprobado'
-    );
+  WITH client_pt AS (
+    SELECT st_setsrid(st_makepoint(p_client_lng, p_client_lat), 4326)::geography AS g
+  ),
+  lim AS (
+    SELECT least(greatest(coalesce(p_limit, 80), 1), 100) AS n
+  ),
+  base AS (
+    SELECT
+      p.id AS profile_id,
+      p.nombre,
+      p.apellido AS apellido_full,
+      p.avatar_url,
+      st_y(p.location::geometry) AS lat_exact,
+      st_x(p.location::geometry) AS lng_exact,
+      p.coverage_km,
+      st_distance(p.location, (SELECT g FROM client_pt), false) / 1000.0 AS distance_exact,
+      (
+        SELECT j2.nombre_oficio
+        FROM public.jobs j2
+        WHERE j2.user_id = p.id
+        ORDER BY j2.es_principal DESC, j2.nombre_oficio
+        LIMIT 1
+      ) AS primary_trade,
+      (
+        SELECT array_agg(j3.nombre_oficio ORDER BY j3.es_principal DESC, j3.nombre_oficio)
+        FROM public.jobs j3
+        WHERE j3.user_id = p.id
+      ) AS all_trades,
+      (
+        SELECT string_agg(j4.nombre_oficio || ': ' || coalesce(j4.descripcion, ''), ' · ')
+        FROM public.jobs j4
+        WHERE j4.user_id = p.id
+      ) AS summary_jobs,
+      coalesce(p.rating_average, 0) AS rating_average,
+      coalesce(p.review_count, 0) AS review_count,
+      coalesce(p.total_jobs_done, 0) AS total_jobs_done,
+      p.atiende_urgencias,
+      EXISTS (
+        SELECT 1
+        FROM public.antecedentes_penales ap
+        WHERE ap.user_id = p.id
+          AND ap.status = 'aprobado'
+      ) AS antecedentes_penales
+    FROM public.profiles p
+    WHERE p.professional_status = 'accepted'
+      AND p.location IS NOT NULL
+      AND p.coverage_km IS NOT NULL
+      AND p.coverage_km > 0
+      AND (p_exclude_user_id IS NULL OR p.id <> p_exclude_user_id)
+      AND EXISTS (SELECT 1 FROM public.jobs j WHERE j.user_id = p.id)
+  )
+  SELECT
+    b.profile_id,
+    b.nombre,
+    NULL::text AS apellido,
+    b.avatar_url,
+    round(b.lat_exact::numeric, 2)::double precision AS lat,
+    round(b.lng_exact::numeric, 2)::double precision AS lng,
+    b.coverage_km,
+    round(b.distance_exact::numeric, 1)::double precision AS distance_km,
+    b.primary_trade,
+    b.all_trades,
+    b.summary_jobs,
+    b.rating_average,
+    b.review_count,
+    b.total_jobs_done,
+    b.atiende_urgencias,
+    b.antecedentes_penales
+  FROM base b
+  WHERE b.distance_exact <= b.coverage_km
+    AND (
+      coalesce(trim(p_query), '') = ''
+      OR b.nombre ILIKE '%' || trim(p_query) || '%'
+      OR b.primary_trade ILIKE '%' || trim(p_query) || '%'
+      OR exists (
+        SELECT 1 FROM unnest(coalesce(b.all_trades, array[]::text[])) t
+        WHERE t ILIKE '%' || trim(p_query) || '%'
+      )
+      OR coalesce(b.summary_jobs, '') ILIKE '%' || trim(p_query) || '%'
+      -- #97: palabras clave del oficio
+      OR exists (
+        SELECT 1 FROM unnest(coalesce(b.all_trades, array[]::text[])) t
+        WHERE public.search_fold(t) = ANY ((SELECT public.trade_names_for_query(p_query))::text[])
+      )
+    )
+    AND (
+      p_category_names IS NULL
+      OR cardinality(p_category_names) = 0
+      OR exists (
+        SELECT 1
+        FROM unnest(coalesce(b.all_trades, array[]::text[])) t
+        WHERE t = ANY (p_category_names)
+      )
+    )
+  ORDER BY b.distance_exact ASC, b.rating_average DESC NULLS LAST
+  LIMIT (SELECT n FROM lim);
 $function$;
 
-REVOKE ALL ON FUNCTION public.list_public_antecedentes_aprobados(uuid[]) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.list_public_antecedentes_aprobados(uuid[]) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.search_workers_for_client(double precision, double precision, text, text[], uuid, integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.search_workers_for_client(double precision, double precision, text, text[], uuid, integer) TO anon;
+GRANT EXECUTE ON FUNCTION public.search_workers_for_client(double precision, double precision, text, text[], uuid, integer) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.search_workers_for_client(double precision, double precision, text, text[], uuid, integer) TO service_role;
 
-COMMENT ON FUNCTION public.list_public_antecedentes_aprobados(uuid[]) IS
-  '#110. Ids públicos (misma puerta que el perfil) que tienen el certificado aprobado. No devuelve el archivo, el DNI ni el apellido.';
+COMMENT ON FUNCTION public.search_workers_for_client(double precision, double precision, text, text[], uuid, integer) IS
+  '#110. Misma búsqueda. antecedentes_penales es solo true/false. apellido sigue NULL. No devuelve el archivo.';
 
 -- Cuerpo vivo de get_public_worker_profile el 2026-10-09.
 -- Único cambio: la clave antecedentes_penales (boolean). Nada del archivo.

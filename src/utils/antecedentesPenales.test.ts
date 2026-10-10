@@ -105,7 +105,14 @@ describe('antecedentes penales', () => {
     expect(sql).toContain('REVOKE ALL ON TABLE public.antecedentes_penales FROM PUBLIC, anon');
     expect(sql).toContain('REVOKE ALL ON FUNCTION public.admin_list_antecedentes_pendientes() FROM PUBLIC, anon');
     expect(sql).toContain('REVOKE ALL ON FUNCTION public.submit_my_antecedentes_penales(text, text) FROM PUBLIC, anon');
-    expect(sql).toContain('GRANT EXECUTE ON FUNCTION public.list_public_antecedentes_aprobados(uuid[]) TO anon');
+    expect(sql).not.toContain('list_public_antecedentes_aprobados');
+    expect(sql).toContain('antecedentes_penales boolean');
+    expect(sql).toContain('NULL::text AS apellido');
+    expect(sql).toContain('invoke_vault_edge_webhook');
+    expect(sql).not.toMatch(/CREATE EXTENSION/i);
+    expect(sql).not.toMatch(/allow_delete_query/);
+    expect(sql).not.toMatch(/DELETE FROM storage\.objects/);
+    expect(sql).not.toMatch(/eyJ/);
     expect(sql).toContain("UNION ALL\n    SELECT 'antecedentes-penales'");
     expect(sql).not.toMatch(/getPublicUrl/);
 
@@ -125,7 +132,12 @@ describe('antecedentes penales', () => {
     expect(profile).not.toMatch(/apellido/);
 
     const search = readFileSync(resolve(ROOT, 'src/services/searchWorkersSupabase.ts'), 'utf8');
-    expect(search).toContain('list_public_antecedentes_aprobados');
+    expect(search).toContain('antecedentes_penales');
+    expect(search).not.toContain('list_public_antecedentes_aprobados');
     expect(search).not.toMatch(/apellido/);
+
+    const upload = readFileSync(resolve(ROOT, 'src/services/antecedentesPenalesSupabase.ts'), 'utf8');
+    expect(upload).toContain(".remove([name])");
+    expect(upload).toContain('no se pudo borrar el archivo anterior');
   });
 });

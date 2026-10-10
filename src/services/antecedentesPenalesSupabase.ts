@@ -85,14 +85,21 @@ export async function compressAntecedentesImage(uri: string): Promise<Uint8Array
   return bytes;
 }
 
+/** Borra con la Storage API. Un fallo no deshace el envío: solo queda en el log. */
 async function removeQuiet(path: string | null | undefined): Promise<void> {
   const name = (path ?? '').trim();
   if (!name) return;
   try {
     const sb = getSupabaseClient();
-    await sb.storage.from(ANTECEDENTES_BUCKET).remove([name]);
-  } catch {
-    /* el server ya puede haberlo borrado */
+    const { error } = await sb.storage.from(ANTECEDENTES_BUCKET).remove([name]);
+    if (error) {
+      console.warn('antecedentes: no se pudo borrar el archivo anterior', error.message);
+    }
+  } catch (err) {
+    console.warn(
+      'antecedentes: no se pudo borrar el archivo anterior',
+      err instanceof Error ? err.message : err,
+    );
   }
 }
 
