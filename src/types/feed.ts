@@ -75,6 +75,8 @@ export type WorkerPublicProfile = {
   introVideoUrl?: string | null;
   /** El profesional marcó que atiende urgencias. Ausente o false = sin badge. */
   atiendeUrgencias?: boolean;
+  /** Certificado de antecedentes aprobado. No incluye el archivo. */
+  antecedentesPenales?: boolean;
 };
 
 export const MAX_WORKER_TRADES = 5;

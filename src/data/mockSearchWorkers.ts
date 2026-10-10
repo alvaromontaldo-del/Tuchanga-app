@@ -30,6 +30,8 @@ export type SearchableWorker = {
   coverageKm: number;
   /** Marcó «Atiendo urgencias». Ausente = no. */
   atiendeUrgencias?: boolean;
+  /** Certificado de antecedentes aprobado. Ausente = no. */
+  antecedentesPenales?: boolean;
 };
 
 export type SearchWorkerHit = {
