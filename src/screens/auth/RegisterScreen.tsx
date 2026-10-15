@@ -97,7 +97,8 @@ import { getHighAccuracyPosition } from '../../utils/deviceGeolocation';
 import { normalizeLocalImageUri } from '../../utils/normalizeLocalImage';
 import {
   formatArgentineCuit,
-  isValidArgentineCuit,
+  isRegistrationDocumentReady,
+  registrationDocumentError,
   type AccountDocumentType,
 } from '../../utils/argentineCuit';
 
@@ -316,6 +317,12 @@ export function RegisterScreen({ navigation, route }: Props) {
     return phoneNationalDigits;
   }, [phoneCountryId, phoneNationalDigits]);
 
+  const documentReady = isRegistrationDocumentReady(documentType, dni);
+
+  useEffect(() => {
+    if (!documentReady) setTermsAccepted(false);
+  }, [documentReady]);
+
   function blurFirstName() {
     if (!firstName.trim()) {
       setErrors((p) => ({ ...p, firstName: 'El nombre es obligatorio.' }));
@@ -338,23 +345,9 @@ export function RegisterScreen({ navigation, route }: Props) {
 
   function blurDni() {
     const dniDigits = normalizeDigitsOnly(dni);
-    if (documentType === 'cuit') {
-      if (!dniDigits) {
-        setErrors((p) => ({ ...p, dni: 'El CUIT es obligatorio.' }));
-        return;
-      }
-      if (!isValidArgentineCuit(dniDigits)) {
-        setErrors((p) => ({
-          ...p,
-          dni: 'El CUIT debe tener 11 dígitos y un dígito verificador válido.',
-        }));
-        return;
-      }
-    } else if (!dniDigits) {
-      setErrors((p) => ({ ...p, dni: 'El DNI es obligatorio.' }));
-      return;
-    } else if (dniDigits.length < 7 || dniDigits.length > 8) {
-      setErrors((p) => ({ ...p, dni: 'El DNI debe tener 7 u 8 dígitos.' }));
+    const documentError = registrationDocumentError(documentType, dniDigits);
+    if (documentError) {
+      setErrors((p) => ({ ...p, dni: documentError }));
       return;
     }
     setErrors((p) => ({ ...p, dni: undefined }));
@@ -712,15 +705,8 @@ export function RegisterScreen({ navigation, route }: Props) {
     if (!lastName.trim()) next.lastName = 'El apellido es obligatorio.';
 
     const dniDigits = normalizeDigitsOnly(dni);
-    if (documentType === 'cuit') {
-      if (!dniDigits) next.dni = 'El CUIT es obligatorio.';
-      else if (!isValidArgentineCuit(dniDigits)) {
-        next.dni = 'El CUIT debe tener 11 dígitos y un dígito verificador válido.';
-      }
-    } else if (!dniDigits) next.dni = 'El DNI es obligatorio.';
-    else if (dniDigits.length < 7 || dniDigits.length > 8) {
-      next.dni = 'El DNI debe tener 7 u 8 dígitos.';
-    }
+    const documentError = registrationDocumentError(documentType, dniDigits);
+    if (documentError) next.dni = documentError;
 
     const bd = birthDate.trim();
     if (!bd) (next as any).birthDate = 'La fecha de nacimiento es obligatoria.';
@@ -1205,8 +1191,8 @@ export function RegisterScreen({ navigation, route }: Props) {
                 setErrors((p) => ({ ...p, dni: undefined }));
               }}
               onBlur={blurDni}
-              keyboardType="number-pad"
-              maxLength={documentType === 'cuit' ? 13 : 8}
+              keyboardType={documentType === 'cuit' ? 'numbers-and-punctuation' : 'number-pad'}
+              maxLength={documentType === 'cuit' ? undefined : 8}
               placeholder={documentType === 'cuit' ? '20-12345678-6' : 'Ej.: 12345678'}
               error={errors.dni}
             />
@@ -1721,12 +1707,13 @@ export function RegisterScreen({ navigation, route }: Props) {
               </View>
             ) : null}
 
+            {documentReady ? (
             <View style={styles.termsCheckRow}>
               <Pressable
                 onPress={() => setTermsAccepted((v) => !v)}
                 accessibilityRole="checkbox"
                 accessibilityState={{ checked: termsAccepted }}
-                accessibilityLabel="Leí y acepto los Términos y condiciones"
+                accessibilityLabel="Aceptar términos y condiciones"
                 hitSlop={6}
                 style={({ pressed }) => [styles.termsBox, termsAccepted && styles.termsBoxOn, pressed && styles.pressed]}
               >
@@ -1744,6 +1731,7 @@ export function RegisterScreen({ navigation, route }: Props) {
                 {' '}(versión {TERMS_VERSION}).
               </Text>
             </View>
+            ) : null}
 
             <AppButton
               title={
@@ -1881,6 +1869,14 @@ export function RegisterScreen({ navigation, route }: Props) {
           visible={termsOpen}
           mode="read"
           onClose={() => setTermsOpen(false)}
+          onAccept={
+            documentReady
+              ? () => {
+                  setTermsAccepted(true);
+                  setTermsOpen(false);
+                }
+              : undefined
+          }
         />
       </AppKeyboardAvoidingView>
     </AppScreen>

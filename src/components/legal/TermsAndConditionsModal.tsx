@@ -91,14 +91,30 @@ export function TermsAndConditionsModal({
 
             <View style={styles.footer}>
               {readOnly ? (
-                <Pressable
-                  onPress={onClose}
-                  accessibilityRole="button"
-                  accessibilityLabel="Cerrar"
-                  style={({ pressed }) => [styles.secondaryBtn, pressed && styles.btnPressed]}
-                >
-                  <Text style={styles.secondaryBtnText}>Cerrar</Text>
-                </Pressable>
+                <>
+                  {onAccept ? (
+                    <Pressable
+                      onPress={onAccept}
+                      accessibilityRole="button"
+                      accessibilityLabel="Aceptar términos y condiciones"
+                      style={({ pressed }) => [
+                        styles.primaryBtn,
+                        styles.acceptBeforeClose,
+                        pressed && styles.btnPressed,
+                      ]}
+                    >
+                      <Text style={styles.primaryBtnText}>Aceptar términos y condiciones</Text>
+                    </Pressable>
+                  ) : null}
+                  <Pressable
+                    onPress={onClose}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cerrar"
+                    style={({ pressed }) => [styles.secondaryBtn, pressed && styles.btnPressed]}
+                  >
+                    <Text style={styles.secondaryBtnText}>Cerrar</Text>
+                  </Pressable>
+                </>
               ) : (
                 <>
                   <Pressable
@@ -210,6 +226,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.primary,
+  },
+  acceptBeforeClose: {
+    marginBottom: spacing.sm,
   },
   primaryBtnDisabled: { opacity: 0.55 },
   primaryBtnText: { fontSize: 15, fontWeight: '900', color: '#fff' },

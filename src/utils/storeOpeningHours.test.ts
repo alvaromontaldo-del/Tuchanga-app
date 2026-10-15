@@ -25,7 +25,7 @@ describe('editor de horarios del comercio', () => {
     expect(rows[0].slots[0]).toEqual({ open: '09:00', close: '18:00' });
   });
 
-  it('copia el horario de martes a miércoles, jueves y viernes', () => {
+  it('copia el horario del lunes a martes, miércoles, jueves y viernes y queda guardado', () => {
     let days = defaultStoreWeekSchedule();
     days = setStoreDayClosed(days, 7, true);
     days = patchStoreDaySlot(days, 2, 0, { open: '10:00', close: '16:00' });
@@ -33,28 +33,42 @@ describe('editor de horarios del comercio', () => {
     days = patchStoreDaySlot(days, 6, 0, { open: '09:00', close: '13:00' });
 
     const copied = copyTuesdayHoursToFriday(days);
-    for (const day of [3, 4, 5]) {
+    for (const day of [2, 3, 4, 5]) {
       const row = copied.find((item) => item.day === day);
       expect(row?.closed).toBe(false);
-      expect(row?.slots).toEqual([{ open: '10:00', close: '16:00' }]);
+      expect(row?.slots).toEqual([{ open: '08:00', close: '12:00' }]);
     }
     expect(copied.find((item) => item.day === 1)?.slots[0].open).toBe('08:00');
     expect(copied.find((item) => item.day === 6)?.slots[0].close).toBe('13:00');
     expect(copied.find((item) => item.day === 7)?.closed).toBe(true);
 
+    const json = storeWeekScheduleToJson(copied);
+    for (const day of [1, 2, 3, 4, 5]) {
+      expect(json.schedule.find((item) => item.day === day)?.slots).toEqual([
+        { open: '08:00', close: '12:00' },
+      ]);
+    }
+    expect(json.schedule.find((item) => item.day === 6)?.slots).toEqual([
+      { open: '09:00', close: '13:00' },
+    ]);
+    expect(json.schedule.find((item) => item.day === 7)?.slots).toEqual([]);
+
     copied.find((item) => item.day === 5)!.slots[0].open = '11:00';
-    expect(days.find((item) => item.day === 2)?.slots[0].open).toBe('10:00');
+    expect(days.find((item) => item.day === 1)?.slots[0].open).toBe('08:00');
   });
 
-  it('copia también el cerrado del martes y no pisa el finde', () => {
+  it('copia también el cerrado del lunes y no pisa el finde', () => {
     let days = defaultStoreWeekSchedule();
-    days = setStoreDayClosed(days, 2, true);
+    days = setStoreDayClosed(days, 1, true);
     const copied = copyTuesdayHoursToFriday(days);
-    expect(copied.filter((day) => day.day >= 2 && day.day <= 5).every((day) => day.closed)).toBe(
+    expect(copied.filter((day) => day.day >= 1 && day.day <= 5).every((day) => day.closed)).toBe(
       true,
     );
-    expect(copied.find((day) => day.day === 1)?.closed).toBe(false);
     expect(copied.find((day) => day.day === 6)?.closed).toBe(false);
+    expect(copied.find((day) => day.day === 7)?.closed).toBe(false);
+    expect(storeWeekScheduleToJson(copied).schedule.filter((day) => day.day <= 5).every((day) => day.slots.length === 0)).toBe(
+      true,
+    );
   });
 
   it('guarda cada día en el formato semanal y un cerrado con slots vacíos', () => {
@@ -158,20 +172,19 @@ describe('editor de horarios del comercio', () => {
     ]);
   });
 
-  it('copia las dos franjas del martes a miércoles, jueves y viernes', () => {
-    let days = setStoreDaySplit(defaultStoreWeekSchedule(), 2, true);
-    days = patchStoreDaySlot(days, 2, 0, { open: '08:00', close: '12:00' });
-    days = patchStoreDaySlot(days, 2, 1, { open: '15:00', close: '19:00' });
-    days = patchStoreDaySlot(days, 1, 0, { open: '09:00', close: '13:00' });
+  it('copia las dos franjas del lunes a martes, miércoles, jueves y viernes', () => {
+    let days = setStoreDaySplit(defaultStoreWeekSchedule(), 1, true);
+    days = patchStoreDaySlot(days, 1, 0, { open: '08:00', close: '12:00' });
+    days = patchStoreDaySlot(days, 1, 1, { open: '15:00', close: '19:00' });
+    days = patchStoreDaySlot(days, 2, 0, { open: '09:00', close: '13:00' });
 
     const copied = copyTuesdayHoursToFriday(days);
-    for (const day of [2, 3, 4, 5]) {
+    for (const day of [1, 2, 3, 4, 5]) {
       expect(copied.find((item) => item.day === day)?.slots).toEqual([
         { open: '08:00', close: '12:00' },
         { open: '15:00', close: '19:00' },
       ]);
     }
-    expect(copied.find((item) => item.day === 1)?.slots).toEqual([{ open: '09:00', close: '13:00' }]);
     expect(copied.find((item) => item.day === 6)?.slots).toHaveLength(1);
 
     const json = storeWeekScheduleToJson(copied);
@@ -180,11 +193,11 @@ describe('editor de horarios del comercio', () => {
       { open: '15:00', close: '19:00' },
     ]);
     expect(formatPickupOpeningHours(json)).toBe(
-      'Lun: 09:00 a 13:00 · Mar, Mié, Jue, Vie: 08:00 a 12:00 y de 15:00 a 19:00 · Sáb, Dom: 09:00 a 18:00',
+      'Lun a Vie: 08:00 a 12:00 y de 15:00 a 19:00 · Sáb, Dom: 09:00 a 18:00',
     );
 
     copied.find((item) => item.day === 5)!.slots[1].close = '20:00';
-    expect(days.find((item) => item.day === 2)?.slots[1].close).toBe('19:00');
+    expect(days.find((item) => item.day === 1)?.slots[1].close).toBe('19:00');
   });
 
   it('una semana por defecto en cortado pasa la validación del guardado', () => {
@@ -205,17 +218,21 @@ describe('editor de horarios del comercio', () => {
     expect(validateStoreWeekSchedule(corrido)).toBeNull();
   });
 
-  it('copiar el martes cortado a viernes deja la semana válida', () => {
-    const splitTuesday = setStoreDaySplit(defaultStoreWeekSchedule(), 2, true);
-    const copied = copyTuesdayHoursToFriday(splitTuesday);
-    for (const day of [2, 3, 4, 5]) {
+  it('copiar el lunes cortado a viernes deja la semana válida y guardada', () => {
+    const splitMonday = setStoreDaySplit(defaultStoreWeekSchedule(), 1, true);
+    const copied = copyTuesdayHoursToFriday(splitMonday);
+    for (const day of [1, 2, 3, 4, 5]) {
       expect(copied.find((item) => item.day === day)?.slots).toEqual([
         { open: '09:00', close: '13:00' },
         { open: '15:00', close: '19:00' },
       ]);
     }
-    expect(copied.find((item) => item.day === 1)?.slots).toEqual([{ open: '09:00', close: '18:00' }]);
+    expect(copied.find((item) => item.day === 6)?.slots).toEqual([{ open: '09:00', close: '18:00' }]);
     expect(validateStoreWeekSchedule(copied)).toBeNull();
+    expect(storeWeekScheduleToJson(copied).schedule.find((day) => day.day === 5)?.slots).toEqual([
+      { open: '09:00', close: '13:00' },
+      { open: '15:00', close: '19:00' },
+    ]);
   });
 
   it('rechaza dos franjas que se pisan', () => {
