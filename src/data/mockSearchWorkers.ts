@@ -32,6 +32,8 @@ export type SearchableWorker = {
   atiendeUrgencias?: boolean;
   /** Certificado de antecedentes aprobado. Ausente = no. */
   antecedentesPenales?: boolean;
+  /** Matrícula aprobada. Ausente = no. No incluye el número ni las fotos. */
+  matriculaVerificada?: boolean;
 };
 
 export type SearchWorkerHit = {

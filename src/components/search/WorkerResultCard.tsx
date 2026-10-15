@@ -5,6 +5,7 @@ import { ChangaCard } from '../feed/ChangaCard';
 import { StarRating } from '../profile/StarRating';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { AntecedentesPenalesBadge } from '../profile/AntecedentesPenalesBadge';
+import { MatriculaVerificadaBadge } from '../profile/MatriculaVerificadaBadge';
 import { UrgenciasBadge } from './UrgenciasBadge';
 import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { asText, isRenderableUri } from '../../utils/safeAsync';
@@ -21,6 +22,7 @@ export type WorkerResultCardModel = {
   distanceLabel?: string;
   atiendeUrgencias?: boolean;
   antecedentesPenales?: boolean;
+  matriculaVerificada?: boolean;
 };
 
 function escapeRegExp(s: string) {
@@ -80,6 +82,7 @@ export function WorkerResultCard({
         </Text>
         {urgenciasBadgeView(worker.atiendeUrgencias) ? <UrgenciasBadge /> : null}
         {worker.antecedentesPenales ? <AntecedentesPenalesBadge compact /> : null}
+        {worker.matriculaVerificada ? <MatriculaVerificadaBadge compact /> : null}
         <Text style={styles.resultSummary} numberOfLines={1}>
           {summaryParts.map((p, i) =>
             p.h ? (

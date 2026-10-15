@@ -22,6 +22,7 @@ type RpcRow = {
   total_jobs_done?: number | null;
   atiende_urgencias?: boolean | null;
   antecedentes_penales?: boolean | null;
+  matricula_verificada?: boolean | null;
 };
 
 const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?u=worker';
@@ -80,6 +81,7 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
       coverageKm: Math.max(1, Math.floor(Number(r.coverage_km) || 1)),
       atiendeUrgencias: readAtiendeUrgencias(r.atiende_urgencias),
       antecedentesPenales: r.antecedentes_penales === true,
+      matriculaVerificada: r.matricula_verificada === true,
     };
 
     return {

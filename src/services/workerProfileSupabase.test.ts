@@ -97,6 +97,7 @@ describe('mapPublicWorkerRpcPayload', () => {
     ]);
     expect(profile?.trades[1]?.yearsExperience).toBe(10);
     expect(profile?.antecedentesPenales).toBe(false);
+    expect(profile?.matriculaVerificada).toBe(false);
     expect(JSON.stringify(profile)).not.toContain('NoDebeVerse');
     expect(JSON.stringify(profile)).not.toContain('apellido');
   });
@@ -104,13 +105,19 @@ describe('mapPublicWorkerRpcPayload', () => {
   it('el tilde es solo un booleano y no copia el archivo ni el dni', () => {
     const raw = rpcPayload();
     (raw.profile as { antecedentes_penales?: boolean }).antecedentes_penales = true;
+    (raw.profile as { matricula_verificada?: boolean }).matricula_verificada = true;
     (raw.profile as { storage_path?: string }).storage_path = 'secreto/certificado.pdf';
+    (raw.profile as { numero?: string }).numero = 'MAT-9981';
+    (raw.profile as { entidad?: string }).entidad = 'Ente secreto';
     (raw.profile as { dni?: string }).dni = '30111222';
     const profile = mapPublicWorkerRpcPayload(raw);
     expect(profile?.antecedentesPenales).toBe(true);
+    expect(profile?.matriculaVerificada).toBe(true);
     expect(profile?.firstName).toBe('Alvaro');
     const dumped = JSON.stringify(profile);
     expect(dumped).not.toContain('secreto/certificado.pdf');
+    expect(dumped).not.toContain('MAT-9981');
+    expect(dumped).not.toContain('Ente secreto');
     expect(dumped).not.toContain('30111222');
     expect(dumped).not.toContain('NoDebeVerse');
   });

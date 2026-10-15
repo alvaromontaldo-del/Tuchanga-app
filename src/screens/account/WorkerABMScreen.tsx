@@ -21,6 +21,7 @@ import { useAppToast } from '../../components/toast/toast';
 import { TradeSearchModal } from '../../components/search/TradeSearchModal';
 import { ImagePickerComponent } from '../../components/common/ImagePickerComponent';
 import { AntecedentesPenalesCard } from '../../components/profile/AntecedentesPenalesCard';
+import { MatriculaCard } from '../../components/profile/MatriculaCard';
 import { IntroVideoEditor } from '../../components/profile/IntroVideoEditor';
 import { colors, radii, spacing } from '../../constants/theme';
 import { isSupabaseConfigured } from '../../config/supabase';
@@ -51,6 +52,7 @@ import {
   ATIENDE_URGENCIAS_TITLE,
   toggleAtiendeUrgencias,
 } from '../../utils/urgencias';
+import { profileOffersMatricula } from '../../utils/matriculaVerificada';
 import type { AuthUser } from '../../services/auth';
 
 type Props = AccountStackScreenProps<'WorkerABM'>;
@@ -882,6 +884,10 @@ export function WorkerABMScreen({ navigation }: Props) {
                 thumbColor={atiendeUrgencias ? '#E65100' : '#F3F4F6'}
               />
             </View>
+
+            {isSupabaseConfigured() && userId && profileOffersMatricula(trades) ? (
+              <MatriculaCard />
+            ) : null}
 
             {isSupabaseConfigured() && userId ? <AntecedentesPenalesCard /> : null}
 

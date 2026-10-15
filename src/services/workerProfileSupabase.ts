@@ -146,6 +146,7 @@ export function mapPublicWorkerRpcPayload(raw: unknown): WorkerPublicProfile | n
     totalJobsDone: completedJobsFromPayload(profile, 'total_jobs_done') ?? 0,
     trades,
     antecedentesPenales: profile.antecedentes_penales === true,
+    matriculaVerificada: profile.matricula_verificada === true,
   };
 }
 
