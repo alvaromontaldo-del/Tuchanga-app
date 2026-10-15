@@ -40,3 +40,32 @@ export function formatArgentineCuit(input: string | null | undefined): string {
 export function documentNumberIsLocked(input: string | null | undefined): boolean {
   return onlyDigits(input).length >= 7;
 }
+
+/** Mensaje del alta. `null` si el DNI (7–8) o el CUIT (11 + verificador) está completo. */
+export function registrationDocumentError(
+  type: AccountDocumentType,
+  raw: string | null | undefined,
+): string | null {
+  const digits = onlyDigits(raw);
+  if (type === 'cuit') {
+    if (!digits) return 'El CUIT es obligatorio.';
+    if (!isValidArgentineCuit(digits)) {
+      return 'El CUIT debe tener 11 dígitos y un dígito verificador válido.';
+    }
+    return null;
+  }
+  if (!digits) return 'El DNI es obligatorio.';
+  if (digits.length < 7 || digits.length > 8) return 'El DNI debe tener 7 u 8 dígitos.';
+  return null;
+}
+
+/**
+ * El check de términos y «Crear cuenta» usan la misma regla para DNI y CUIT.
+ * Un CUIT de 11 dígitos no entra en el tope de 8 del DNI.
+ */
+export function isRegistrationDocumentReady(
+  type: AccountDocumentType,
+  raw: string | null | undefined,
+): boolean {
+  return registrationDocumentError(type, raw) == null;
+}

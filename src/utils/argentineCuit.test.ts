@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   documentNumberIsLocked,
   formatArgentineCuit,
+  isRegistrationDocumentReady,
   isValidArgentineCuit,
+  registrationDocumentError,
 } from './argentineCuit';
 
 describe('CUIT argentino', () => {
@@ -44,6 +46,34 @@ describe('registro y Mis datos (#111 #112)', () => {
     expect(register).toContain('formatArgentineCuit');
     expect(register).toContain("documentType === 'cuit' ? 'cuit' : 'dni'");
     expect(register).not.toContain('asCommerce && documentType');
+  });
+
+  it('un CUIT válido habilita términos y Crear cuenta igual que un DNI', () => {
+    expect(isRegistrationDocumentReady('dni', '30111222')).toBe(true);
+    expect(isRegistrationDocumentReady('dni', '3011122')).toBe(true);
+    expect(isRegistrationDocumentReady('dni', '123456')).toBe(false);
+    expect(registrationDocumentError('dni', '20123456786')).toBe(
+      'El DNI debe tener 7 u 8 dígitos.',
+    );
+
+    expect(isRegistrationDocumentReady('cuit', '20-12345678-6')).toBe(true);
+    expect(isRegistrationDocumentReady('cuit', '20123456786')).toBe(true);
+    expect(isRegistrationDocumentReady('cuit', '20-12345678-0')).toBe(false);
+    expect(isRegistrationDocumentReady('cuit', '2012345678')).toBe(false);
+    expect(registrationDocumentError('cuit', '20-12345678-0')).toBe(
+      'El CUIT debe tener 11 dígitos y un dígito verificador válido.',
+    );
+
+    const modal = readFileSync('src/components/legal/TermsAndConditionsModal.tsx', 'utf8');
+    expect(register).toContain('isRegistrationDocumentReady(documentType, dni)');
+    expect(register).toContain('{documentReady ? (');
+    expect(register).toContain('accessibilityLabel="Aceptar términos y condiciones"');
+    expect(register).toContain('maxLength={documentType === \'cuit\' ? undefined : 8}');
+    expect(register).not.toContain('maxLength={documentType === \'cuit\' ? 13 : 8}');
+    expect(register).toContain('onAccept=');
+    expect(register).toContain('disabled={!termsAccepted}');
+    expect(modal).toContain('Aceptar términos y condiciones');
+    expect(modal).toContain('{onAccept ? (');
   });
 
   it('Mis datos muestra el documento bloqueado y deja cargarlo si falta', () => {

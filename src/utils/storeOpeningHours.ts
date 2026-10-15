@@ -286,17 +286,20 @@ export function validateStoreWeekSchedule(days: StoreDaySchedule[]): string | nu
   return null;
 }
 
-/** Copia el horario del martes (abierto o cerrado) a miércoles, jueves y viernes. */
+/**
+ * «Copiar horario de martes a viernes»: el origen es el lunes
+ * (el día anterior al rango) y se aplica a martes, miércoles, jueves y viernes.
+ */
 export function copyTuesdayHoursToFriday(days: StoreDaySchedule[]): StoreDaySchedule[] {
   const week = ensureStoreWeekShape(days);
-  const tuesday = week.find((day) => day.day === 2);
-  if (!tuesday) return week;
+  const monday = week.find((day) => day.day === 1);
+  if (!monday) return week;
   return week.map((day) => {
-    if (day.day < 3 || day.day > 5) return day;
+    if (day.day < 2 || day.day > 5) return day;
     return {
       day: day.day,
-      closed: tuesday.closed,
-      slots: cloneSlots(tuesday.slots),
+      closed: monday.closed,
+      slots: cloneSlots(monday.slots),
     };
   });
 }
