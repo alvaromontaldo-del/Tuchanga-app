@@ -114,7 +114,7 @@ async function handleNotificationResponse(
       return;
     }
 
-    if (data.type === 'antecedentes_penales') {
+    if (data.type === 'antecedentes_penales' || data.type === 'matricula_verificada') {
       const ready = await waitForNavigation();
       if (!ready) return;
       navigationRef.navigate('Main', {

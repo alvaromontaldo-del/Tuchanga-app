@@ -344,6 +344,7 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
               distanceLabel: `A ${formatKm(item.distanceKm)}`,
               atiendeUrgencias: item.worker.atiendeUrgencias,
               antecedentesPenales: item.worker.antecedentesPenales,
+              matriculaVerificada: item.worker.matriculaVerificada,
             }}
             highlightQuery={query}
             onPress={() =>

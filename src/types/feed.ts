@@ -77,6 +77,8 @@ export type WorkerPublicProfile = {
   atiendeUrgencias?: boolean;
   /** Certificado de antecedentes aprobado. No incluye el archivo. */
   antecedentesPenales?: boolean;
+  /** Matrícula aprobada. No incluye el número, la entidad ni las fotos. */
+  matriculaVerificada?: boolean;
 };
 
 export const MAX_WORKER_TRADES = 5;
