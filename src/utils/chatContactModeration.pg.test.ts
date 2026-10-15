@@ -14,6 +14,10 @@ const ANTIPUENTEO = readFileSync(
   resolve(process.cwd(), 'supabase/20261009_antipuenteo_contacto.sql'),
   'utf8',
 );
+const ANTIPUENTEO_PALABRAS = readFileSync(
+  resolve(process.cwd(), 'supabase/20261015_antipuenteo_palabras.sql'),
+  'utf8',
+);
 
 const CLIENT = '11111111-1111-4111-8111-111111111111';
 const WORKER = '22222222-2222-4222-8222-222222222222';
@@ -251,6 +255,7 @@ describe.skipIf(!postgresAvailable())('moderación de chat y bucket privado', ()
     psqlScript(setupSql);
     psqlScript(SQL);
     psqlScript(ANTIPUENTEO);
+    psqlScript(ANTIPUENTEO_PALABRAS);
     psql(`
       INSERT INTO public.conversations (id, cliente_id, trabajador_id)
       VALUES ('${CONV}', '${CLIENT}', '${WORKER}');
@@ -304,7 +309,7 @@ describe.skipIf(!postgresAvailable())('moderación de chat y bucket privado', ()
           || '|' || (public.redact_offplatform_contact('10 bolsas de cemento')->>'text')
           || '|' || (public.redact_offplatform_contact('Av. San Martín 2300')->>'text');
       `),
-    ).toBe('¿cuál es la dirección?|•••|•••|$300.000|10 bolsas de cemento|•••');
+    ).toBe('¿cuál es la •••?|•••|•••|$300.000|10 bolsas de cemento|•••');
   });
 
   it('el motivo de bloqueo queda vacío en text, image, budget, quotation y system', () => {
@@ -422,7 +427,7 @@ describe.skipIf(!postgresAvailable())('moderación de chat y bucket privado', ()
         VALUES ('${CONV}', '${CLIENT}', '¿cuál es la dirección?', 'text')
         RETURNING body;
       `),
-    ).toBe('¿cuál es la dirección?');
+    ).toBe('¿cuál es la •••?');
 
     const systemId = psql(`
       SELECT public._test_insert_system('Seña de $15.000 confirmada el 23/06/2026 17:16. PIN 4821. 11 1234 5678');
@@ -474,8 +479,64 @@ describe.skipIf(!postgresAvailable())('moderación de chat y bucket privado', ()
         || '|' || (public.redact_offplatform_contact('hablamos por whatsapp en la obra')->>'text');
     `);
     expect(rows).toBe(
-      'Te paso mi dirección|•••, •••|La ubicación te la paso ••• •••|•••|•••|•••|veinte mil|25 lucas|las 15:30|¿me pasás el teléfono?|hablamos por whatsapp en la obra',
+      'Te paso mi •••|•••, •••|La ••• te la paso ••• •••|•••|•••|•••|veinte mil|25 lucas|las 15:30|¿me pasás el •••?|hablamos por ••• en la obra',
     );
+  });
+
+  it('tapa la palabra de contacto y no entra en otra palabra', () => {
+    expect(
+      psql(`
+        SELECT (public.redact_offplatform_contact('¿cuál es la dirección?')->>'text')
+          || '|' || (public.redact_offplatform_contact('tela')->>'text')
+          || '|' || (public.redact_offplatform_contact('hotel')->>'text')
+          || '|' || (public.redact_offplatform_contact('telón')->>'text')
+          || '|' || (public.redact_offplatform_contact('digital')->>'text')
+          || '|' || (public.redact_offplatform_contact('direccional del auto')->>'text')
+          || '|' || (public.redact_offplatform_contact('d i r e c c i ó n')->>'text')
+          || '|' || (public.redact_offplatform_contact('$300.000')->>'text')
+          || '|' || (public.redact_offplatform_contact('las 15:30')->>'text');
+      `),
+    ).toBe('¿cuál es la •••?|tela|hotel|telón|digital|direccional del auto|•••|$300.000|las 15:30');
+  });
+
+  it('tapa la palabra en la cotización de trabajo y en la de materiales', () => {
+    const req = '66666666-6666-4666-8666-666666666666';
+    const quote = '77777777-7777-4777-8777-777777777777';
+    expect(
+      psql(`
+        INSERT INTO public.contrataciones (conversation_id, service_detail)
+        VALUES ('${CONV}', '¿cuál es la dirección?')
+        RETURNING service_detail;
+      `),
+    ).toBe('¿cuál es la •••?');
+    expect(
+      psql(`
+        INSERT INTO public.material_requests (id, conversation_id, title)
+        VALUES ('${req}', '${CONV}', 'cemento y el tel')
+        RETURNING title;
+      `),
+    ).toBe('cemento y el •••');
+    expect(
+      psql(`
+        INSERT INTO public.request_items (request_id, description)
+        VALUES ('${req}', 'manguera, pasame el mail')
+        RETURNING description;
+      `),
+    ).toBe('manguera, pasame el •••');
+    expect(
+      psql(`
+        INSERT INTO public.quotes (id, request_id, notes)
+        VALUES ('${quote}', '${req}', 'retiro por whatsapp')
+        RETURNING notes;
+      `),
+    ).toBe('retiro por •••');
+    expect(
+      psql(`
+        INSERT INTO public.quote_items (quote_id, item_note, alternative_description, variant_label)
+        VALUES ('${quote}', 'sin cel', 'el correo del local', 'insta')
+        RETURNING item_note || '|' || alternative_description || '|' || variant_label;
+      `),
+    ).toBe('sin •••|el ••• del local|•••');
   });
 
   it('compara contra el perfil cargado y no loguea el dato', () => {

@@ -26,23 +26,63 @@ function hides(text: string, kind: OffplatformKind, gone: string) {
   expect(result.notice, text).toBe(OFFPLATFORM_NOTICE);
 }
 
-describe('antipuenteo: no bloquea la palabra, detecta el dato', () => {
+describe('antipuenteo: tapa el dato y la palabra, y el mensaje sigue', () => {
   it.each([
-    '¿cuál es la dirección?',
-    'ya estoy en la ubicación',
-    'pasame la dirección cuando puedas',
-    '¿me pasás el teléfono?',
     'llamame cuando llegues',
-    'mandame un mail cuando termines',
-    'hablamos por whatsapp en la obra',
     'Cinta',
     'Cable',
     'se viene el calor',
     'Cinta aisladora y cable de 2.5',
     'meta de la semana y calle interna',
-    'instagram del local lo vemos después',
     'el punto es que falta el enduido',
   ])('deja pasar la frase «%s»', keeps);
+
+  it.each([
+    ['¿cuál es la dirección?', '¿cuál es la •••?'],
+    ['¿Cuál es la Dirección?', '¿Cuál es la •••?'],
+    ['pasame la direccion cuando puedas', 'pasame la ••• cuando puedas'],
+    ['ya estoy en la ubicación', 'ya estoy en la •••'],
+    ['Te paso mi dirección', 'Te paso mi •••'],
+    ['¿me pasás el teléfono?', '¿me pasás el •••?'],
+    ['mandame un mail cuando termines', 'mandame un ••• cuando termines'],
+    ['hablamos por whatsapp en la obra', 'hablamos por ••• en la obra'],
+    ['instagram del local lo vemos después', '••• del local lo vemos después'],
+    ['mi domicilio', 'mi •••'],
+    ['seguime en IG', 'seguime en •••'],
+    ['el insta', 'el •••'],
+    ['pasame el TEL', 'pasame el •••'],
+    ['tu cel', 'tu •••'],
+    ['el celular', 'el •••'],
+    ['el wsp', 'el •••'],
+    ['el wpp', 'el •••'],
+    ['tu email', 'tu •••'],
+    ['el correo', 'el •••'],
+    ['DIRE', '•••'],
+    ['d i r e c c i ó n', '•••'],
+    ['t e l', '•••'],
+    ['t.e.l', '•••'],
+    ['w h a t s a p p', '•••'],
+    ['e-mail', '•••'],
+    ['I N S T A', '•••'],
+  ])('tapa solo la palabra en «%s»', (text, expected) => {
+    const result = redactOffplatformContact(text);
+    expect(result.text, text).toBe(expected);
+    expect(result.changed, text).toBe(true);
+    expect(result.notice, text).toBe(OFFPLATFORM_NOTICE);
+  });
+
+  it.each([
+    'tela',
+    'Tela',
+    'hotel',
+    'Hotel',
+    'telón',
+    'Telón',
+    'digital',
+    'Digital',
+    'direccional del auto',
+    'el hotel tiene tela y un telón digital',
+  ])('no tapa dentro de otra palabra «%s»', keeps);
 
   it.each([
     '$300.000',
@@ -65,13 +105,12 @@ describe('antipuenteo: no bloquea la palabra, detecta el dato', () => {
     'veinte mil',
     '25 lucas',
     'las 15:30',
-    'Te paso mi dirección',
   ])('deja pasar montos, medidas, horarios y fechas «%s»', keeps);
 });
 
 describe('mensajes que se colaron en el chat', () => {
-  it('deja «Te paso mi dirección» y tapa la calle con piso', () => {
-    keeps('Te paso mi dirección');
+  it('tapa la palabra «dirección» y la calle con piso', () => {
+    expect(redactOffplatformContact('Te paso mi dirección').text).toBe(`Te paso mi ${OFFPLATFORM_REDACTION}`);
     const result = redactOffplatformContact('Pellegrini 570, piso 2');
     expect(result.text).toBe(`${OFFPLATFORM_REDACTION}, ${OFFPLATFORM_REDACTION}`);
     expect(result.kinds).toContain('direccion');
@@ -84,7 +123,9 @@ describe('mensajes que se colaron en el chat', () => {
     const result = redactOffplatformContact(
       'La ubicación te la paso por Whatsapp pásame tu telefono',
     );
-    expect(result.text).toBe(`La ubicación te la paso ${OFFPLATFORM_REDACTION} ${OFFPLATFORM_REDACTION}`);
+    expect(result.text).toBe(
+      `La ${OFFPLATFORM_REDACTION} te la paso ${OFFPLATFORM_REDACTION} ${OFFPLATFORM_REDACTION}`,
+    );
     expect(result.kinds).toContain('canal');
     expect(result.text.toLowerCase()).not.toContain('whatsapp');
     expect(result.text.toLowerCase()).not.toContain('telefono');
@@ -111,8 +152,10 @@ describe('mensajes que se colaron en el chat', () => {
     keeps('son veinte mil pesos');
     keeps('sale 25 lucas');
     keeps('llegamos tipo las 15:30');
-    keeps('¿me pasás el teléfono?');
-    keeps('hablamos por whatsapp en la obra');
+    expect(redactOffplatformContact('¿me pasás el teléfono?').text).toBe('¿me pasás el •••?');
+    expect(redactOffplatformContact('hablamos por whatsapp en la obra').text).toBe(
+      'hablamos por ••• en la obra',
+    );
   });
 });
 
@@ -246,7 +289,7 @@ describe('paridad con el SQL', () => {
       'Año 2024',
       '••• del portón',
       'Pasa a buscarla por •••',
-      'Te paso mi dirección',
+      'Te paso mi •••',
       '•••, •••',
       'estoy en •••',
       '•••',
@@ -260,11 +303,23 @@ describe('paridad con el SQL', () => {
       '•••',
       '•••',
       '•••',
-      'La ubicación te la paso ••• •••',
-      '¿me pasás el teléfono?',
-      'hablamos por whatsapp en la obra',
+      'La ••• te la paso ••• •••',
+      '¿me pasás el •••?',
+      'hablamos por ••• en la obra',
       'Cinta 1234',
       'Llegá a •••, te espero en la vereda',
+      '¿cuál es la •••?',
+      'tela',
+      'hotel',
+      'telón',
+      'digital',
+      'direccional del auto',
+      '•••',
+      '•••',
+      '•••',
+      '•••',
+      '•••',
+      '$300.000 y de 9 a 18 hs',
     ]);
   });
 });
