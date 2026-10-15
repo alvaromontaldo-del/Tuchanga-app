@@ -1,9 +1,11 @@
 /**
  * Antipuenteo, primera capa (sin IA).
  *
- * No se bloquea por la palabra («dirección», «teléfono», «ubicación»,
- * «whatsapp», «mail», «calle»…). Se detecta el dato y se reemplaza por «•••».
- * El envío sigue. La misma regla vive en el cliente y en
+ * El dato de contacto se reemplaza por «•••» y el mensaje se envía igual.
+ * Desde el 15/10 también se tapa la palabra que pide ese dato
+ * (dirección, teléfono, mail, whatsapp, ig y las de la lista), con el
+ * mismo aviso. Solo esa palabra: «tela», «hotel», «telón», «digital» y
+ * «direccional» siguen. La misma regla vive en el cliente y en
  * public.redact_offplatform_contact (SQL).
  *
  * La comparación contra el teléfono y la dirección cargados en el perfil
@@ -802,6 +804,71 @@ function collectAddresses(raw: string, folded: string, spans: Span[], ignored: S
   }
 }
 
+/**
+ * Palabras que piden contacto. La más larga primero: «tel» no se come
+ * «telefono» escrito con letras separadas. Tiene que coincidir con el SQL.
+ */
+const CONTACT_WORDS: { word: string; kind: OffplatformKind }[] = [
+  { word: 'direccion', kind: 'direccion' },
+  { word: 'domicilio', kind: 'direccion' },
+  { word: 'ubicacion', kind: 'direccion' },
+  { word: 'instagram', kind: 'canal' },
+  { word: 'telefono', kind: 'telefono' },
+  { word: 'whatsapp', kind: 'canal' },
+  { word: 'celular', kind: 'telefono' },
+  { word: 'correo', kind: 'email' },
+  { word: 'email', kind: 'email' },
+  { word: 'insta', kind: 'canal' },
+  { word: 'dire', kind: 'direccion' },
+  { word: 'mail', kind: 'email' },
+  { word: 'cel', kind: 'telefono' },
+  { word: 'wsp', kind: 'canal' },
+  { word: 'wpp', kind: 'canal' },
+  { word: 'tel', kind: 'telefono' },
+  { word: 'ig', kind: 'canal' },
+];
+
+const CONTACT_WORD_KIND: Record<string, OffplatformKind> = Object.fromEntries(
+  CONTACT_WORDS.map((entry) => [entry.word, entry.kind]),
+);
+
+/** Separador entre letras sueltas: espacio, punto, guion o guion bajo. */
+const CONTACT_LETTER_SEP = '[\\s._-]+';
+
+function contactWordKind(compact: string): OffplatformKind {
+  return CONTACT_WORD_KIND[compact] ?? 'canal';
+}
+
+/**
+ * Tapa la palabra, no el mensaje. Límite de palabra: no entra dentro de
+ * «tela», «hotel», «telón», «digital» ni «direccional». También «d i r e»,
+ * «t.e.l» y «e-mail». Mayúsculas y tildes ya vienen plegadas.
+ */
+function collectContactWords(folded: string, spans: Span[], ignored: Span[]) {
+  const compactAlt = CONTACT_WORDS.map((entry) => entry.word).join('|');
+  const spacedAlt = CONTACT_WORDS.map((entry) => entry.word.split('').join(CONTACT_LETTER_SEP)).join('|');
+  const re = new RegExp(
+    `\\b(?:${compactAlt}|e${CONTACT_LETTER_SEP}mail|${spacedAlt})\\b`,
+    'g',
+  );
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(folded))) {
+    const text = match[0];
+    if (!text) {
+      re.lastIndex += 1;
+      continue;
+    }
+    const compact = text.replace(/[^a-z]/g, '');
+    const span: Span = {
+      start: match.index,
+      end: match.index + text.length,
+      kind: contactWordKind(compact),
+    };
+    if (overlapsAny(span, ignored) || overlapsAny(span, spans)) continue;
+    spans.push(span);
+  }
+}
+
 function collect(raw: string, folded: string): Span[] {
   const ignored: Span[] = [];
   for (const pattern of IGNORE_RES) {
@@ -881,6 +948,7 @@ function collect(raw: string, folded: string): Span[] {
   );
 
   collectAddresses(raw, folded, spans, ignored);
+  collectContactWords(folded, spans, ignored);
 
   return spans.filter((span) => span.kind !== 'ignore');
 }
