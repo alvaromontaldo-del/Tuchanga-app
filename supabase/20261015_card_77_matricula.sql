@@ -37,6 +37,30 @@
 
 BEGIN;
 
+-- Postgres no admite subconsultas en un CHECK: la validación de rutas vive
+-- en esta función IMMUTABLE (1 a 3 rutas, sin repetir, todas
+-- <user_id>/<13 dígitos>-<6 a 12 letras/números>.jpg).
+CREATE OR REPLACE FUNCTION public._matricula_paths_ok(p_user_id uuid, p_paths text[])
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public
+AS $fn$
+  SELECT p_user_id IS NOT NULL
+    AND p_paths IS NOT NULL
+    AND cardinality(p_paths) BETWEEN 1 AND 3
+    AND (SELECT count(DISTINCT x) FROM unnest(p_paths) AS x) = cardinality(p_paths)
+    AND NOT EXISTS (
+      SELECT 1
+      FROM unnest(p_paths) AS x
+      WHERE x IS NULL
+         OR x !~ ('^' || p_user_id::text || '/[0-9]{13}-[a-z0-9]{6,12}\.jpg$')
+    );
+$fn$;
+
+REVOKE ALL ON FUNCTION public._matricula_paths_ok(uuid, text[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._matricula_paths_ok(uuid, text[]) TO service_role;
+
 CREATE TABLE IF NOT EXISTS public.matriculas (
   user_id uuid PRIMARY KEY REFERENCES public.profiles (id) ON DELETE CASCADE,
   status text NOT NULL,
@@ -63,15 +87,7 @@ CREATE TABLE IF NOT EXISTS public.matriculas (
       AND entidad !~ '[[:cntrl:]]'
     ),
   CONSTRAINT matriculas_paths_chk
-    CHECK (
-      cardinality(storage_paths) BETWEEN 1 AND 3
-      AND (SELECT count(DISTINCT p) FROM unnest(storage_paths) AS p) = cardinality(storage_paths)
-      AND NOT EXISTS (
-        SELECT 1
-        FROM unnest(storage_paths) AS p
-        WHERE p !~ ('^' || user_id::text || '/[0-9]{13}-[a-z0-9]{6,12}\.jpg$')
-      )
-    ),
+    CHECK (public._matricula_paths_ok(user_id, storage_paths)),
   CONSTRAINT matriculas_rechazo_chk
     CHECK (
       status <> 'rechazada'
