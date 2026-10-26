@@ -46,3 +46,15 @@ export async function resolveMpWebhookSecret(): Promise<string> {
   if (fromEnv) return fromEnv;
   return readVaultSecret("mp_webhook_secret");
 }
+
+/**
+ * Secreto del webhook de suscripciones. Si no hay uno propio, usa el de pagos
+ * para no exigir un segundo secreto en sandbox.
+ */
+export async function resolveMpSubscriptionWebhookSecret(): Promise<string> {
+  const fromEnv = envValue("MP_SUBSCRIPTION_WEBHOOK_SECRET");
+  if (fromEnv) return fromEnv;
+  const fromVault = await readVaultSecret("mp_subscription_webhook_secret");
+  if (fromVault) return fromVault;
+  return resolveMpWebhookSecret();
+}

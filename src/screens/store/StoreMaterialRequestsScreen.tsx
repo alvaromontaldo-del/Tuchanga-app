@@ -19,7 +19,7 @@ import { useStoreBoardCards } from '../../hooks/useStoreQuotes';
 import type { CommerceStackParamList } from '../../navigation/mainTypes';
 import { completarOrdenMaterialConPin, formatMoneyAr } from '../../services/clientQuotesSupabase';
 import { listKey } from '../../utils/safeAsync';
-import { storeCanReceiveQuotes, storeStatusLabel } from '../../services/storeRegistrationSupabase';
+import { StoreSubscriptionCard } from '../../components/store/StoreSubscriptionCard';
 import type { StoreBoardCard, StoreBoardColumn } from '../../types/materials';
 import { normalizeOrderCodeInput, PIN_LENGTH } from '../../utils/orderCode';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -49,7 +49,6 @@ export function StoreMaterialRequestsScreen({ navigation, route }: Props) {
   const toast = useAppToast();
   const { cards, loading, error, refresh, refreshSilent } = useStoreBoardCards(true);
   const { primaryStore } = useCommerceShell();
-  const canReceive = primaryStore ? storeCanReceiveQuotes(primaryStore.status) : false;
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<StoreBoardColumn>(
     () => route.params?.initialColumn ?? 'nuevas',
@@ -212,17 +211,12 @@ export function StoreMaterialRequestsScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.flex}>
-      {primaryStore && !canReceive ? (
-        <View style={styles.banner}>
-          <Ionicons name="time-outline" size={20} color={colors.text} />
-          <View style={styles.bannerText}>
-            <Text style={styles.bannerTitle}>{storeStatusLabel(primaryStore.status)}</Text>
-            <Text style={styles.bannerSub}>
-              {primaryStore.status === 'pending_approval'
-                ? 'Cuando un admin apruebe tu local vas a empezar a recibir pedidos.'
-                : 'Tu local no está recibiendo pedidos en este momento.'}
-            </Text>
-          </View>
+      {primaryStore ? (
+        <View style={styles.subscriptionWrap}>
+          <StoreSubscriptionCard
+            storeId={primaryStore.id}
+            fallbackStatus={primaryStore.status}
+          />
         </View>
       ) : null}
 
@@ -578,21 +572,10 @@ function KanbanCard({
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
-  banner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
+  subscriptionWrap: {
     marginHorizontal: spacing.md,
     marginTop: spacing.sm,
-    padding: spacing.md,
-    backgroundColor: '#FFF8E1',
-    borderRadius: radii.card,
-    borderWidth: 1,
-    borderColor: '#FFE082',
   },
-  bannerText: { flex: 1, gap: 2 },
-  bannerTitle: { fontSize: 14, fontWeight: '800', color: colors.text },
-  bannerSub: { fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
   tabRow: {
     flexDirection: 'row',
     flexGrow: 0,

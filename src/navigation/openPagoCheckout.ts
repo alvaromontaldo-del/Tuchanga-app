@@ -11,6 +11,8 @@ export function openPagoCheckout(params: {
   conversationId?: string;
   contratacionId?: string;
   materialOrderId?: string;
+  checkoutKind?: 'subscription';
+  subscriptionStoreId?: string;
 }): void {
   if (!navigationRef.isReady()) return;
   navigationRef.navigate('PagoCheckout', params);

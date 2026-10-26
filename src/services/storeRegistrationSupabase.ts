@@ -152,13 +152,13 @@ export async function fetchMyStoresDetailed(): Promise<MyStoreSummary[]> {
 export function storeStatusLabel(status: string): string {
   switch (status) {
     case 'pending_approval':
-      return 'Pendiente de aprobación';
+      return 'En revisión';
     case 'trial':
-      return 'Trial activo';
+      return 'Prueba gratis';
     case 'active':
       return 'Activo';
     case 'unpaid':
-      return 'Pago pendiente';
+      return 'Suspendido';
     case 'paused':
       return 'Pausado';
     case 'rejected':

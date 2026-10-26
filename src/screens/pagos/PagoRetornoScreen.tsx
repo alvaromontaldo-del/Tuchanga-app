@@ -37,6 +37,7 @@ export function PagoRetornoScreen() {
   const initialStatus = route.params?.status;
   const mpPaymentId = route.params?.mpPaymentId;
   const conversationId = route.params?.conversationId;
+  const subscriptionStoreId = route.params?.subscriptionStoreId;
 
   const [syncError, setSyncError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -51,6 +52,11 @@ export function PagoRetornoScreen() {
   }, []);
 
   const isMaterial = Boolean(materialOrderId);
+  const isSubscription = Boolean(subscriptionStoreId);
+
+  const backToCommerce = useCallback(() => {
+    navigation.navigate('Commerce', { screen: 'StoreMaterialRequests' });
+  }, [navigation]);
 
   const goNext = useCallback(() => {
     if (redirectedRef.current) return;
@@ -112,15 +118,40 @@ export function PagoRetornoScreen() {
   }, [contratacionId, materialOrderId, mpPaymentId]);
 
   useEffect(() => {
+    if (isSubscription) return;
     if (!contratacionId && !materialOrderId) return;
     void runSync();
-  }, [contratacionId, materialOrderId, mpPaymentId, runSync]);
+  }, [contratacionId, materialOrderId, mpPaymentId, runSync, isSubscription]);
 
   useEffect(() => {
     if (confirmed || materialConfirmed) goNext();
   }, [confirmed, materialConfirmed, goNext]);
 
   const done = confirmed || materialConfirmed;
+
+  if (isSubscription) {
+    const failed = initialStatus === 'failure';
+    const pending = initialStatus === 'pending';
+    return (
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <View style={styles.card}>
+          <Text style={styles.title}>
+            {failed ? 'No se vinculó el débito' : pending ? 'Autorización en proceso' : 'Débito en modo prueba'}
+          </Text>
+          <Text style={styles.subtitle}>
+            {failed
+              ? 'No se vinculó el débito. Podés intentarlo de nuevo desde el tablero.'
+              : pending
+                ? 'Mercado Pago todavía está procesando la autorización. Es un pago de prueba.'
+                : 'Si Mercado Pago autorizó el débito, lo vas a ver en tu comercio. Es un pago de prueba.'}
+          </Text>
+          <Pressable onPress={backToCommerce} style={styles.btn}>
+            <Text style={styles.btnText}>Volver al comercio</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (!contratacionId && !materialOrderId) {
     return (

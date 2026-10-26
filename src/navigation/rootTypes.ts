@@ -14,6 +14,8 @@ export type RootStackParamList = {
     conversationId?: string;
     contratacionId?: string;
     materialOrderId?: string;
+    checkoutKind?: 'subscription';
+    subscriptionStoreId?: string;
   };
   PagoRetorno: {
     status: 'approved' | 'pending' | 'failure';
@@ -21,6 +23,7 @@ export type RootStackParamList = {
     mpPaymentId?: string;
     contratacionId?: string;
     materialOrderId?: string;
+    subscriptionStoreId?: string;
   };
 };
 

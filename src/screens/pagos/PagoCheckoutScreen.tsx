@@ -33,6 +33,8 @@ export function PagoCheckoutScreen() {
   const checkoutUrl = route.params?.checkoutUrl ?? '';
   const sandbox = route.params?.sandbox ?? false;
   const conversationId = route.params?.conversationId;
+  const checkoutKind = route.params?.checkoutKind;
+  const subscriptionStoreId = route.params?.subscriptionStoreId;
   const checkoutReady = isRenderableUri(checkoutUrl);
   const [closing, setClosing] = useState(false);
   const [webKey, setWebKey] = useState(0);
@@ -60,9 +62,10 @@ export function PagoCheckoutScreen() {
         status,
         conversationId,
         mpPaymentId: mpPaymentIdRef.current,
+        subscriptionStoreId,
       });
     },
-    [contratacionId, materialOrderId, conversationId, navigation],
+    [contratacionId, materialOrderId, conversationId, navigation, subscriptionStoreId],
   );
 
   const handleUrl = useCallback(
@@ -165,7 +168,9 @@ export function PagoCheckoutScreen() {
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>Mercado Pago</Text>
           <Text style={styles.headerSubtitle}>
-            {`${COSTO_SERVICIO_LABEL} · checkout seguro`}
+            {checkoutKind === 'subscription'
+              ? 'Débito automático · modo prueba'
+              : `${COSTO_SERVICIO_LABEL} · checkout seguro`}
           </Text>
         </View>
         <View style={styles.backBtn} />

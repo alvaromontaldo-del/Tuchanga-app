@@ -26,7 +26,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useCommerceShell } from '../../context/CommerceShellContext';
 import { useUserMode } from '../../context/UserModeContext';
 import type { CommerceStackParamList } from '../../navigation/mainTypes';
-import { storeStatusLabel } from '../../services/storeRegistrationSupabase';
+import { StoreSubscriptionCard } from '../../components/store/StoreSubscriptionCard';
 import { updateMyStoreAvatarFromUri } from '../../services/storeQuotesSupabase';
 import { normalizeLocalImageUri } from '../../utils/normalizeLocalImage';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -197,9 +197,6 @@ export function CommerceAccountScreen({ navigation }: Props) {
         {primaryStore ? (
           <>
             <Text style={styles.value}>{primaryStore.name}</Text>
-            <Text style={styles.status}>
-              Estado: {storeStatusLabel(primaryStore.status)}
-            </Text>
           </>
         ) : (
           <Text style={styles.muted}>Todavía no registraste un local.</Text>
@@ -208,6 +205,13 @@ export function CommerceAccountScreen({ navigation }: Props) {
           <Text style={styles.muted}>{stores.length} locales vinculados a esta cuenta.</Text>
         ) : null}
       </View>
+
+      {primaryStore ? (
+        <StoreSubscriptionCard
+          storeId={primaryStore.id}
+          fallbackStatus={primaryStore.status}
+        />
+      ) : null}
 
       {primaryStore && primaryStore.status !== 'rejected' ? (
         <Pressable
@@ -323,7 +327,6 @@ const styles = StyleSheet.create({
   },
   label: { fontSize: 12, fontWeight: '700', color: colors.textSecondary, letterSpacing: 0.4 },
   value: { fontSize: 16, fontWeight: '800', color: colors.text },
-  status: { marginTop: 4, fontSize: 14, color: colors.textSecondary },
   muted: { fontSize: 14, color: colors.textSecondary, marginTop: 4 },
   rowBtn: {
     flexDirection: 'row',
