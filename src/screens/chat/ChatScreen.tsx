@@ -35,7 +35,12 @@ import { useFeed } from '../../context/FeedContext';
 import { useSocket } from '../../context/SocketContext';
 import { useUnreadMessages } from '../../context/UnreadMessagesContext';
 import { fetchConversationReads } from '../../services/conversationReadsSupabase';
-import { fetchApproxChatDistanceKm, sendMessageSupabase } from '../../services/chatSupabase';
+import {
+  fetchApproxChatDistanceKm,
+  sendMessageSupabase,
+  subscribeConversationDistanceTick,
+} from '../../services/chatSupabase';
+import { JobAddressBanner } from '../../components/chat/JobAddressBanner';
 import {
   IMAGE_BODY_PREVIEW,
   sendChatImageMessageSupabase,
@@ -989,11 +994,16 @@ export function ChatScreen({
       return;
     }
     let cancelled = false;
-    void fetchApproxChatDistanceKm(conversationId).then((value) => {
-      if (!cancelled) setApproxDistanceKm(value);
-    });
+    const load = () => {
+      void fetchApproxChatDistanceKm(conversationId).then((value) => {
+        if (!cancelled) setApproxDistanceKm(value);
+      });
+    };
+    load();
+    const unsub = subscribeConversationDistanceTick(conversationId, load);
     return () => {
       cancelled = true;
+      unsub();
     };
   }, [conversationId, participants?.myRole]);
 
@@ -3724,6 +3734,14 @@ export function ChatScreen({
             </View>
           ) : null}
         </View>
+
+        {participants?.myRole === 'cliente' ? (
+          <JobAddressBanner
+            conversationId={conversationId}
+            estadoPago={job?.estado_pago}
+            role="cliente"
+          />
+        ) : null}
 
         <KeyboardAvoidingView
           style={styles.flex}
