@@ -218,6 +218,7 @@ export function DetalleServicioScreen() {
   const [pinVisible, setPinVisible] = useState<string | null>(null);
   const [pinInput, setPinInput] = useState('');
   const [direccionData, setDireccionData] = useState<DireccionCliente | null>(null);
+  const [direccionLista, setDireccionLista] = useState(false);
   const [slots, setSlots] = useState<SlotDraft[]>(() => [newSlotDraft()]);
   const [opcionesAgenda, setOpcionesAgenda] = useState<DisponibilidadOpcion[]>([]);
   const [picker, setPicker] = useState<{
@@ -350,15 +351,20 @@ export function DetalleServicioScreen() {
   useEffect(() => {
     if (!canShowDireccionTrabajador || !row?.id) {
       setDireccionData(null);
+      setDireccionLista(false);
       return;
     }
     let cancelled = false;
+    setDireccionLista(false);
     void obtenerDireccionCliente(row.id)
       .then((d) => {
         if (!cancelled) setDireccionData(d);
       })
       .catch(() => {
         if (!cancelled) setDireccionData(null);
+      })
+      .finally(() => {
+        if (!cancelled) setDireccionLista(true);
       });
     return () => {
       cancelled = true;
@@ -806,7 +812,9 @@ export function DetalleServicioScreen() {
                 </View>
               </>
             ) : (
-              <Text style={styles.hint}>Cargando dirección…</Text>
+              <Text style={styles.hint}>
+                {direccionLista ? 'La dirección no está disponible.' : 'Cargando dirección…'}
+              </Text>
             )}
           </View>
         ) : null}

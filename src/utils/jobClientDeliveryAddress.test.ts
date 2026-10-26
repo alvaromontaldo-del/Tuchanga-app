@@ -114,19 +114,20 @@ describe('formulario de pedido de materiales', () => {
     expect(screen).toContain('Enviar a comercios del rubro');
   });
 
-  it('el alta toma el domicilio del cliente del chat y sigue avisando a los comercios', () => {
-    expect(service).toContain('fetchConversationClientDeliveryAddress');
-    expect(service).toContain("rpc('get_conversation_client_delivery_address'");
+  it('el alta no manda calle ni coordenadas y sigue avisando a los comercios', () => {
     expect(service).toContain(".select('cliente_id,trabajador_id')");
-    expect(service).toContain('fetchProfileDeliveryAddress(clienteId)');
-    expect(service).not.toContain('fetchProfileDeliveryAddress(professionalId)');
-    expect(service).not.toContain('fetchProfileDeliveryAddress(trabajadorId)');
-    expect(service).toContain("client_id: delivery.clientId");
+    expect(service).toContain('client_id: clienteId');
+    expect(service).toContain('client_lat: null');
+    expect(service).toContain('client_lng: null');
+    expect(service).not.toContain('fetchConversationClientDeliveryAddress');
+    expect(service).not.toContain("rpc('get_conversation_client_delivery_address'");
+    expect(service).not.toContain('fetchProfileDeliveryAddress');
     expect(service).toContain('push_on_store_board');
     expect(service).toContain('Tenés una nueva solicitud de cotización.');
     const createFn = service.slice(service.indexOf('export async function createMaterialRequestWithTargets'));
     expect(createFn).not.toContain('input.clientAddress');
     expect(createFn).not.toContain('input.clientLat');
+    expect(createFn).not.toContain('client_address:');
   });
 
   it('el SQL copia el perfil del cliente del chat y no el del profesional', () => {

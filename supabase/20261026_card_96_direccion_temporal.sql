@@ -11,9 +11,13 @@
 -- distancia_aprox_chat sigue devolviendo solo el token de km, redondeado
 -- igual que hoy, pero el punto del cliente sale de la dirección temporal
 -- si hay una válida.
--- Después del pago, get_conversation_client_delivery_address y
--- obtener_direccion_cliente devuelven esa dirección con las mismas reglas
--- de visibilidad de hoy. El trigger de materiales también la usa.
+-- Después del pago de UN trabajo de ESTA conversación,
+-- get_conversation_client_delivery_address y obtener_direccion_cliente
+-- devuelven esa dirección (temporal o perfil), completa y exacta.
+-- Antes del pago el profesional no recibe fila: ni calle ni coordenadas,
+-- tampoco redondeadas. El cliente sigue viendo la suya.
+-- El comercio destinatario sigue viendo la calle para el flete
+-- (get_store_request_client_address), sin coordenadas y sin PIN.
 -- El texto no pasa por el antipuenteo: antes del pago el otro no lo ve,
 -- y después del pago es el domicilio del trabajo, igual que direccion_texto.
 --
@@ -23,6 +27,7 @@
 --   get_conversation_client_delivery_address(uuid)          e97eb5d8c39119b8af0e72625b2296b4
 --   material_requests_apply_client_job_address()            87587b575c0d60d2dfe9b6d9d311a623
 --   obtener_direccion_cliente(uuid)                         b63b3abb85892a049d9ce7df0133fcb6
+--   get_store_request_client_address(uuid, uuid)           dd6fe793763ea5fd5bfaf8f276e681ca
 -- No se recrean set_my_direccion_exacta ni update_profile_geo_coverage:
 -- set_conversation_job_address las llama si el cliente pide guardar
 -- también el perfil. anon no recibe EXECUTE de nada nuevo.
@@ -46,6 +51,10 @@ BEGIN
   IF md5(pg_get_functiondef('public.obtener_direccion_cliente(uuid)'::regprocedure))
      IS DISTINCT FROM 'b63b3abb85892a049d9ce7df0133fcb6' THEN
     RAISE EXCEPTION 'obtener_direccion_cliente cambió desde el md5 vivo';
+  END IF;
+  IF md5(pg_get_functiondef('public.get_store_request_client_address(uuid, uuid)'::regprocedure))
+     IS DISTINCT FROM 'dd6fe793763ea5fd5bfaf8f276e681ca' THEN
+    RAISE EXCEPTION 'get_store_request_client_address cambió desde el md5 vivo';
   END IF;
 END
 $guard$;
@@ -350,7 +359,7 @@ AS $function$
 DECLARE
   v_cliente uuid;
   v_trabajador uuid;
-  v_show_street boolean;
+  v_paid_here boolean;
 BEGIN
   IF auth.uid() IS NULL OR p_conversation_id IS NULL THEN
     RETURN;
@@ -371,27 +380,25 @@ BEGIN
     RETURN;
   END IF;
 
-  -- La calle: al propio cliente, o al profesional con un trabajo pagado (seña o total).
-  v_show_street := auth.uid() = v_cliente OR EXISTS (
+  -- Pago de ESTA conversación. Un trabajo viejo del mismo par no alcanza.
+  v_paid_here := EXISTS (
     SELECT 1
     FROM public.contrataciones k
-    WHERE k.worker_id = v_trabajador
-      AND k.client_id = v_cliente
+    WHERE k.conversation_id = p_conversation_id
       AND k.estado_pago IN ('seña_pagada', 'totalmente_pagado')
   );
+
+  -- Antes del pago el profesional no recibe nada: ni calle ni coordenadas.
+  IF auth.uid() IS DISTINCT FROM v_cliente AND NOT v_paid_here THEN
+    RETURN;
+  END IF;
 
   RETURN QUERY
   SELECT
     v_cliente,
-    CASE WHEN v_show_street THEN nullif(btrim(j.job_address_text), '') ELSE NULL END,
-    CASE
-      WHEN v_show_street THEN j.job_lat
-      ELSE round(j.job_lat::numeric, 2)::double precision
-    END,
-    CASE
-      WHEN v_show_street THEN j.job_lng
-      ELSE round(j.job_lng::numeric, 2)::double precision
-    END
+    nullif(btrim(j.job_address_text), ''),
+    j.job_lat,
+    j.job_lng
   FROM public.conversation_job_address j
   WHERE j.conversation_id = p_conversation_id
     AND j.job_lat IS NOT NULL
@@ -407,16 +414,14 @@ BEGIN
   RETURN QUERY
   SELECT
     p.id,
-    CASE WHEN v_show_street THEN nullif(btrim(p.direccion_texto), '') ELSE NULL END,
+    nullif(btrim(p.direccion_texto), ''),
     CASE
       WHEN p.location IS NULL THEN NULL
-      WHEN v_show_street THEN ST_Y(p.location::geometry)
-      ELSE round(ST_Y(p.location::geometry)::numeric, 2)::double precision
+      ELSE ST_Y(p.location::geometry)
     END,
     CASE
       WHEN p.location IS NULL THEN NULL
-      WHEN v_show_street THEN ST_X(p.location::geometry)
-      ELSE round(ST_X(p.location::geometry)::numeric, 2)::double precision
+      ELSE ST_X(p.location::geometry)
     END
   FROM public.profiles p
   WHERE p.id = v_cliente;
@@ -424,7 +429,7 @@ END;
 $function$;
 
 COMMENT ON FUNCTION public.get_conversation_client_delivery_address(uuid) IS
-  'Domicilio del trabajo si hay dirección temporal; si no, el perfil. Antes del pago, sin calle y con coords a 2 decimales.';
+  'Dirección temporal o del perfil. El cliente la ve siempre. El profesional, solo si esta conversación tiene un trabajo pago, y entonces exacta.';
 
 REVOKE ALL ON FUNCTION public.get_conversation_client_delivery_address(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.get_conversation_client_delivery_address(uuid) FROM anon;
@@ -489,7 +494,7 @@ AS $function$
 DECLARE
   v_cliente uuid;
   v_trabajador uuid;
-  v_show_street boolean;
+  v_paid_here boolean;
   v_address text;
   v_lat double precision;
   v_lng double precision;
@@ -523,11 +528,10 @@ BEGIN
 
   NEW.client_id := v_cliente;
 
-  v_show_street := NEW.professional_id IS NULL OR EXISTS (
+  v_paid_here := EXISTS (
     SELECT 1
     FROM public.contrataciones k
-    WHERE k.worker_id = v_trabajador
-      AND k.client_id = v_cliente
+    WHERE k.conversation_id = NEW.conversation_id
       AND k.estado_pago IN ('seña_pagada', 'totalmente_pagado')
   );
 
@@ -569,20 +573,103 @@ BEGIN
     v_lng := NULL;
   END IF;
 
-  NEW.client_address := CASE WHEN v_show_street THEN v_address ELSE NULL END;
-  -- #120: solo coordenadas redondeadas (2 decimales).
-  NEW.client_lat := CASE WHEN v_lat IS NULL THEN NULL ELSE round(v_lat::numeric, 2)::double precision END;
-  NEW.client_lng := CASE WHEN v_lng IS NULL THEN NULL ELSE round(v_lng::numeric, 2)::double precision END;
+  -- La calle queda para el comercio (no tiene SELECT sobre la columna).
+  -- Las coordenadas solo si esta conversación ya está paga, y exactas.
+  -- Antes del pago el profesional no las puede leer.
+  NEW.client_address := v_address;
+  NEW.client_lat := CASE WHEN v_paid_here THEN v_lat ELSE NULL END;
+  NEW.client_lng := CASE WHEN v_paid_here THEN v_lng ELSE NULL END;
   RETURN NEW;
 END;
 $function$;
 
 COMMENT ON FUNCTION public.material_requests_apply_client_job_address() IS
-  'El pedido de materiales usa la dirección temporal del trabajo si existe. La calle solo después del pago; coords a 2 decimales.';
+  'Copia la dirección del trabajo (temporal o perfil). Coordenadas exactas solo si esta conversación está paga.';
 
 REVOKE ALL ON FUNCTION public.material_requests_apply_client_job_address() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.material_requests_apply_client_job_address() FROM anon;
 REVOKE ALL ON FUNCTION public.material_requests_apply_client_job_address() FROM authenticated;
 GRANT EXECUTE ON FUNCTION public.material_requests_apply_client_job_address() TO service_role;
+
+-- Calle para el comercio que cotiza el flete. No devuelve coordenadas ni el PIN.
+-- Si hay dirección temporal de esa conversación, esa es la de entrega.
+CREATE OR REPLACE FUNCTION public.get_store_request_client_address(p_request_id uuid, p_store_id uuid)
+ RETURNS text
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_address text;
+  v_client uuid;
+  v_professional uuid;
+  v_conversation uuid;
+  v_job text;
+BEGIN
+  IF auth.uid() IS NULL OR p_request_id IS NULL OR p_store_id IS NULL THEN
+    RETURN NULL;
+  END IF;
+  IF NOT public.is_store_owner(p_store_id) THEN
+    RETURN NULL;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.request_target_stores rts
+    WHERE rts.request_id = p_request_id
+      AND rts.store_id = p_store_id
+  ) THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT
+    nullif(btrim(mr.client_address), ''),
+    mr.client_id,
+    mr.professional_id,
+    mr.conversation_id
+    INTO v_address, v_client, v_professional, v_conversation
+  FROM public.material_requests mr
+  WHERE mr.id = p_request_id;
+
+  IF v_conversation IS NOT NULL THEN
+    SELECT nullif(btrim(j.job_address_text), '')
+      INTO v_job
+    FROM public.conversation_job_address j
+    WHERE j.conversation_id = v_conversation
+      AND nullif(btrim(j.job_address_text), '') IS NOT NULL;
+    IF v_job IS NOT NULL THEN
+      RETURN v_job;
+    END IF;
+  END IF;
+
+  IF v_address IS NULL AND v_conversation IS NOT NULL THEN
+    SELECT nullif(btrim(p.direccion_texto), '')
+      INTO v_address
+    FROM public.conversations c
+    JOIN public.profiles p ON p.id = c.cliente_id
+    WHERE c.id = v_conversation
+      AND c.deleted_at IS NULL
+      AND c.cliente_id IS NOT NULL
+      AND (v_professional IS NULL OR c.cliente_id IS DISTINCT FROM v_professional);
+  END IF;
+
+  IF v_address IS NULL
+     AND v_client IS NOT NULL
+     AND (v_professional IS NULL OR v_client IS DISTINCT FROM v_professional) THEN
+    SELECT nullif(btrim(p.direccion_texto), '')
+      INTO v_address
+    FROM public.profiles p
+    WHERE p.id = v_client;
+  END IF;
+
+  RETURN v_address;
+END;
+$function$;
+
+COMMENT ON FUNCTION public.get_store_request_client_address(uuid, uuid) IS
+  'Calle de entrega para el comercio destinatario, para cotizar el flete. Prefiere la dirección temporal. No devuelve coordenadas ni el PIN.';
+
+REVOKE ALL ON FUNCTION public.get_store_request_client_address(uuid, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_store_request_client_address(uuid, uuid) FROM anon;
+GRANT EXECUTE ON FUNCTION public.get_store_request_client_address(uuid, uuid) TO authenticated, service_role;
 
 COMMIT;

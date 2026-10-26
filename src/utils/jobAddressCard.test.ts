@@ -91,6 +91,15 @@ describe('dirección temporal del trabajo', () => {
     expect(distance).not.toMatch(/RETURNS TABLE/i);
     expect(sql).toContain('REVOKE ALL ON FUNCTION public.distancia_aprox_chat(uuid) FROM anon');
     expect(sql).not.toContain('GRANT EXECUTE ON FUNCTION public.distancia_aprox_chat(uuid) TO anon');
+    expect(sql).toContain('dd6fe793763ea5fd5bfaf8f276e681ca');
+    const store = fnBody('get_store_request_client_address');
+    expect(store).toContain('conversation_job_address');
+    expect(store).toContain('is_store_owner');
+    expect(store).not.toContain('ST_Y');
+    expect(store).not.toContain('verification_pin');
+    expect(sql).toContain('REVOKE ALL ON FUNCTION public.get_store_request_client_address(uuid, uuid) FROM anon');
+    expect(sql).not.toMatch(/GRANT EXECUTE ON FUNCTION public\.get_store_request_client_address[^;]*TO anon/);
+
     expect(sql).toContain('86fa0f176593602bfd4315d6a7a97dc2');
     expect(sql).toContain('e97eb5d8c39119b8af0e72625b2296b4');
     expect(sql).toContain('87587b575c0d60d2dfe9b6d9d311a623');
@@ -98,8 +107,10 @@ describe('dirección temporal del trabajo', () => {
 
     const delivery = fnBody('get_conversation_client_delivery_address');
     expect(delivery.indexOf('conversation_job_address')).toBeLessThan(delivery.indexOf('p.direccion_texto'));
-    expect(delivery).toContain('round(j.job_lat::numeric, 2)');
-    expect(delivery).toContain('CASE WHEN v_show_street THEN nullif(btrim(j.job_address_text)');
+    expect(delivery).toContain('k.conversation_id = p_conversation_id');
+    expect(delivery).toContain('auth.uid() IS DISTINCT FROM v_cliente AND NOT v_paid_here');
+    expect(delivery).not.toContain('k.worker_id = v_trabajador');
+    expect(delivery).not.toContain('round(');
     expect(delivery).toContain("estado_pago IN ('seña_pagada', 'totalmente_pagado')");
 
     const exact = fnBody('obtener_direccion_cliente');
@@ -108,8 +119,11 @@ describe('dirección temporal del trabajo', () => {
 
     const materials = fnBody('material_requests_apply_client_job_address');
     expect(materials.indexOf('conversation_job_address')).toBeLessThan(materials.indexOf('p.direccion_texto'));
-    expect(materials).toContain('round(v_lat::numeric, 2)');
-    expect(materials).toContain('NEW.client_address := CASE WHEN v_show_street THEN v_address ELSE NULL END');
+    expect(materials).toContain('k.conversation_id = NEW.conversation_id');
+    expect(materials).not.toContain('k.worker_id = v_trabajador');
+    expect(materials).not.toContain('round(');
+    expect(materials).toContain('NEW.client_address := v_address');
+    expect(materials).toContain('CASE WHEN v_paid_here THEN v_lat ELSE NULL END');
     expect(sql).toContain(
       'REVOKE ALL ON FUNCTION public.material_requests_apply_client_job_address() FROM anon',
     );
