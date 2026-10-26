@@ -39,15 +39,24 @@ describe('ranking #115 y check de materiales #116', () => {
     expect(sql).not.toMatch(/CREATE\s+(OR\s+REPLACE\s+)?FUNCTION\s+public\.search_workers_public/i);
     expect(sql).not.toMatch(/DROP\s+FUNCTION[\s\S]{0,120}search_workers_public/i);
     expect(sql).not.toMatch(/FUNCTION\s+public\.(crear_cotizacion|editar_cotizacion|recotizar_en_curso)/);
-    expect(sql).toContain("DEFAULT 'score'");
-    expect(sql).toContain('ranking_score numeric');
+    expect(sql).not.toMatch(/p_sort_by/);
+    const fn = sql.slice(sql.indexOf('CREATE FUNCTION public.search_workers_for_client'));
+    const returns = fn.slice(fn.indexOf('RETURNS TABLE'), fn.indexOf('LANGUAGE sql'));
+    expect(returns).toContain('matricula_verificada boolean');
+    expect(returns).not.toContain('ranking_score');
   });
 
   it('la salida al cliente no lleva facturación ni el apellido real', () => {
     const out = sql.slice(sql.indexOf('-- salida al cliente'), sql.indexOf('FROM scored s'));
     expect(out).toContain('NULL::text AS apellido');
-    expect(out).toContain('s.ranking_score');
+    expect(out).not.toContain('ranking_score');
     expect(out).not.toMatch(/precio_trabajador|earned|apellido_full/);
+    const order = sql.slice(sql.indexOf('-- orden fijo'), sql.indexOf('LIMIT (SELECT n FROM lim)'));
+    expect(order).toContain('s.ranking_score DESC');
+    expect(order).toContain('s.rating_average DESC');
+    expect(order).toContain('s.total_jobs_done DESC');
+    expect(order).toContain('s.profile_id ASC');
+    expect(order).not.toMatch(/distance/);
     expect(sql).toContain('allows_materials_list boolean NOT NULL DEFAULT true');
     expect(sql).toContain('admin_set_trade_allows_materials_list');
     expect(sql).toContain("status <> 'draft'");
@@ -62,14 +71,12 @@ describe('ranking #115 y check de materiales #116', () => {
     expect(sql).toContain('ln(21::numeric)');
 
     const screen = readFileSync(resolve(__dirname, '../screens/search/SearchWorkerScreen.tsx'), 'utf8');
-    const sorts = readFileSync(resolve(__dirname, '../constants/workerSearchSort.ts'), 'utf8');
     const search = readFileSync(resolve(__dirname, '../services/searchWorkersSupabase.ts'), 'utf8');
     const card = readFileSync(resolve(__dirname, '../components/search/WorkerResultCard.tsx'), 'utf8');
-    expect(sorts).toContain('Recomendados');
-    expect(sorts).toContain('Más cercanos');
-    expect(screen).toContain('WORKER_SEARCH_SORTS');
+    expect(screen).not.toContain('WORKER_SEARCH_SORTS');
     expect(screen).not.toContain('ranking_score');
-    expect(search).toContain('p_sort_by');
+    expect(screen).not.toContain('workerSearchSort');
+    expect(search).not.toContain('p_sort_by');
     expect(search).not.toContain('ranking_score');
     expect(search).not.toMatch(/apellido/);
     expect(card).not.toContain('ranking_score');

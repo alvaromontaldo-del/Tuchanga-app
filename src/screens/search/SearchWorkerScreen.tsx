@@ -22,7 +22,6 @@ import { isSupabaseConfigured } from '../../config/supabase';
 import { useAuth } from '../../context/AuthContext';
 import type { AuthUser } from '../../services/auth';
 import { fetchSearchWorkerHitsFromSupabase } from '../../services/searchWorkersSupabase';
-import { WORKER_SEARCH_SORTS, type WorkerSearchSort } from '../../constants/workerSearchSort';
 import { filterSearchHitsByUrgencias } from '../../utils/urgencias';
 import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { SearchHeaderBar } from '../../components/search/SearchHeaderBar';
@@ -95,7 +94,6 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
 
   const [hits, setHits] = useState<SearchWorkerHit[]>([]);
   const [onlyUrgencias, setOnlyUrgencias] = useState(false);
-  const [sortBy, setSortBy] = useState<WorkerSearchSort>('score');
   const [hitsLoading, setHitsLoading] = useState(false);
   const [hitsError, setHitsError] = useState<string | null>(null);
   const [searchRetry, setSearchRetry] = useState(0);
@@ -175,7 +173,6 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
           query,
           categoryNames: selectedCategories,
           excludeUserId: user?.id,
-          sortBy,
         });
         if (!cancelled) {
           setHits(data);
@@ -202,30 +199,13 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
     user?.id,
     searchRetry,
     isRestoring,
-    sortBy,
   ]);
 
   const useSupabaseSearch = isSupabaseConfigured();
 
-  const orderedHits = useMemo(() => {
-    if (useSupabaseSearch || sortBy === 'score') return hits;
-    const copy = [...hits];
-    copy.sort((a, b) => {
-      if (sortBy === 'rating') {
-        const byRating = b.worker.ratingAverage - a.worker.ratingAverage;
-        if (byRating !== 0) return byRating;
-      } else if (sortBy === 'jobs') {
-        const byJobs = (b.worker.totalJobsDone ?? 0) - (a.worker.totalJobsDone ?? 0);
-        if (byJobs !== 0) return byJobs;
-      }
-      return a.distanceKm - b.distanceKm;
-    });
-    return copy;
-  }, [hits, sortBy, useSupabaseSearch]);
-
   const visibleHits = useMemo(
-    () => filterSearchHitsByUrgencias(orderedHits, onlyUrgencias),
-    [orderedHits, onlyUrgencias],
+    () => filterSearchHitsByUrgencias(hits, onlyUrgencias),
+    [hits, onlyUrgencias],
   );
 
   const triggerSearch = useCallback(() => {
@@ -313,26 +293,6 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
           onToggle: () => setOnlyUrgencias((on) => !on),
         }}
       />
-
-      <View style={styles.sortRow}>
-        {WORKER_SEARCH_SORTS.map((option) => {
-          const selected = sortBy === option.id;
-          return (
-            <Pressable
-              key={option.id}
-              onPress={() => setSortBy(option.id)}
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              accessibilityLabel={`Ordenar: ${option.label}`}
-              style={[styles.sortChip, selected && styles.sortChipOn]}
-            >
-              <Text style={[styles.sortChipText, selected && styles.sortChipTextOn]}>
-                {option.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
 
       <FlatList
         ref={listRef}
@@ -469,33 +429,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   originSecondaryText: { color: colors.primary, fontWeight: '700', fontSize: 14 },
-  sortRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-  },
-  sortChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  sortChipOn: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  sortChipText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textSecondary,
-  },
-  sortChipTextOn: {
-    color: '#FFFFFF',
-  },
   listContent: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xl * 2,

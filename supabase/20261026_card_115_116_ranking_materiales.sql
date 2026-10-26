@@ -4,7 +4,9 @@
 -- Producción (kyxehrxcdealbujvvnxp), leído el 2026-10-26 con pg_get_functiondef:
 --   * search_workers_for_client(double precision, double precision, text, text[], uuid, integer)
 --     md5 a421ef5c7e08c83f1b07e67a7addfa78.
---     Se recrea desde ese cuerpo. Se suma p_sort_by (default 'score') y ranking_score.
+--     Se recrea desde ese cuerpo. Misma firma y mismas columnas de salida.
+--     El ranking_score se calcula adentro y solo ordena: no sale al cliente.
+--     Orden fijo: score DESC, rating DESC, trabajos DESC, id. Sin distancia.
 --     Los filtros, el radio, el redondeo de lat/lng y apellido NULL quedan iguales.
 --     La función viva tenía EXECUTE para anon. Este script no se lo da: la búsqueda
 --     de la app exige sesión. authenticated y service_role sí.
@@ -15,7 +17,8 @@
 --
 -- Decisiones de Alvaro (mandan sobre el brief):
 --   * Un solo check, allows_materials_list, en professional_trades. Todos en true.
---   * El puntaje solo ordena. La salida no lleva facturación.
+--   * El puntaje solo ordena y no se devuelve. La salida no lleva facturación.
+--   * No hay selector de orden ni desempate por km.
 --   * No entran km, matrícula ni antecedentes (siguen como booleanos de insignia).
 --   * Inactividad = días desde el último trabajo finalizado y totalmente pagado
 --     (ahí el trabajador facturó). Sin ese trabajo, factor 1.
@@ -190,8 +193,7 @@ CREATE FUNCTION public.search_workers_for_client(
   p_query text DEFAULT ''::text,
   p_category_names text[] DEFAULT NULL::text[],
   p_exclude_user_id uuid DEFAULT NULL::uuid,
-  p_limit integer DEFAULT 80,
-  p_sort_by text DEFAULT 'score'
+  p_limit integer DEFAULT 80
 )
 RETURNS TABLE(
   profile_id uuid,
@@ -210,8 +212,7 @@ RETURNS TABLE(
   total_jobs_done integer,
   atiende_urgencias boolean,
   antecedentes_penales boolean,
-  matricula_verificada boolean,
-  ranking_score numeric
+  matricula_verificada boolean
 )
 LANGUAGE sql
 STABLE
@@ -429,44 +430,33 @@ AS $function$
     s.total_jobs_done,
     s.atiende_urgencias,
     s.antecedentes_penales,
-    s.matricula_verificada,
-    s.ranking_score
+    s.matricula_verificada
   FROM scored s
+  -- orden fijo: score, estrellas, trabajos, id. Sin distancia.
   ORDER BY
-    CASE
-      WHEN lower(btrim(coalesce(p_sort_by, 'score'))) = 'rating' THEN s.rating_average
-    END DESC NULLS LAST,
-    CASE
-      WHEN lower(btrim(coalesce(p_sort_by, 'score'))) = 'jobs' THEN s.total_jobs_done
-    END DESC NULLS LAST,
-    CASE
-      WHEN lower(btrim(coalesce(p_sort_by, 'score'))) = 'distance' THEN s.distance_exact
-    END ASC NULLS LAST,
-    CASE
-      WHEN lower(btrim(coalesce(p_sort_by, 'score'))) NOT IN ('rating', 'jobs', 'distance')
-        THEN s.ranking_score
-    END DESC NULLS LAST,
-    s.distance_exact ASC,
+    s.ranking_score DESC,
+    s.rating_average DESC NULLS LAST,
+    s.total_jobs_done DESC NULLS LAST,
     s.profile_id ASC
   LIMIT (SELECT n FROM lim);
 $function$;
 
 COMMENT ON FUNCTION public.search_workers_for_client(
-  double precision, double precision, text, text[], uuid, integer, text
+  double precision, double precision, text, text[], uuid, integer
 ) IS
-  'Búsqueda de profesionales. p_sort_by: score (default), rating, jobs, distance. ranking_score solo ordena; apellido es NULL. No devuelve facturación.';
+  'Búsqueda de profesionales ordenada por ranking interno. El score no se devuelve. apellido es NULL. No devuelve facturación.';
 
 REVOKE ALL ON FUNCTION public.search_workers_for_client(
-  double precision, double precision, text, text[], uuid, integer, text
+  double precision, double precision, text, text[], uuid, integer
 ) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.search_workers_for_client(
-  double precision, double precision, text, text[], uuid, integer, text
+  double precision, double precision, text, text[], uuid, integer
 ) FROM anon;
 GRANT EXECUTE ON FUNCTION public.search_workers_for_client(
-  double precision, double precision, text, text[], uuid, integer, text
+  double precision, double precision, text, text[], uuid, integer
 ) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.search_workers_for_client(
-  double precision, double precision, text, text[], uuid, integer, text
+  double precision, double precision, text, text[], uuid, integer
 ) TO service_role;
 
 COMMIT;
