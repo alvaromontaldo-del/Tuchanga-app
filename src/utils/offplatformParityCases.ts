@@ -44,4 +44,8 @@ export const OFFPLATFORM_PARITY_CASES = [
   'DIRE',
   'WPP',
   '$300.000 y de 9 a 18 hs',
+  'llamame al 341.343.1122',
+  'llamame al 343.332.112',
+  'llamame al 341.3434-once2',
+  'te cobro 15.000',
 ] as const;

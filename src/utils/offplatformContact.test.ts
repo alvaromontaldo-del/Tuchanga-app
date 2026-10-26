@@ -28,7 +28,6 @@ function hides(text: string, kind: OffplatformKind, gone: string) {
 
 describe('antipuenteo: tapa el dato y la palabra, y el mensaje sigue', () => {
   it.each([
-    'llamame cuando llegues',
     'Cinta',
     'Cable',
     'se viene el calor',
@@ -105,7 +104,22 @@ describe('antipuenteo: tapa el dato y la palabra, y el mensaje sigue', () => {
     'veinte mil',
     '25 lucas',
     'las 15:30',
+    'te cobro 15.000',
   ])('deja pasar montos, medidas, horarios y fechas «%s»', keeps);
+
+  it.each([
+    ['llamame al 341.343.1122', '••• al •••'],
+    ['llamame al 343.332.112', '••• al •••'],
+    ['llamame al 341.3434-once2', '••• al •••'],
+    ['LLAMAME', '•••'],
+    ['hay que llamar', 'hay que •••'],
+    ['llama cuando llegues', '••• cuando llegues'],
+  ])('tapa llamame y el teléfono en «%s»', (text, expected) => {
+    const result = redactOffplatformContact(text);
+    expect(result.text, text).toBe(expected);
+    expect(result.changed, text).toBe(true);
+    expect(result.notice, text).toBe(OFFPLATFORM_NOTICE);
+  });
 });
 
 describe('mensajes que se colaron en el chat', () => {
@@ -320,6 +334,10 @@ describe('paridad con el SQL', () => {
       '•••',
       '•••',
       '$300.000 y de 9 a 18 hs',
+      '••• al •••',
+      '••• al •••',
+      '••• al •••',
+      'te cobro 15.000',
     ]);
   });
 });
