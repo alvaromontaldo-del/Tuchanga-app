@@ -1,10 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
+import { fetchStoreTrialDays } from '../services/storeSubscriptionSupabase';
+import { pendingCommerceReviewMessage } from '../utils/storeSubscription';
 
 export const PENDING_COMMERCE_NOTICE_TITLE = 'Comercio en validación';
 
-export const PENDING_COMMERCE_NOTICE_MESSAGE =
-  'Su comercio está siendo validado por un administrador. Aguarde entre 24 y 48 hs para poder ingresar.';
+async function reviewMessage(): Promise<string> {
+  const days = await fetchStoreTrialDays();
+  return pendingCommerceReviewMessage(days);
+}
 
 const NOTICE_KEY = '@yachanga/pending_commerce_notice_v1';
 
@@ -32,6 +36,13 @@ export function showPendingCommerceNoticeOnce(userId: string | null | undefined)
     } catch {
       /* si falla el storage igual mostramos esta vez; el set evita repetir en la sesión */
     }
-    Alert.alert(PENDING_COMMERCE_NOTICE_TITLE, PENDING_COMMERCE_NOTICE_MESSAGE);
+    Alert.alert(PENDING_COMMERCE_NOTICE_TITLE, await reviewMessage());
+  })();
+}
+
+/** Aviso al tocar el módulo cuando el comercio sigue en revisión. Lee N del servidor. */
+export function presentPendingCommerceNotice(): void {
+  void (async () => {
+    Alert.alert(PENDING_COMMERCE_NOTICE_TITLE, await reviewMessage());
   })();
 }

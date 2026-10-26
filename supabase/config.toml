@@ -8,6 +8,15 @@
 [functions.mp_webhook]
 verify_jwt = false
 
+# #114. Checkout de suscripción del comercio. El caller es la app con access token.
+[functions.mp_crear_suscripcion]
+verify_jwt = true
+
+# #114. Webhook de preapproval / cobros de suscripción. MP no manda JWT.
+# El deploy por API no lee este archivo: hay que pasar verify_jwt = false.
+[functions.mp_subscription_webhook]
+verify_jwt = false
+
 [functions.mp_crear_preferencia]
 verify_jwt = true
 

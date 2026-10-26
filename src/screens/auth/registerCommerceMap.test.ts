@@ -76,8 +76,9 @@ describe('no se tocan las pantallas vecinas del mapa', () => {
       'Cortado',
     );
     const notice = readFileSync('src/context/pendingCommerceNotice.ts', 'utf8');
-    expect(notice).toContain(
-      'Su comercio está siendo validado por un administrador. Aguarde entre 24 y 48 hs para poder ingresar.',
+    expect(notice).toContain('pendingCommerceReviewMessage');
+    expect(readFileSync('src/utils/storeSubscription.ts', 'utf8')).toContain(
+      'Tu comercio está siendo revisado por el equipo de YaChanga. Cuando lo aprobemos, empiezan tus ',
     );
   });
 
