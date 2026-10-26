@@ -64,6 +64,7 @@ import {
   type ChatQuote,
   type QuoteStatus,
 } from '../../services/quotesSupabase';
+import { conversationAllowsMaterialsList } from '../../services/tradeMaterialsFlag';
 import { postPinWorkerChatCopy } from '../../utils/postPinWorkUi';
 import {
   quoteWarrantyLabel,
@@ -336,7 +337,9 @@ export function ChatScreen({
     clientId: string;
     workerId: string;
     myRole: 'cliente' | 'trabajador';
+    primaryTrade: string | null;
   } | null>(null);
+  const [materialsAllowed, setMaterialsAllowed] = useState(true);
   const [approxDistanceKm, setApproxDistanceKm] = useState<string | null>(null);
   const [peerAvatarUrl, setPeerAvatarUrl] = useState<string | null>(
     otherAvatarUrl?.trim() || null,
@@ -885,6 +888,7 @@ export function ChatScreen({
           clientId: c.cliente_id,
           workerId: c.trabajador_id,
           myRole,
+          primaryTrade: c.primary_trade ?? null,
         });
         if (otherAvatarUrl?.trim()) return;
         const otherId = myRole === 'cliente' ? c.trabajador_id : c.cliente_id;
@@ -901,6 +905,25 @@ export function ChatScreen({
       cancelled = true;
     };
   }, [conversationId, leaveChat, myId, otherAvatarUrl, toast]);
+
+  useEffect(() => {
+    const current = participants;
+    if (!isSupabaseConfigured() || !current || current.myRole !== 'trabajador') {
+      setMaterialsAllowed(true);
+      return;
+    }
+    let cancelled = false;
+    void conversationAllowsMaterialsList({
+      conversationId,
+      workerId: current.workerId,
+      primaryTrade: current.primaryTrade,
+    }).then((allowed) => {
+      if (!cancelled) setMaterialsAllowed(allowed);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, participants]);
 
   useEffect(() => {
     if (!isSupabaseConfigured() || !conversationId || participants?.myRole !== 'trabajador') {
@@ -3496,6 +3519,7 @@ export function ChatScreen({
                     <Ionicons name="calculator-outline" size={16} color={colors.text} />
                     <Text style={styles.headerActionChipText} numberOfLines={1}>{quoteChip.label}</Text>
                   </Pressable>
+                  {materialsAllowed ? (
                   <Pressable
                     onPress={() => {
                       if (!participants.clientId) {
@@ -3515,6 +3539,7 @@ export function ChatScreen({
                     <Ionicons name="clipboard-outline" size={16} color={colors.text} />
                     <Text style={styles.headerActionChipText} numberOfLines={1}>Materiales</Text>
                   </Pressable>
+                  ) : null}
                 </View>
               ) : null}
             </View>

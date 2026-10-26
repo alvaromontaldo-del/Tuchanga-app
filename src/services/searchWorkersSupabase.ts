@@ -5,6 +5,7 @@ import { coarseCoord } from '../utils/publicWorkerSearch';
 import { completedJobsFromPayload } from '../utils/workerReputation';
 import { readAtiendeUrgencias } from '../utils/urgencias';
 import { fetchCompletedJobsByProfileIds } from './workerCompletedJobs';
+import type { WorkerSearchSort } from '../constants/workerSearchSort';
 
 type RpcRow = {
   profile_id: string;
@@ -27,8 +28,28 @@ type RpcRow = {
 
 const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?u=worker';
 
+function rpcRejectsSortArg(message: string): boolean {
+  return /p_sort_by|schema cache|could not find the function|function .* does not exist/i.test(message);
+}
+
+function sortHitsLocally(hits: SearchWorkerHit[], sort: WorkerSearchSort): SearchWorkerHit[] {
+  const copy = [...hits];
+  copy.sort((a, b) => {
+    if (sort === 'rating') {
+      const byRating = b.worker.ratingAverage - a.worker.ratingAverage;
+      if (byRating !== 0) return byRating;
+    } else if (sort === 'jobs') {
+      const byJobs = (b.worker.totalJobsDone ?? 0) - (a.worker.totalJobsDone ?? 0);
+      if (byJobs !== 0) return byJobs;
+    }
+    return a.distanceKm - b.distanceKm;
+  });
+  return copy;
+}
+
 /**
  * Profesionales con al menos un job, ubicación y radio; el punto del cliente debe caer dentro del radio.
+ * El orden lo define el servidor (recomendados por defecto). El puntaje no se copia al resultado.
  */
 export async function fetchSearchWorkerHitsFromSupabase(params: {
   clientLat: number;
@@ -36,11 +57,13 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
   query: string;
   categoryNames: string[];
   excludeUserId?: string;
+  sortBy?: WorkerSearchSort;
 }): Promise<SearchWorkerHit[]> {
   const sb = getSupabaseClient();
   await sb.auth.getSession();
 
-  const { data, error } = await sb.rpc('search_workers_for_client', {
+  const sortBy = params.sortBy ?? 'score';
+  const rpcArgs = {
     p_client_lat: params.clientLat,
     p_client_lng: params.clientLng,
     p_query: params.query.trim(),
@@ -48,7 +71,16 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
       params.categoryNames.length > 0 ? params.categoryNames : null,
     p_exclude_user_id: params.excludeUserId ?? null,
     p_limit: 80,
+  };
+  let serverSorted = true;
+  let { data, error } = await sb.rpc('search_workers_for_client', {
+    ...rpcArgs,
+    p_sort_by: sortBy,
   });
+  if (error && rpcRejectsSortArg(error.message ?? '')) {
+    serverSorted = false;
+    ({ data, error } = await sb.rpc('search_workers_for_client', rpcArgs));
+  }
 
   if (error) throw error;
   const rows = (data ?? []) as RpcRow[];
@@ -90,15 +122,15 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
     };
   });
 
-  hits.sort((a, b) => a.distanceKm - b.distanceKm);
+  const ordered = serverSorted ? hits : sortHitsLocally(hits, sortBy);
 
-  const missing = hits.filter((h) => h.worker.totalJobsDone == null).map((h) => h.worker.id);
-  if (missing.length === 0) return hits;
+  const missing = ordered.filter((h) => h.worker.totalJobsDone == null).map((h) => h.worker.id);
+  if (missing.length === 0) return ordered;
 
   const byId = await fetchCompletedJobsByProfileIds(missing);
-  if (!byId) return hits;
+  if (!byId) return ordered;
 
-  return hits.map((h) => {
+  return ordered.map((h) => {
     if (h.worker.totalJobsDone != null) return h;
     const n = byId.get(h.worker.id);
     if (n == null) return h;
