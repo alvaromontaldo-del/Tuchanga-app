@@ -1,8 +1,12 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { shouldRenderSystemMessageInChat, shouldShowSystemMessage } from './chatSystemMessages';
 import {
   MATERIAL_FEE_PAID_MULTI_BODY,
   MATERIAL_FEE_PAID_SINGLE_BODY,
   dedupeMaterialServiceFeePaidMessages,
+  isMaterialFeePaidLegend,
+  materialFeeLegendVisibleToRole,
   type MaterialFeePaidChatMessage,
 } from './materialFeePaidChat';
 
@@ -131,5 +135,37 @@ describe('dedupeMaterialServiceFeePaidMessages', () => {
     };
 
     expect(dedupeMaterialServiceFeePaidMessages([other, other])).toEqual([other, other]);
+  });
+});
+
+describe('leyenda de costo de materiales por rol', () => {
+  it('la ve el cliente y no el profesional', () => {
+    expect(isMaterialFeePaidLegend(MATERIAL_FEE_PAID_SINGLE_BODY)).toBe(true);
+    expect(isMaterialFeePaidLegend(MATERIAL_FEE_PAID_MULTI_BODY)).toBe(true);
+    expect(isMaterialFeePaidLegend('Costo de servicio YaChanga acreditado…')).toBe(true);
+    expect(isMaterialFeePaidLegend('Horario confirmado')).toBe(false);
+    expect(materialFeeLegendVisibleToRole('cliente')).toBe(true);
+    expect(materialFeeLegendVisibleToRole('trabajador')).toBe(false);
+    expect(materialFeeLegendVisibleToRole(null)).toBe(false);
+
+    const meta = { event: 'material_service_fee_paid', audience: 'todos' };
+    expect(shouldShowSystemMessage(meta, 'cliente')).toBe(true);
+    expect(shouldShowSystemMessage(meta, 'trabajador')).toBe(false);
+    expect(shouldRenderSystemMessageInChat(meta, 'cliente')).toBe(true);
+    expect(shouldRenderSystemMessageInChat(meta, 'trabajador')).toBe(false);
+  });
+
+  it('el chat filtra la leyenda y el botón de cotizaciones no se aplasta', () => {
+    const chat = readFileSync('src/screens/chat/ChatScreen.tsx', 'utf8');
+    expect(chat).toContain('isMaterialFeePaidLegend');
+    expect(chat).toContain('materialFeeLegendVisibleToRole');
+    const button = chat.slice(chat.indexOf('>Ver cotizaciones<') - 700, chat.indexOf('>Ver cotizaciones<'));
+    expect(button).toContain('styles.quoteBtnSolo');
+    expect(button).toContain('styles.materialQuoteBtn');
+    expect(button).not.toContain('flex: 0');
+    const compare = readFileSync('src/screens/client/ClientCompareQuotesScreen.tsx', 'utf8');
+    expect(compare).toContain('styles.workerOrderBtn');
+    expect(compare).toContain('Ver código y PIN');
+    expect(compare).toContain('!readOnly || card.orderCode || card.verificationPin');
   });
 });

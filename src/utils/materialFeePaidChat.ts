@@ -1,3 +1,5 @@
+import { foldAccents } from './normalizeSearch';
+
 /**
  * Aviso de chat cuando el cliente paga el costo de servicio de materiales.
  *
@@ -16,6 +18,16 @@ export const MATERIAL_FEE_PAID_SINGLE_BODY =
 
 export const MATERIAL_FEE_PAID_MULTI_BODY =
   'Costo de servicio YaChanga acreditado para todos los comercios. Ya podés ver cada comercio, su código y su PIN.';
+
+/** La leyenda del costo de materiales es solo para el cliente del trabajo. */
+export function isMaterialFeePaidLegend(text: string): boolean {
+  const folded = foldAccents(text).replace(/\s+/g, ' ').trim();
+  return folded.startsWith('costo de servicio yachanga acreditado');
+}
+
+export function materialFeeLegendVisibleToRole(role: string | null | undefined): boolean {
+  return role === 'cliente';
+}
 
 export type MaterialFeePaidChatMessage = {
   id: string;

@@ -1,4 +1,5 @@
 import type { ChatSystemEvent } from '../types/contrataciones';
+import { MATERIAL_SERVICE_FEE_PAID_EVENT } from './materialFeePaidChat';
 
 /**
  * Eventos que se muestran en la tarjeta fija inferior, no en el historial del chat.
@@ -33,6 +34,8 @@ export function shouldShowSystemMessage(
   myRole: 'cliente' | 'trabajador' | null,
 ): boolean {
   const event = getSystemEvent(metadata);
+  // El aviso «costo de servicio YaChanga acreditado» de materiales no va al profesional.
+  if (metadata?.event === MATERIAL_SERVICE_FEE_PAID_EVENT) return myRole === 'cliente';
   if (event === 'conformidad_aceptada' && myRole === 'trabajador') return false;
 
   const audience = metadata?.audience;
