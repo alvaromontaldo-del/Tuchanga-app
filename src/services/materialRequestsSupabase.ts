@@ -1,17 +1,10 @@
-import { normalizeDisplayAddress } from '../utils/formatAddress';
 import { offplatformSubmitText } from '../utils/offplatformContact';
-import {
-  isMissingDeliveryAddressRpc,
-  pickJobClientDelivery,
-  type JobClientDelivery,
-} from '../utils/jobClientDeliveryAddress';
 import { edgeFunctionSecretHeaders } from './edgeFunctionSecret';
 import {
   conversationAllowsMaterialsList,
   MATERIALS_LIST_BLOCKED_MESSAGE,
 } from './tradeMaterialsFlag';
 import { getSupabaseClient } from '../lib/supabase';
-import { fetchProfileDeliveryAddress } from './supabaseUser';
 import type { MaterialItemDraft, NearbyStore, StoreRubro } from '../types/materials';
 
 /** Haversine en km con 1 decimal (alineado a `public.haversine_km` en SQL). */
@@ -190,89 +183,6 @@ export type CreateMaterialRequestInput = {
   rubroId: string;
 };
 
-function firstRecord(data: unknown): Record<string, unknown> | null {
-  const row = Array.isArray(data) ? data[0] : data;
-  if (!row || typeof row !== 'object') return null;
-  return row as Record<string, unknown>;
-}
-
-function numberOrNull(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim()) {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-
-/**
- * Domicilio del cliente de ese chat. El RPC lee `direccion_texto` (PII).
- * Si el SQL todavía no se ejecutó, usa solo las coordenadas públicas de
- * `profiles.location` del cliente. Nunca el perfil del profesional.
- */
-export async function fetchConversationClientDeliveryAddress(params: {
-  conversationId: string;
-  professionalId: string;
-}): Promise<JobClientDelivery | null> {
-  const conversationId = params.conversationId.trim();
-  const professionalId = params.professionalId.trim();
-  if (!conversationId || !professionalId) return null;
-
-  const sb = getSupabaseClient();
-  const {
-    data: { session },
-  } = await sb.auth.getSession();
-  const callerId = session?.user?.id ?? '';
-  if (!callerId) throw new Error('Tenés que iniciar sesión.');
-  if (callerId !== professionalId) return null;
-
-  const rpc = await sb.rpc('get_conversation_client_delivery_address', {
-    p_conversation_id: conversationId,
-  });
-
-  if (!rpc.error) {
-    const row = firstRecord(rpc.data);
-    if (!row) return null;
-    const address = typeof row.direccion_texto === 'string' ? row.direccion_texto : null;
-    return pickJobClientDelivery({
-      professionalId,
-      clientId: typeof row.client_id === 'string' ? row.client_id : null,
-      address: address ? normalizeDisplayAddress(address) : null,
-      lat: numberOrNull(row.lat),
-      lng: numberOrNull(row.lng),
-    });
-  }
-
-  if (!isMissingDeliveryAddressRpc(rpc.error)) throw rpc.error;
-
-  const conv = await sb
-    .from('conversations')
-    .select('cliente_id,trabajador_id')
-    .eq('id', conversationId)
-    .is('deleted_at', null)
-    .maybeSingle();
-  if (conv.error) throw conv.error;
-
-  const clienteId = String(
-    (conv.data as { cliente_id?: string | null } | null)?.cliente_id ?? '',
-  ).trim();
-  const trabajadorId = String(
-    (conv.data as { trabajador_id?: string | null } | null)?.trabajador_id ?? '',
-  ).trim();
-  if (!clienteId || clienteId === professionalId) return null;
-  if (trabajadorId && trabajadorId !== professionalId && clienteId !== professionalId) return null;
-
-  const loc = await fetchProfileDeliveryAddress(clienteId);
-  if (!loc) return null;
-  return pickJobClientDelivery({
-    professionalId,
-    clientId: clienteId,
-    address: loc.address ? normalizeDisplayAddress(loc.address) : null,
-    lat: loc.lat,
-    lng: loc.lng,
-  });
-}
-
 export type CreateMaterialRequestResult = {
   requestId: string;
   storeCount: number;
@@ -310,26 +220,34 @@ export async function createMaterialRequestWithTargets(
     throw new Error(MATERIALS_LIST_BLOCKED_MESSAGE);
   }
 
-  const delivery = await fetchConversationClientDeliveryAddress({
-    conversationId,
-    professionalId: input.professionalId,
-  });
-  if (!delivery) {
-    throw new Error('No se pudo usar la dirección del cliente de este trabajo.');
+  // El profesional no pide la calle ni el punto. El trigger copia el domicilio
+  // del trabajo (temporal o perfil) para el comercio. Antes del pago no quedan
+  // coordenadas en la fila: el profesional no las puede leer.
+  const conv = await sb
+    .from('conversations')
+    .select('cliente_id,trabajador_id')
+    .eq('id', conversationId)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (conv.error) throw conv.error;
+  const clienteId = String(
+    (conv.data as { cliente_id?: string | null } | null)?.cliente_id ?? '',
+  ).trim();
+  const trabajadorId = String(
+    (conv.data as { trabajador_id?: string | null } | null)?.trabajador_id ?? '',
+  ).trim();
+  if (!clienteId || clienteId === input.professionalId || (trabajadorId && trabajadorId !== input.professionalId)) {
+    throw new Error('No se pudo identificar al cliente de este trabajo.');
   }
-
-  const lat = delivery.lat;
-  const lng = delivery.lng;
-  const clientAddress = delivery.address;
 
   const baseRow = {
     professional_id: input.professionalId,
-    client_id: delivery.clientId,
+    client_id: clienteId,
     rubro_id: input.rubroId,
     title,
     status: 'sent' as const,
-    client_lat: lat,
-    client_lng: lng,
+    client_lat: null,
+    client_lng: null,
     conversation_id: conversationId,
   };
 
@@ -337,46 +255,15 @@ export async function createMaterialRequestWithTargets(
   let reqError: { message?: string } | null = null;
 
   {
-    const first = await sb
-      .from('material_requests')
-      .insert({ ...baseRow, client_address: clientAddress })
-      .select('id')
-      .single();
+    const first = await sb.from('material_requests').insert(baseRow).select('id').single();
     request = first.data as { id: string } | null;
     reqError = first.error;
     if (
       first.error &&
-      /client_address|conversation_id|schema cache|column/i.test(first.error.message ?? '')
+      /conversation_id|schema cache|column/i.test(first.error.message ?? '')
     ) {
       const { conversation_id: _c, ...withoutConv } = baseRow;
-      const fallbackPayload: Record<string, unknown> = { ...withoutConv };
-      if (!/client_address/i.test(first.error.message ?? '')) {
-        fallbackPayload.client_address = clientAddress;
-      }
-      // Reintentos: sin conversation_id y/o sin client_address
-      let fallback = await sb
-        .from('material_requests')
-        .insert(
-          /client_address/i.test(first.error.message ?? '')
-            ? withoutConv
-            : { ...baseRow, client_address: clientAddress },
-        )
-        .select('id')
-        .single();
-      if (
-        fallback.error &&
-        /conversation_id|schema cache|column/i.test(fallback.error.message ?? '')
-      ) {
-        fallback = await sb
-          .from('material_requests')
-          .insert(
-            /client_address/i.test(first.error.message + (fallback.error.message ?? ''))
-              ? withoutConv
-              : { ...withoutConv, client_address: clientAddress },
-          )
-          .select('id')
-          .single();
-      }
+      const fallback = await sb.from('material_requests').insert(withoutConv).select('id').single();
       request = fallback.data as { id: string } | null;
       reqError = fallback.error;
     }

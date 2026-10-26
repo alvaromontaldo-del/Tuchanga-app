@@ -727,6 +727,45 @@ export function subscribeToUserInboxEvents(
 const ROUNDED_KM = /^\d+(,\d)?$/;
 
 /**
+ * El profesional no recibe la dirección. Solo se entera de que cambió
+ * `conversations.job_address_updated_at` y vuelve a pedir los km.
+ * El payload puede traer la fila de la conversación: no se lee nada más.
+ */
+export function subscribeConversationDistanceTick(
+  conversationId: string,
+  onTick: () => void,
+): () => void {
+  const id = conversationId.trim();
+  if (!id) return () => {};
+  const sb = getSupabaseClient();
+  const channelName = `job-address-tick:${id}`;
+  removeSupabaseRealtimeTopic(sb, channelName);
+  let lastTick = '';
+  const channel = sb
+    .channel(channelName)
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'conversations',
+        filter: `id=eq.${id}`,
+      },
+      (payload) => {
+        const row = payload?.new as { job_address_updated_at?: string | null } | null;
+        const next = typeof row?.job_address_updated_at === 'string' ? row.job_address_updated_at : '';
+        if (!next || next === lastTick) return;
+        lastTick = next;
+        onTick();
+      },
+    )
+    .subscribe();
+  return () => {
+    void sb.removeChannel(channel);
+  };
+}
+
+/**
  * Km ya redondeados por `distancia_aprox_chat`. NULL si la RPC no está,
  * el que llama no es el profesional, o falta una ubicación. No trae coordenadas.
  */
