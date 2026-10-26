@@ -6,6 +6,10 @@ import {
   type JobClientDelivery,
 } from '../utils/jobClientDeliveryAddress';
 import { edgeFunctionSecretHeaders } from './edgeFunctionSecret';
+import {
+  conversationAllowsMaterialsList,
+  MATERIALS_LIST_BLOCKED_MESSAGE,
+} from './tradeMaterialsFlag';
 import { getSupabaseClient } from '../lib/supabase';
 import { fetchProfileDeliveryAddress } from './supabaseUser';
 import type { MaterialItemDraft, NearbyStore, StoreRubro } from '../types/materials';
@@ -298,6 +302,14 @@ export async function createMaterialRequestWithTargets(
     throw new Error('No se pudo identificar el chat del trabajo.');
   }
 
+  const materialsAllowed = await conversationAllowsMaterialsList({
+    conversationId,
+    workerId: input.professionalId,
+  });
+  if (!materialsAllowed) {
+    throw new Error(MATERIALS_LIST_BLOCKED_MESSAGE);
+  }
+
   const delivery = await fetchConversationClientDeliveryAddress({
     conversationId,
     professionalId: input.professionalId,
@@ -370,7 +382,13 @@ export async function createMaterialRequestWithTargets(
     }
   }
 
-  if (reqError) throw reqError;
+  if (reqError) {
+    const raw = reqError.message ?? '';
+    if (/no puede pedir cotización de materiales/i.test(raw)) {
+      throw new Error(MATERIALS_LIST_BLOCKED_MESSAGE);
+    }
+    throw reqError;
+  }
   if (!request?.id) throw new Error('No se pudo crear la solicitud.');
   const requestId = request.id;
 

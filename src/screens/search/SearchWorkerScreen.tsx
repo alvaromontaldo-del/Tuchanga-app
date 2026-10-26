@@ -201,12 +201,12 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
     isRestoring,
   ]);
 
+  const useSupabaseSearch = isSupabaseConfigured();
+
   const visibleHits = useMemo(
     () => filterSearchHitsByUrgencias(hits, onlyUrgencias),
     [hits, onlyUrgencias],
   );
-
-  const useSupabaseSearch = isSupabaseConfigured();
 
   const triggerSearch = useCallback(() => {
     setSearchRetry((n) => n + 1);

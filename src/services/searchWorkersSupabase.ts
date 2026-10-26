@@ -29,6 +29,7 @@ const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?u=worker';
 
 /**
  * Profesionales con al menos un job, ubicación y radio; el punto del cliente debe caer dentro del radio.
+ * El servidor ordena por ranking. El puntaje no viene en la respuesta y la app no lo reordena.
  */
 export async function fetchSearchWorkerHitsFromSupabase(params: {
   clientLat: number;
@@ -89,8 +90,6 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
       distanceKm: Math.max(0, Number(r.distance_km) || 0),
     };
   });
-
-  hits.sort((a, b) => a.distanceKm - b.distanceKm);
 
   const missing = hits.filter((h) => h.worker.totalJobsDone == null).map((h) => h.worker.id);
   if (missing.length === 0) return hits;
