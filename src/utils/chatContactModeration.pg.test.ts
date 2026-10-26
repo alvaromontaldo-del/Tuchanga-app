@@ -18,6 +18,10 @@ const ANTIPUENTEO_PALABRAS = readFileSync(
   resolve(process.cwd(), 'supabase/20261015_antipuenteo_palabras.sql'),
   'utf8',
 );
+const ANTIPUENTEO_LLAMAME = readFileSync(
+  resolve(process.cwd(), 'supabase/20261026_antipuenteo_llamame.sql'),
+  'utf8',
+);
 
 const CLIENT = '11111111-1111-4111-8111-111111111111';
 const WORKER = '22222222-2222-4222-8222-222222222222';
@@ -256,6 +260,7 @@ describe.skipIf(!postgresAvailable())('moderación de chat y bucket privado', ()
     psqlScript(SQL);
     psqlScript(ANTIPUENTEO);
     psqlScript(ANTIPUENTEO_PALABRAS);
+    psqlScript(ANTIPUENTEO_LLAMAME);
     psql(`
       INSERT INTO public.conversations (id, cliente_id, trabajador_id)
       VALUES ('${CONV}', '${CLIENT}', '${WORKER}');
@@ -370,7 +375,7 @@ describe.skipIf(!postgresAvailable())('moderación de chat y bucket privado', ()
         VALUES ('${CONV}', '${CLIENT}', 'llámame al 11 1234 5678', 'text')
         RETURNING body;
       `),
-    ).toBe('llámame al •••');
+    ).toBe('••• al •••');
     expect(
       psql(
         `SELECT kinds::text FROM public.offplatform_contact_detections WHERE field_name = 'body' ORDER BY created_at DESC LIMIT 1;`,

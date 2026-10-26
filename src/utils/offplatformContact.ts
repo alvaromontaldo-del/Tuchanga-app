@@ -487,6 +487,31 @@ function isThousands(token: string): boolean {
   return /^\d{1,3}(?:\.\d{3})+$/.test(token.trim());
 }
 
+/** Dígitos de la corrida con puntos o guiones que contiene el tramo. */
+function dottedRunDigits(folded: string, start: number, end: number): number {
+  let s = start;
+  let e = end;
+  while (s > 0 && /[\d.\-]/.test(folded[s - 1] ?? '')) s -= 1;
+  while (e < folded.length && /[\d.\-]/.test(folded[e] ?? '')) e += 1;
+  return digitsOf(folded.slice(s, e)).length;
+}
+
+const THOUSANDS_IGNORE = /\b\d{1,3}(?:\.\d{3})+(?:[.,]\d{1,2})?\b/g;
+
+function collectIgnores(folded: string): Span[] {
+  const ignored: Span[] = [];
+  for (const pattern of IGNORE_RES) {
+    const thousands = pattern.source === THOUSANDS_IGNORE.source;
+    pushMatches(folded, pattern, 'ignore', ignored, (text, index) => {
+      if (!thousands) return true;
+      const count = dottedRunDigits(folded, index, index + text.length);
+      // 9 dígitos o más con puntos es un teléfono, no un monto.
+      return count < 9 || count > 15;
+    });
+  }
+  return ignored;
+}
+
 function collectDigitPhones(folded: string, spans: Span[], ignored: Span[]) {
   const re = /(?:^|[^\d])((?:\+|00)?\d[\d\s().-]{5,28}\d)(?!\d)/g;
   let match: RegExpExecArray | null;
@@ -494,10 +519,11 @@ function collectDigitPhones(folded: string, spans: Span[], ignored: Span[]) {
     const token = match[1] ?? '';
     const start = match.index + match[0].indexOf(token);
     const span: Span = { start, end: start + token.length, kind: 'telefono' };
-    if (overlapsAny(span, ignored) || overlapsAny(span, spans)) continue;
-    if (isThousands(token)) continue;
     const digits = digitsOf(token);
-    if (digits.length >= 8 && digits.length <= 15) spans.push(span);
+    if (digits.length < 8 || digits.length > 15) continue;
+    if (isThousands(token) && digits.length < 9) continue;
+    if (overlapsAny(span, ignored) || overlapsAny(span, spans)) continue;
+    spans.push(span);
   }
 }
 
@@ -636,6 +662,65 @@ function collectWordPhones(folded: string, spans: Span[], ignored: Span[]) {
       if (!overlapsAny(span, ignored) && !overlapsAny(span, spans)) spans.push(span);
     }
     i = aborted ? j + 1 : Math.max(j, i + 1);
+  }
+}
+
+function spokenPhoneDigits(fragment: string): string {
+  const num = numberWordAlt();
+  // «once2» y «2once» no tienen límite entre la palabra y el dígito.
+  const re = new RegExp(
+    `(?:${num})(?=\\d)|(?<=\\d)(?:${num})|\\b(?:${num})\\b|\\d{1,4}`,
+    'g',
+  );
+  let out = '';
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(fragment))) {
+    const piece = tokenDigits(match[0] ?? '');
+    if (piece) out += piece;
+  }
+  return out;
+}
+
+function mixedPhoneToken(): string {
+  const num = numberWordAlt();
+  return `(?:(?:${num})\\d{1,4}|\\d{1,4}(?:${num})|(?:${num})|\\d{1,4})`;
+}
+
+function numberWordAlt(): string {
+  const words = new Set<string>(Object.keys(NUM_WORD_DIGITS));
+  for (const stem of Object.keys(DECADE_BASE)) {
+    for (const unit of Object.keys(UNIT_VALUE)) {
+      words.add(`${stem}i${unit}`);
+      words.add(`${stem}y${unit}`);
+    }
+  }
+  for (const unit of ['uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve']) {
+    words.add(`veinti${unit}`);
+    words.add(`beinti${unit}`);
+  }
+  return [...words].sort((a, b) => b.length - a.length).join('|');
+}
+
+/**
+ * «341.3434-once2»: dígitos y una palabra de número, separados por punto
+ * o guion, o pegados («once2»). Desde 9 dígitos. «15.000» no entra: no hay palabra.
+ */
+function collectMixedPhones(folded: string, spans: Span[], ignored: Span[]) {
+  const token = mixedPhoneToken();
+  const re = new RegExp(`\\b${token}(?:[.\\s-]+${token})+\\b`, 'g');
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(folded))) {
+    const text = match[0];
+    if (!text || !/[a-z]/.test(text)) {
+      if (!text) re.lastIndex += 1;
+      continue;
+    }
+    const digits = spokenPhoneDigits(text);
+    if (digits.length < 9 || digits.length > 15) continue;
+    if (/\b(?:mil|miles|lucas|luca|pesos|peso|millones|millon)\b/.test(text)) continue;
+    const span: Span = { start: match.index, end: match.index + text.length, kind: 'telefono' };
+    if (overlapsAny(span, ignored) || overlapsAny(span, spans)) continue;
+    spans.push(span);
   }
 }
 
@@ -816,9 +901,12 @@ const CONTACT_WORDS: { word: string; kind: OffplatformKind }[] = [
   { word: 'telefono', kind: 'telefono' },
   { word: 'whatsapp', kind: 'canal' },
   { word: 'celular', kind: 'telefono' },
+  { word: 'llamame', kind: 'telefono' },
   { word: 'correo', kind: 'email' },
+  { word: 'llamar', kind: 'telefono' },
   { word: 'email', kind: 'email' },
   { word: 'insta', kind: 'canal' },
+  { word: 'llama', kind: 'telefono' },
   { word: 'dire', kind: 'direccion' },
   { word: 'mail', kind: 'email' },
   { word: 'cel', kind: 'telefono' },
@@ -870,10 +958,7 @@ function collectContactWords(folded: string, spans: Span[], ignored: Span[]) {
 }
 
 function collect(raw: string, folded: string): Span[] {
-  const ignored: Span[] = [];
-  for (const pattern of IGNORE_RES) {
-    pushMatches(folded, pattern, 'ignore', ignored);
-  }
+  const ignored = collectIgnores(folded);
 
   const spans: Span[] = [];
 
@@ -921,6 +1006,7 @@ function collect(raw: string, folded: string): Span[] {
   }
 
   collectDigitPhones(folded, spans, ignored);
+  collectMixedPhones(folded, spans, ignored);
   collectWordPhones(folded, spans, ignored);
   collectOffplatformIntent(folded, spans, ignored);
 
