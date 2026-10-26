@@ -13,6 +13,9 @@ import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AppButton } from '../../components/common/AppButton';
+import { ConfirmLeaveModal } from '../../components/common/ConfirmLeaveModal';
+import { useQuoterLeaveGuard } from '../../hooks/useQuoterLeaveGuard';
+import { materialRequestIsDirty } from '../../utils/quoterLeaveGuard';
 import { OffplatformNotice } from '../../components/chat/OffplatformNotice';
 import { offplatformSubmitText } from '../../utils/offplatformContact';
 import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
@@ -74,7 +77,20 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
   const [selectedRubroId, setSelectedRubroId] = useState<string | null>(null);
   const [rubroPickerOpen, setRubroPickerOpen] = useState(false);
   const [focusLocalId, setFocusLocalId] = useState<string | null>(null);
+  const [rubroTouched, setRubroTouched] = useState(false);
+  const sentRef = useRef(false);
   const inputRefs = useRef<Map<string, TextInputType>>(new Map());
+  const leaveGuard = useQuoterLeaveGuard(
+    navigation,
+    () =>
+      !sentRef.current &&
+      materialRequestIsDirty({
+        descriptions: items.map((item) => item.description),
+        itemCount: items.length,
+        rubroTouched,
+      }),
+    () => submitting,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -178,6 +194,7 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
         `Enviado a ${result.storeCount} comercio${result.storeCount === 1 ? '' : 's'}.`,
         'Listo',
       );
+      sentRef.current = true;
       navigation.goBack();
     } catch (e) {
       toast.error(
@@ -299,9 +316,17 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
         onClose={() => setRubroPickerOpen(false)}
         onSelect={(name) => {
           const found = rubros.find((r) => r.name === name);
-          if (found) setSelectedRubroId(found.id);
+          if (found) {
+            setRubroTouched(true);
+            setSelectedRubroId(found.id);
+          }
           setRubroPickerOpen(false);
         }}
+      />
+      <ConfirmLeaveModal
+        visible={leaveGuard.visible}
+        onCancel={leaveGuard.stay}
+        onAccept={leaveGuard.leave}
       />
     </AppKeyboardAvoidingView>
   );

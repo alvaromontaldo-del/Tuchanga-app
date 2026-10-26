@@ -18,6 +18,9 @@ import {
   View,
 } from 'react-native';
 import { AppButton } from '../../components/common/AppButton';
+import { ConfirmLeaveModal } from '../../components/common/ConfirmLeaveModal';
+import { useQuoterLeaveGuard } from '../../hooks/useQuoterLeaveGuard';
+import { storeQuoteDraftIsDirty } from '../../utils/quoterLeaveGuard';
 import { OffplatformNotice } from '../../components/chat/OffplatformNotice';
 import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
 import { useAppToast } from '../../components/toast/toast';
@@ -117,6 +120,20 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
   /** Evita mostrar el formulario vacío antes de hidratar una cotización ya enviada. */
   const [formReady, setFormReady] = useState(false);
   const [notesInitial, setNotesInitial] = useState('');
+  const sentRef = useRef(false);
+  const leaveGuard = useQuoterLeaveGuard(
+    navigation,
+    () =>
+      !sentRef.current &&
+      storeQuoteDraftIsDirty({
+        locked: Boolean(detail?.alreadyQuoted),
+        freightType,
+        freightCostText: freightCostRef.current || freightCostText,
+        notes: notesRef.current,
+        items: Object.values(itemDraftsRef.current),
+      }),
+    () => submitting,
+  );
 
   useEffect(() => {
     setFormReady(false);
@@ -215,6 +232,7 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
         itemDrafts: { ...itemDraftsRef.current },
       });
       toast.success('Presupuesto enviado al cliente.', 'Enviado');
+      sentRef.current = true;
       navigation.goBack();
     } catch (e) {
       toast.error(
@@ -376,6 +394,11 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
           />
         </View>
       ) : null}
+      <ConfirmLeaveModal
+        visible={leaveGuard.visible}
+        onCancel={leaveGuard.stay}
+        onAccept={leaveGuard.leave}
+      />
     </AppKeyboardAvoidingView>
   );
 }

@@ -20,6 +20,8 @@ import {
   matriculaUploadErrorMessage,
   parseMyMatricula,
   previousMatriculaPaths,
+  MATRICULA_SAVE_FIRST,
+  matriculaCardMode,
   profileOffersMatricula,
   tradeRequiresMatricula,
 } from './matriculaVerificada';
@@ -52,6 +54,40 @@ describe('matrícula verificada', () => {
       ]),
     ).toBe(true);
     expect(profileOffersMatricula([{ name: 'Carpintería', rubroSlug: 'carpinteria' }])).toBe(false);
+  });
+
+  it('la tarjeta sigue a los oficios guardados, no al formulario sin guardar', () => {
+    expect(
+      matriculaCardMode(
+        [{ name: 'Gas', rubroSlug: 'gasista' }],
+        [{ name: 'Gas', rubroSlug: 'gasista' }],
+      ),
+    ).toBe('ready');
+    expect(
+      matriculaCardMode(
+        [{ name: 'Electricidad', rubroSlug: 'electricidad' }],
+        [{ name: 'Carpintería', rubroSlug: 'carpinteria' }],
+      ),
+    ).toBe('ready');
+    expect(
+      matriculaCardMode([{ name: 'Control de plagas y fumigación', rubroSlug: 'control-plagas-fumigacion' }], []),
+    ).toBe('ready');
+    expect(
+      matriculaCardMode(
+        [{ name: 'Carpintería', rubroSlug: 'carpinteria' }],
+        [{ name: 'Gas', rubroSlug: 'gasista' }],
+      ),
+    ).toBe('save-first');
+    expect(
+      matriculaCardMode([], [{ name: 'Fumigación', rubroSlug: 'control-plagas-fumigacion' }]),
+    ).toBe('save-first');
+    expect(
+      matriculaCardMode(
+        [{ name: 'Albañilería', rubroSlug: 'albanileria' }],
+        [{ name: 'Pintura (obras)', rubroSlug: 'pintura-obras' }],
+      ),
+    ).toBe('hidden');
+    expect(MATRICULA_SAVE_FIRST).toBe('Guardá tus datos profesionales para cargar la matrícula');
   });
 
   it('pide número, entidad y entre 1 y 3 fotos', () => {
@@ -113,6 +149,11 @@ describe('matrícula verificada', () => {
     expect(matriculaUploadErrorMessage(new Error('Could not find the function public.submit_my_matricula'))).toMatch(
       /no está habilitada/,
     );
+    expect(
+      matriculaUploadErrorMessage(
+        new Error('La matrícula es para gasista, electricista, plomería o fumigación.'),
+      ),
+    ).toBe('La matrícula es para gasista, electricista, plomería o fumigación.');
   });
 
   it('el SQL deja las fotos privadas y el perfil público solo con la insignia', () => {
@@ -189,7 +230,8 @@ describe('matrícula verificada', () => {
     expect(search).not.toMatch(/apellido/);
 
     const abm = read('src/screens/account/WorkerABMScreen.tsx');
-    expect(abm).toContain('profileOffersMatricula');
+    expect(abm).toContain('matriculaCardMode');
+    expect(abm).toContain('MATRICULA_SAVE_FIRST');
     expect(abm).toContain('<MatriculaCard />');
     expect(abm).toContain('<AntecedentesPenalesCard />');
   });

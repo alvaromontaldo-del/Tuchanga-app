@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -19,6 +20,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureGalleryPermission, ensureCameraPermission } from '../../utils/mediaPermissions';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
+import { ConfirmLeaveModal } from '../../components/common/ConfirmLeaveModal';
 import { ClickableAvatar } from '../../components/common/ClickableAvatar';
 import { ExpandableText } from '../../components/common/ExpandableText';
 import { useAppToast } from '../../components/toast/toast';
@@ -141,7 +143,17 @@ import {
   resolvePrecioTrabajadorAnterior,
   serviceFeePayBarCopy,
 } from '../../utils/recotizarUi';
-import { dedupeMaterialServiceFeePaidMessages } from '../../utils/materialFeePaidChat';
+import {
+  dedupeMaterialServiceFeePaidMessages,
+  isMaterialFeePaidLegend,
+  materialFeeLegendVisibleToRole,
+} from '../../utils/materialFeePaidChat';
+import {
+  EMPTY_SERVICE_QUOTE,
+  recotizarDraftIsDirty,
+  serviceQuoteIsDirty,
+  type ServiceQuoteFields,
+} from '../../utils/quoterLeaveGuard';
 import { materialQuoteChatCard } from '../../utils/materialQuoteVisibility';
 import { fetchMaterialQuoteStatuses } from '../../services/clientQuotesSupabase';
 import { newRandomUserId } from '../../utils/stableUserId';
@@ -300,6 +312,9 @@ export function ChatScreen({
   backToContractedWork,
 }: Props) {
   const navigation = useNavigation<any>();
+  const chatFocused = useIsFocused();
+  const chatFocusedRef = useRef(chatFocused);
+  chatFocusedRef.current = chatFocused;
   const leaveChat = useCallback(() => {
     if (backToContractedWork) {
       navigation.navigate('ContractedWorkOrders');
@@ -503,6 +518,49 @@ export function ChatScreen({
   );
   const [replacesQuoteId, setReplacesQuoteId] = useState<string | null>(null);
   const [editingQuoteId, setEditingQuoteId] = useState<string | null>(null);
+  const [quoterLeaveOpen, setQuoterLeaveOpen] = useState(false);
+  const quoteBaselineRef = useRef<ServiceQuoteFields>(EMPTY_SERVICE_QUOTE);
+  const quoteModalOpenRef = useRef(false);
+  const recotizarModalOpenRef = useRef(false);
+  const quoteSubmittingRef = useRef(false);
+  const recotizarSubmittingRef = useRef(false);
+  const allowQuoterLeaveRef = useRef(false);
+  const pendingNavLeaveRef = useRef<unknown>(null);
+  const quoterLeaveKindRef = useRef<'quote' | 'recotizar' | null>(null);
+  const closeQuoteRef = useRef<() => void>(() => {});
+  const closeRecotizarRef = useRef<() => void>(() => {});
+  const quoteDirtyRef = useRef<() => boolean>(() => false);
+  const recotizarDirtyRef = useRef<() => boolean>(() => false);
+  quoteModalOpenRef.current = quoteModalOpen;
+  recotizarModalOpenRef.current = recotizarModalOpen;
+  quoteSubmittingRef.current = quoteSubmitting;
+  recotizarSubmittingRef.current = recotizarSubmitting;
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!chatFocusedRef.current) return false;
+      if (!quoteModalOpenRef.current && !recotizarModalOpenRef.current) return false;
+      if (quoteModalOpenRef.current) closeQuoteRef.current();
+      else closeRecotizarRef.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
+
+  useEffect(() => {
+    return navigation.addListener('beforeRemove', (e: { preventDefault: () => void; data?: { action?: unknown } }) => {
+      if (allowQuoterLeaveRef.current) return;
+      if (quoteSubmittingRef.current || recotizarSubmittingRef.current) return;
+      const dirty =
+        (quoteModalOpenRef.current && quoteDirtyRef.current()) ||
+        (recotizarModalOpenRef.current && recotizarDirtyRef.current());
+      if (!dirty) return;
+      e.preventDefault();
+      pendingNavLeaveRef.current = e?.data?.action ?? null;
+      quoterLeaveKindRef.current = null;
+      setQuoterLeaveOpen(true);
+    });
+  }, [navigation]);
   const [materialQuotesByRequest, setMaterialQuotesByRequest] = useState<Map<
     string,
     { status: string; storeId: string }[]
@@ -1073,6 +1131,12 @@ export function ChatScreen({
       if (
         (m.type === 'text' || !m.type) &&
         (body === 'ver cotizaciones' || body === 'lista de materiales')
+      ) {
+        return false;
+      }
+      if (
+        isMaterialFeePaidLegend(String(m.text ?? '')) &&
+        !materialFeeLegendVisibleToRole(participants?.myRole)
       ) {
         return false;
       }
@@ -1940,8 +2004,9 @@ export function ChatScreen({
                   <Pressable
                     style={({ pressed }) => [
                       styles.quoteBtn,
+                      styles.quoteBtnSolo,
                       styles.quoteBtnPrimary,
-                      { marginTop: spacing.sm, flex: 0, alignSelf: 'stretch' },
+                      styles.materialQuoteBtn,
                       pressed && styles.pressed,
                     ]}
                     onPress={() =>
@@ -1951,7 +2016,7 @@ export function ChatScreen({
                       })
                     }
                   >
-                    <Text style={styles.quoteBtnPrimaryText}>Ver cotizaciones</Text>
+                    <Text style={styles.materialQuoteBtnText}>Ver cotizaciones</Text>
                   </Pressable>
                 ) : null}
               </View>
@@ -2071,24 +2136,26 @@ export function ChatScreen({
                       accessibilityRole="button"
                       accessibilityLabel="Editar presupuesto"
                       onPress={() => {
-                        setEditingQuoteId(q.id);
-                        setReplacesQuoteId(null);
-                        setQuoteNetAmount(Math.max(0, Math.floor(Number(q.net_amount) || 0)));
-                        setQuoteNetText(
-                          amountToArsInput(Math.max(0, Math.floor(Number(q.net_amount) || 0))),
-                        );
-                        setQuoteDetail(q.service_detail ?? '');
-                        if (
+                        const amount = Math.max(0, Math.floor(Number(q.net_amount) || 0));
+                        const amountText = amountToArsInput(amount);
+                        const warrantyOn =
                           q.warranty_days != null &&
                           q.warranty_days >= WARRANTY_DAYS_MIN &&
-                          q.warranty_days <= WARRANTY_DAYS_MAX
-                        ) {
-                          setIncluyeGarantia(true);
-                          setWarrantyDaysText(String(q.warranty_days));
-                        } else {
-                          setIncluyeGarantia(false);
-                          setWarrantyDaysText('');
-                        }
+                          q.warranty_days <= WARRANTY_DAYS_MAX;
+                        const daysText = warrantyOn ? String(q.warranty_days) : '';
+                        quoteBaselineRef.current = {
+                          amountText,
+                          detail: q.service_detail ?? '',
+                          warrantyOn,
+                          warrantyDaysText: daysText,
+                        };
+                        setEditingQuoteId(q.id);
+                        setReplacesQuoteId(null);
+                        setQuoteNetAmount(amount);
+                        setQuoteNetText(amountText);
+                        setQuoteDetail(q.service_detail ?? '');
+                        setIncluyeGarantia(warrantyOn);
+                        setWarrantyDaysText(daysText);
                         setQuoteModalOpen(true);
                       }}
                     >
@@ -2195,24 +2262,27 @@ export function ChatScreen({
                         pressed && styles.pressed,
                       ]}
                       onPress={() => {
-                        setQuoteModalOpen(true);
-                        setQuoteNetAmount(Math.max(0, Math.floor(Number(q.net_amount) || 0)));
-                        setQuoteNetText(
-                          amountToArsInput(Math.max(0, Math.floor(Number(q.net_amount) || 0))),
-                        );
-                        setQuoteDetail(q.service_detail ?? '');
-                        if (
+                        const amount = Math.max(0, Math.floor(Number(q.net_amount) || 0));
+                        const amountText = amountToArsInput(amount);
+                        const warrantyOn =
                           q.warranty_days != null &&
                           q.warranty_days >= WARRANTY_DAYS_MIN &&
-                          q.warranty_days <= WARRANTY_DAYS_MAX
-                        ) {
-                          setIncluyeGarantia(true);
-                          setWarrantyDaysText(String(q.warranty_days));
-                        } else {
-                          setIncluyeGarantia(false);
-                          setWarrantyDaysText('');
-                        }
+                          q.warranty_days <= WARRANTY_DAYS_MAX;
+                        const daysText = warrantyOn ? String(q.warranty_days) : '';
+                        quoteBaselineRef.current = {
+                          amountText,
+                          detail: q.service_detail ?? '',
+                          warrantyOn,
+                          warrantyDaysText: daysText,
+                        };
+                        setEditingQuoteId(null);
+                        setQuoteNetAmount(amount);
+                        setQuoteNetText(amountText);
+                        setQuoteDetail(q.service_detail ?? '');
+                        setIncluyeGarantia(warrantyOn);
+                        setWarrantyDaysText(daysText);
                         setReplacesQuoteId(q.id);
+                        setQuoteModalOpen(true);
                       }}
                     >
                       <Text style={styles.quoteBtnPrimaryText}>Recotizar</Text>
@@ -2935,6 +3005,83 @@ export function ChatScreen({
     return () => cancelAnimationFrame(id);
   }, [reviewInputFocused, footerContentHeight, chatBodyHeight]);
 
+  function dismissQuoteModal() {
+    setQuoteModalOpen(false);
+    setEditingQuoteId(null);
+  }
+
+  function dismissRecotizarModal() {
+    setRecotizarModalOpen(false);
+  }
+
+  function quoteDirtyNow() {
+    return serviceQuoteIsDirty(
+      {
+        amountText: quoteNetText,
+        detail: quoteDetail,
+        warrantyOn: incluyeGarantia,
+        warrantyDaysText,
+      },
+      quoteBaselineRef.current,
+    );
+  }
+
+  function requestCloseQuote() {
+    if (quoteSubmitting) {
+      dismissQuoteModal();
+      return;
+    }
+    if (quoteDirtyNow()) {
+      pendingNavLeaveRef.current = null;
+      quoterLeaveKindRef.current = 'quote';
+      setQuoterLeaveOpen(true);
+      return;
+    }
+    dismissQuoteModal();
+  }
+
+  function requestCloseRecotizar() {
+    if (recotizarSubmitting) {
+      dismissRecotizarModal();
+      return;
+    }
+    if (recotizarDraftIsDirty({ amountText: recotizarText, fundamentos: recotizarFundamentos })) {
+      pendingNavLeaveRef.current = null;
+      quoterLeaveKindRef.current = 'recotizar';
+      setQuoterLeaveOpen(true);
+      return;
+    }
+    dismissRecotizarModal();
+  }
+
+  closeQuoteRef.current = requestCloseQuote;
+  closeRecotizarRef.current = requestCloseRecotizar;
+  quoteDirtyRef.current = quoteDirtyNow;
+  recotizarDirtyRef.current = () =>
+    recotizarDraftIsDirty({ amountText: recotizarText, fundamentos: recotizarFundamentos });
+
+  function acceptQuoterLeave() {
+    const navAction = pendingNavLeaveRef.current;
+    const kind = quoterLeaveKindRef.current;
+    pendingNavLeaveRef.current = null;
+    quoterLeaveKindRef.current = null;
+    setQuoterLeaveOpen(false);
+    if (navAction) {
+      allowQuoterLeaveRef.current = true;
+      navigation.dispatch(navAction as never);
+      allowQuoterLeaveRef.current = false;
+      return;
+    }
+    if (kind === 'recotizar') dismissRecotizarModal();
+    else dismissQuoteModal();
+  }
+
+  function cancelQuoterLeave() {
+    pendingNavLeaveRef.current = null;
+    quoterLeaveKindRef.current = null;
+    setQuoterLeaveOpen(false);
+  }
+
   return (
     <>
       <ChatSafetyOptionsModal
@@ -2995,19 +3142,10 @@ export function ChatScreen({
             visible={quoteModalOpen}
             transparent
             animationType="fade"
-            onRequestClose={() => {
-              setQuoteModalOpen(false);
-              setEditingQuoteId(null);
-            }}
+            onRequestClose={requestCloseQuote}
           >
             <AppKeyboardAvoidingView style={styles.flex} keyboardVerticalOffset={0}>
-              <Pressable
-                style={styles.modalBackdrop}
-                onPress={() => {
-                  setQuoteModalOpen(false);
-                  setEditingQuoteId(null);
-                }}
-              >
+              <Pressable style={styles.modalBackdrop} onPress={requestCloseQuote}>
                 <Pressable
                   style={[styles.modalCard, { paddingBottom: spacing.lg + Math.max(insets.bottom, 0) }]}
                   onPress={() => {}}
@@ -3090,10 +3228,7 @@ export function ChatScreen({
                           styles.modalBtnGhost,
                           pressed && styles.pressed,
                         ]}
-                        onPress={() => {
-                          setQuoteModalOpen(false);
-                          setEditingQuoteId(null);
-                        }}
+                        onPress={requestCloseQuote}
                       >
                         <Text style={styles.modalBtnGhostText}>Cancelar</Text>
                       </Pressable>
@@ -3143,8 +3278,7 @@ export function ChatScreen({
                                   warrantyDays: incluyeGarantia ? warrantyDaysNum : null,
                                 });
                               }
-                              setQuoteModalOpen(false);
-                              setEditingQuoteId(null);
+                              dismissQuoteModal();
                               setQuoteNetAmount(0);
                               setQuoteNetText('');
                               setQuoteDetail('');
@@ -3185,10 +3319,10 @@ export function ChatScreen({
             visible={recotizarModalOpen}
             transparent
             animationType="fade"
-            onRequestClose={() => setRecotizarModalOpen(false)}
+            onRequestClose={requestCloseRecotizar}
           >
             <AppKeyboardAvoidingView style={styles.flex} keyboardVerticalOffset={0}>
-              <Pressable style={styles.modalBackdrop} onPress={() => setRecotizarModalOpen(false)}>
+              <Pressable style={styles.modalBackdrop} onPress={requestCloseRecotizar}>
                 <Pressable
                   style={[styles.modalCard, { paddingBottom: spacing.lg + Math.max(insets.bottom, 0) }]}
                   onPress={() => {}}
@@ -3232,7 +3366,7 @@ export function ChatScreen({
                           styles.modalBtnGhost,
                           pressed && styles.pressed,
                         ]}
-                        onPress={() => setRecotizarModalOpen(false)}
+                        onPress={requestCloseRecotizar}
                       >
                         <Text style={styles.modalBtnGhostText}>Cancelar</Text>
                       </Pressable>
@@ -3386,6 +3520,12 @@ export function ChatScreen({
             </Pressable>
       </Modal>
 
+      <ConfirmLeaveModal
+        visible={quoterLeaveOpen}
+        onCancel={cancelQuoterLeave}
+        onAccept={acceptQuoterLeave}
+      />
+
       {/* Safe top propio: el stack header nativo está oculto en ChatConversation */}
       <SafeAreaView style={styles.flex} edges={['top']}>
         <View style={styles.header}>
@@ -3474,6 +3614,7 @@ export function ChatScreen({
                         setRecotizarFundamentos('');
                         return;
                       }
+                      quoteBaselineRef.current = EMPTY_SERVICE_QUOTE;
                       setQuoteModalOpen(true);
                       setEditingQuoteId(null);
                       setReplacesQuoteId(null);
@@ -3494,7 +3635,7 @@ export function ChatScreen({
                     disabled={quoteChip.disabled}
                   >
                     <Ionicons name="calculator-outline" size={16} color={colors.text} />
-                    <Text style={styles.headerActionChipText} numberOfLines={1}>{quoteChip.label}</Text>
+                    <Text style={styles.headerActionChipText}>{quoteChip.label}</Text>
                   </Pressable>
                   <Pressable
                     onPress={() => {
@@ -3513,7 +3654,7 @@ export function ChatScreen({
                     style={({ pressed }) => [styles.headerActionChip, pressed && styles.pressed]}
                   >
                     <Ionicons name="clipboard-outline" size={16} color={colors.text} />
-                    <Text style={styles.headerActionChipText} numberOfLines={1}>Materiales</Text>
+                    <Text style={styles.headerActionChipText}>Materiales</Text>
                   </Pressable>
                 </View>
               ) : null}
@@ -3765,8 +3906,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 1,
-    paddingVertical: 3,
-    paddingHorizontal: 2,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: colors.border,
@@ -3775,7 +3916,7 @@ const styles = StyleSheet.create({
   },
   headerActionChipText: {
     fontSize: 10,
-    lineHeight: 12,
+    lineHeight: 14,
     fontWeight: '800',
     letterSpacing: -0.2,
     color: colors.text,
@@ -4148,6 +4289,18 @@ const styles = StyleSheet.create({
   quoteBtnGhostText: { color: colors.text, fontWeight: '900' },
   quoteBtnPrimary: { borderColor: colors.primary, backgroundColor: colors.primary },
   quoteBtnPrimaryText: { color: '#fff', fontWeight: '900' },
+  materialQuoteBtn: {
+    minHeight: 48,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  materialQuoteBtnText: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 15,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
   quoteBtnDisabled: { opacity: 0.45 },
 
   systemRow: {

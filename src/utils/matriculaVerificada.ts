@@ -94,6 +94,25 @@ export function profileOffersMatricula(trades: MatriculaTradeRef[]): boolean {
   return trades.some(tradeRequiresMatricula);
 }
 
+/** La tarjeta de carga solo si el oficio ya está guardado (la misma fuente que `jobs`). */
+export const MATRICULA_SAVE_FIRST =
+  'Guardá tus datos profesionales para cargar la matrícula';
+
+export type MatriculaCardMode = 'ready' | 'save-first' | 'hidden';
+
+/**
+ * `saved` son los oficios ya persistidos del profesional.
+ * Si el formulario tiene un oficio habilitado que todavía no se guardó, no se puede enviar.
+ */
+export function matriculaCardMode(
+  saved: MatriculaTradeRef[],
+  draft: MatriculaTradeRef[],
+): MatriculaCardMode {
+  if (profileOffersMatricula(saved)) return 'ready';
+  if (profileOffersMatricula(draft)) return 'save-first';
+  return 'hidden';
+}
+
 export function matriculaImageResize(
   width: number,
   height: number,

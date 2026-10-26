@@ -52,7 +52,7 @@ import {
   ATIENDE_URGENCIAS_TITLE,
   toggleAtiendeUrgencias,
 } from '../../utils/urgencias';
-import { profileOffersMatricula } from '../../utils/matriculaVerificada';
+import { MATRICULA_SAVE_FIRST, matriculaCardMode } from '../../utils/matriculaVerificada';
 import type { AuthUser } from '../../services/auth';
 
 type Props = AccountStackScreenProps<'WorkerABM'>;
@@ -214,6 +214,14 @@ export function WorkerABMScreen({ navigation }: Props) {
   const userId = user?.id ?? null;
 
   const profileBase = useMemo(() => profileBaseFromUser(user), [user]);
+  const savedMatriculaTrades = useMemo(
+    () =>
+      (user?.worker?.trades ?? []).map((trade) => ({
+        name: trade.name,
+        rubroSlug: trade.rubroSlug,
+      })),
+    [user?.worker?.trades],
+  );
 
   const [coverageKm, setCoverageKm] = useState('10');
   const [professionalDescription, setProfessionalDescription] = useState(
@@ -222,6 +230,7 @@ export function WorkerABMScreen({ navigation }: Props) {
   const [trades, setTrades] = useState<WorkerTrade[]>(
     () => workerProfile?.trades?.length ? workerProfile.trades : [newTrade({ isPrimary: true })],
   );
+  const matriculaMode = matriculaCardMode(savedMatriculaTrades, trades);
   const [saving, setSaving] = useState(false);
   const [atiendeUrgencias, setAtiendeUrgencias] = useState(false);
   const urgenciasTouched = useRef(false);
@@ -474,6 +483,23 @@ export function WorkerABMScreen({ navigation }: Props) {
                 proofImageUris: t.proofImageUris,
                 isPrimary: t.isPrimary,
               })),
+            });
+            const primarySaved = trimmedTrades.find((t) => t.isPrimary) ?? trimmedTrades[0];
+            replaceOrMergeUser({
+              ...user,
+              worker: {
+                coverageKm: km,
+                primaryTradeName: primarySaved?.name ?? '',
+                trades: trimmedTrades.map((t) => ({
+                  id: t.id,
+                  name: t.name,
+                  details: t.description,
+                  isPrimary: t.isPrimary,
+                  rubroSlug: t.rubroSlug,
+                  proofImageUri: t.proofImageUri,
+                  proofImageUris: t.proofImageUris,
+                })),
+              },
             });
           }
 
@@ -885,8 +911,14 @@ export function WorkerABMScreen({ navigation }: Props) {
               />
             </View>
 
-            {isSupabaseConfigured() && userId && profileOffersMatricula(trades) ? (
+            {isSupabaseConfigured() && userId && matriculaMode === 'ready' ? (
               <MatriculaCard />
+            ) : null}
+            {isSupabaseConfigured() && userId && matriculaMode === 'save-first' ? (
+              <View style={styles.matriculaHold}>
+                <Text style={styles.sectionTitle}>Matrícula</Text>
+                <Text style={styles.matriculaHoldText}>{MATRICULA_SAVE_FIRST}</Text>
+              </View>
             ) : null}
 
             {isSupabaseConfigured() && userId ? <AntecedentesPenalesCard /> : null}
@@ -969,6 +1001,20 @@ const styles = StyleSheet.create({
   formActions: {
     paddingTop: spacing.xl,
     gap: spacing.sm,
+  },
+  matriculaHold: {
+    marginTop: spacing.lg,
+    backgroundColor: '#FBF7F1',
+    borderRadius: radii.card,
+    borderWidth: 1,
+    borderColor: '#E7D9C6',
+    padding: spacing.md,
+  },
+  matriculaHoldText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#6F6256',
+    fontWeight: '600',
   },
   errorBox: {
     flexDirection: 'row',

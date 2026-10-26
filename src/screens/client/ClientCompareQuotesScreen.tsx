@@ -820,8 +820,18 @@ const QuoteCard = memo(function QuoteCard({
             </View>
           ) : null}
           {card.orderId && (!readOnly || card.orderCode || card.verificationPin) ? (
-            <Pressable onPress={onOpenOrder} style={styles.orderLink}>
-              <Text style={styles.orderLinkText}>Ver código y PIN</Text>
+            <Pressable
+              onPress={onOpenOrder}
+              accessibilityRole="button"
+              accessibilityLabel="Ver código y PIN"
+              style={({ pressed }) => [
+                readOnly ? styles.workerOrderBtn : styles.orderLink,
+                pressed && readOnly && styles.acceptBtnPressed,
+              ]}
+            >
+              <Text style={readOnly ? styles.workerOrderBtnText : styles.orderLinkText}>
+                Ver código y PIN
+              </Text>
             </Pressable>
           ) : null}
         </View>
@@ -1241,6 +1251,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     color: colors.primary,
+  },
+  workerOrderBtn: {
+    marginTop: 12,
+    alignSelf: 'stretch',
+    minHeight: 48,
+    borderRadius: radii.button,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: spacing.md,
+  },
+  workerOrderBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   contactBlock: {
     marginTop: 8,
