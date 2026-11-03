@@ -1,0 +1,114 @@
+# Builds nativos EAS (perfil preview): APK Android + iOS.
+# Requiere el secret EXPO_TOKEN (el mismo que eas-update.yml).
+# Push a main solo dispara este workflow si cambia .github/eas-build-trigger.
+name: EAS Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Plataforma
+        required: true
+        type: choice
+        options:
+          - all
+          - android
+          - ios
+        default: all
+  push:
+    branches: [main]
+    paths:
+      - '.github/eas-build-trigger'
+
+jobs:
+  android:
+    name: Android APK (preview)
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.platform == 'all' ||
+      github.event.inputs.platform == 'android'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Android
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: npx eas-cli build --profile preview --platform android --non-interactive --no-wait --message "#110 antecedentes"
+
+  ios:
+    name: iOS (preview)
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.platform == 'all' ||
+      github.event.inputs.platform == 'ios'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build iOS
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: npx eas-cli build --profile preview --platform ios --non-interactive --no-wait --auto-submit --message "#110 antecedentes"
+
+  list:
+    name: List recent builds
+    needs: [android, ios]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Print build metadata
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          npx eas-cli build:list --limit 2 --non-interactive --json | tee builds.json
+          node <<'EOF'
+          const fs = require('fs');
+          const raw = fs.readFileSync('builds.json', 'utf8');
+          const start = Math.min(
+            ...['[', '{'].map((c) => {
+              const i = raw.indexOf(c);
+              return i === -1 ? Infinity : i;
+            }),
+          );
+          const data = JSON.parse(raw.slice(start));
+          const builds = Array.isArray(data) ? data : data.builds || [data];
+          for (const b of builds) {
+            console.log(
+              JSON.stringify({
+                id: b.id,
+                platform: b.platform,
+                status: b.status,
+                artifacts: b.artifacts ?? null,
+              }),
+            );
+          }
+          EOF
