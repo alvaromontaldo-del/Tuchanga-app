@@ -84,6 +84,8 @@ export type StoreBoardQuoteItemDecision = {
   quoteItemId: string;
   requestItemId: string;
   description: string;
+  /** Nombre del material, sin la marca. */
+  materialName: string;
   unitPrice: number;
   decision: 'accepted' | 'rejected' | 'pending';
 };

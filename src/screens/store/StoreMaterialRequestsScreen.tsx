@@ -22,6 +22,7 @@ import { listKey } from '../../utils/safeAsync';
 import { StoreSubscriptionCard } from '../../components/store/StoreSubscriptionCard';
 import type { StoreBoardCard, StoreBoardColumn } from '../../types/materials';
 import { normalizeOrderCodeInput, PIN_LENGTH } from '../../utils/orderCode';
+import { summarizeRejectedMaterials } from '../../utils/rejectedMaterialItems';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 type Props = NativeStackScreenProps<CommerceStackParamList, 'StoreMaterialRequests'>;
@@ -360,6 +361,24 @@ function formatBoardDate(iso: string | null | undefined): string | null {
   return `${dd}/${mm}`;
 }
 
+function rejectedMaterialsOf(card: StoreBoardCard) {
+  return summarizeRejectedMaterials(
+    [
+      ...card.acceptedItems.map((it) => ({
+        requestItemId: it.requestItemId,
+        materialName: it.materialName || it.description,
+        decision: 'accepted' as const,
+      })),
+      ...card.rejectedItems.map((it) => ({
+        requestItemId: it.requestItemId,
+        materialName: it.materialName || it.description,
+        decision: 'rejected' as const,
+      })),
+    ],
+    card.itemCount,
+  );
+}
+
 function itemsSummary(card: StoreBoardCard): string | null {
   const total = card.itemCount || card.acceptedItems.length + card.rejectedItems.length;
   if (card.acceptedItems.length > 0 && total > 0) {
@@ -367,10 +386,9 @@ function itemsSummary(card: StoreBoardCard): string | null {
       card.acceptedItems.length === 1 ? '' : 's'
     }`;
   }
-  if (card.rejectedItems.length > 0 && card.acceptedItems.length === 0 && total > 0) {
-    return `${card.rejectedItems.length} de ${total} ítem${total === 1 ? '' : 's'} rechazado${
-      card.rejectedItems.length === 1 ? '' : 's'
-    }`;
+  const rejected = rejectedMaterialsOf(card);
+  if (rejected.countLabel && card.acceptedItems.length === 0) {
+    return rejected.countLabel;
   }
   if (total > 0) {
     return `${total} ítem${total === 1 ? '' : 's'}`;
@@ -419,7 +437,7 @@ function KanbanCard({
 
   const dateLabel = formatBoardDate(card.quotedAt ?? card.createdAt);
   const summary = itemsSummary(card);
-  const rejectedForDisplay = card.rejectedItems;
+  const rejectedSummary = rejectedMaterialsOf(card);
   const canExpandDetails =
     card.column !== 'rechazadas' &&
     (card.acceptedItems.length > 0 || card.rejectedItems.length > 0);
@@ -495,18 +513,10 @@ function KanbanCard({
               ))}
             </View>
           ) : null}
-          {card.rejectedItems.length > 0 ? (
+          {rejectedSummary.namesLabel ? (
             <View style={styles.decisionBlock}>
               <Text style={styles.decisionTitleNo}>Rechazados</Text>
-              {card.rejectedItems.map((it) => (
-                <Text
-                  key={`r-${it.quoteItemId}`}
-                  style={styles.decisionLineMuted}
-                  numberOfLines={2}
-                >
-                  · {it.description}
-                </Text>
-              ))}
+              <Text style={styles.decisionLineMuted}>{rejectedSummary.namesLabel}</Text>
             </View>
           ) : null}
         </View>
@@ -516,16 +526,8 @@ function KanbanCard({
         <View style={styles.decisionsBox}>
           <View style={styles.decisionBlock}>
             <Text style={styles.decisionTitleNo}>Ítems rechazados</Text>
-            {rejectedForDisplay.length > 0 ? (
-              rejectedForDisplay.map((it) => (
-                <Text
-                  key={`rj-${it.quoteItemId}`}
-                  style={styles.decisionLineMuted}
-                  numberOfLines={3}
-                >
-                  · {it.description}
-                </Text>
-              ))
+            {rejectedSummary.namesLabel ? (
+              <Text style={styles.decisionLineMuted}>{rejectedSummary.namesLabel}</Text>
             ) : (
               <Text style={styles.decisionLineMuted}>Cotización rechazada por completo.</Text>
             )}
