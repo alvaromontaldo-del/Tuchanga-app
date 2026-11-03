@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ClientQuoteCard, ClientQuoteLineItem } from '../types/materials';
 import {
   clientQuoteOptionLabel,
+  clientQuoteRowLabel,
   defaultSelectedItemIds,
   duplicateSelectedMaterials,
   groupQuoteItemsByRequest,
@@ -209,7 +210,7 @@ describe('agrupación de variantes', () => {
     expect(variantSelectionControl(groups[0].variants.length)).toBe('checkbox');
   });
 
-  it('varias opciones usan radio y sin marca muestran Precio o la alternativa', () => {
+  it('varias opciones usan radio; sin marca y con stock no dice Precio', () => {
     const groups = groupQuoteItemsByRequest([
       item({
         quoteItemId: 'v1',
@@ -234,10 +235,41 @@ describe('agrupación de variantes', () => {
     expect(groups).toHaveLength(1);
     expect(materialGroupHeader(groups[0])).toBe('Clavo · 1 u');
     expect(variantSelectionControl(groups[0].variants.length)).toBe('radio');
-    expect(variantOptionLabel(groups[0].variants[0])).toBe('Precio');
+    expect(variantOptionLabel(groups[0].variants[0])).toBe('');
     expect(variantOptionLabel(groups[0].variants[1])).toBe('Tornillo');
-    expect(clientQuoteOptionLabel(groups[0].variants[0])).toBe('Precio');
+    expect(clientQuoteOptionLabel(groups[0].variants[0])).toBe('');
     expect(clientQuoteOptionLabel(groups[0].variants[1])).toBe('Alternativa: Tornillo');
+    expect(clientQuoteRowLabel(groups[0].variants[0], materialGroupHeader(groups[0]))).toBe(
+      'Clavo · 1 u',
+    );
+  });
+
+  it('sin marca y con stock la fila es el material, no «Precio»', () => {
+    const line = item({
+      quoteItemId: 'solo',
+      requestItemId: 'ri',
+      description: 'Cemento',
+      variantLabel: '   ',
+      quantity: 4,
+      unit: 'kg',
+      inStock: true,
+    });
+    expect(variantOptionLabel(line)).toBe('');
+    expect(clientQuoteOptionLabel(line)).toBe('');
+    expect(
+      clientQuoteRowLabel(line, materialGroupHeader({ description: line.description, variants: [line] })),
+    ).toBe('Cemento · 4 kg');
+  });
+
+  it('con marca la fila muestra la marca y no el material', () => {
+    const line = item({
+      quoteItemId: 'marca',
+      requestItemId: 'ri',
+      description: 'Cemento',
+      variantLabel: 'Loma Negra',
+      inStock: true,
+    });
+    expect(clientQuoteRowLabel(line, 'Cemento · 1 u')).toBe('Loma Negra');
   });
 });
 
@@ -401,7 +433,9 @@ describe('datos de la comparación', () => {
     expect(screen).toContain('Horario no informado');
     expect(screen).toContain('Total materiales');
     expect(screen).toContain('materialGroupHeader(');
-    expect(screen).toContain('clientQuoteOptionLabel(');
+    expect(screen).toContain('clientQuoteRowLabel(');
+    expect(screen).not.toContain("'Con stock'");
+    expect(screen).not.toContain('"Con stock"');
     expect(screen).toContain('selectedMaterialsAmount(');
     expect(screen).toContain('Se actualiza con los ítems que marques');
     expect(screen).toContain('initialSelectedItemIdsByQuote(');

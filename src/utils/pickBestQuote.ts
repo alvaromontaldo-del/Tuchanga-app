@@ -161,7 +161,11 @@ export function materialGroupHeader(group: {
   return `${description} · ${qtyLabel} ${unit}`;
 }
 
-/** Etiqueta de una variante: marca, o «Precio» / alternativa si no hay marca. */
+/**
+ * Etiqueta de una variante. Con marca, la marca.
+ * Sin marca y con stock, vacío: la fila muestra el material, no «Precio».
+ * Sin stock, el reemplazo (o vacío si no hay).
+ */
 export function variantOptionLabel(it: {
   variantLabel?: string | null;
   inStock: boolean;
@@ -169,8 +173,8 @@ export function variantOptionLabel(it: {
 }): string {
   const brand = it.variantLabel?.trim();
   if (brand) return brand;
-  if (it.inStock) return 'Precio';
-  return it.alternativeDescription?.trim() || 'Precio';
+  if (it.inStock) return '';
+  return it.alternativeDescription?.trim() || '';
 }
 
 /**
@@ -187,6 +191,22 @@ export function clientQuoteOptionLabel(it: {
     return alt ? `Alternativa: ${alt}` : 'Sin stock';
   }
   return variantOptionLabel(it);
+}
+
+/**
+ * Texto de la fila. Si no hay marca y hay stock, el material
+ * (descripción · cantidad unidad) queda a la izquierda del valor.
+ */
+export function clientQuoteRowLabel(
+  it: {
+    variantLabel?: string | null;
+    inStock: boolean;
+    alternativeDescription?: string | null;
+  },
+  materialLine: string,
+): string {
+  const label = clientQuoteOptionLabel(it).trim();
+  return label || materialLine.trim();
 }
 
 /** Varias opciones: radio. Una sola (aunque tenga marca): checkbox. */

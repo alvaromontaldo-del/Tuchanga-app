@@ -3,12 +3,17 @@
 import {
   buildMaterialOrderExternalReference,
   fetchMpPayment,
+  getAppReturnBase,
   getMpAccessToken,
   processApprovedMpPayment,
   resolvePaymentContext,
   searchMpPaymentsByPreferenceId,
   type MpPayment,
 } from "../_shared/mercadopago.ts";
+import {
+  isStoreSubscriptionReturn,
+  storeSubscriptionAppReturnUrl,
+} from "../_shared/mpSubscription.ts";
 import { createAdminClient } from "../_shared/supabaseAdmin.ts";
 
 async function fetchMerchantOrderPayments(resourceId: string): Promise<MpPayment[]> {
@@ -99,6 +104,20 @@ async function fallbackMarkPaid(orderId: string, payment: MpPayment): Promise<vo
   if (error) throw new Error(error.message);
 }
 
+function plainRedirect(deepLink: string, lines: string[]): Response {
+  const plain = lines.filter((line) => line !== "").join("\n");
+  return new Response(plain, {
+    status: 302,
+    headers: {
+      Location: deepLink,
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Access-Control-Allow-Origin": "*",
+      Refresh: `0;url=${deepLink}`,
+    },
+  });
+}
+
 /**
  * back_url HTTPS de Checkout Pro.
  * Acredita el pago EN EL SERVIDOR (no depende del deep link de la app).
@@ -143,6 +162,27 @@ Deno.serve(async (req) => {
     ""
   ).trim();
   const contratacionId = (url.searchParams.get("contratacion_id") ?? "").trim();
+
+  // Suscripción del comercio: no hay seña ni materiales que acreditar.
+  if (
+    isStoreSubscriptionReturn({
+      storeSubscription: url.searchParams.get("store_subscription"),
+      materialOrderId,
+      contratacionId,
+    })
+  ) {
+    const returnStatus = status === "unknown" ? "pending" : status;
+    const deepLink = storeSubscriptionAppReturnUrl(getAppReturnBase(), returnStatus);
+    return plainRedirect(deepLink, [
+      "YaChanga",
+      "",
+      "Autorización del débito",
+      "Volvé a YaChanga. El estado se actualiza en tu comercio.",
+      "",
+      "Para volver a la app, abri este enlace:",
+      deepLink,
+    ]);
+  }
 
   let credited = false;
   let creditError = "";
@@ -213,7 +253,7 @@ Deno.serve(async (req) => {
 
   // Texto plano a proposito: Supabase no permite servir HTML desde Edge Functions
   // (Content-Type text/html se reescribe a text/plain y el navegador muestra el codigo fuente).
-  const plain = [
+  return plainRedirect(deepLink, [
     "YaChanga",
     "",
     title,
@@ -224,19 +264,5 @@ Deno.serve(async (req) => {
     "",
     "Si no abre sola, volve a YaChanga manualmente: el pago ya quedo registrado en el servidor.",
     creditError ? `(ref: ${creditError.slice(0, 120)})` : "",
-  ]
-    .filter((line) => line !== "")
-    .join("\n");
-
-  return new Response(plain, {
-    status: 302,
-    headers: {
-      Location: deepLink,
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-store",
-      "Access-Control-Allow-Origin": "*",
-      // Fallback en navegadores que respetan Refresh con custom schemes
-      Refresh: `0;url=${deepLink}`,
-    },
-  });
+  ]);
 });
