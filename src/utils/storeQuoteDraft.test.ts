@@ -2,7 +2,12 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { MaterialRequestItem } from '../types/materials';
 import { isClientSelectableQuoteItem } from './pickBestQuote';
-import { buildStoreQuoteItemRows, type QuoteItemDraftState } from './storeQuoteDraft';
+import {
+  buildStoreQuoteItemRows,
+  storeReadonlyPriceCaption,
+  storeReadonlyStockCaption,
+  type QuoteItemDraftState,
+} from './storeQuoteDraft';
 
 function requestItem(id: string, description: string): MaterialRequestItem {
   return { id, description, quantity: 1, unit: 'u', sortOrder: 0 };
@@ -100,6 +105,41 @@ describe('presupuesto del comercio', () => {
         }),
       }),
     ).toThrow(/alternativo/);
+  });
+});
+
+describe('labels de solo lectura (#209)', () => {
+  it('no muestra Con stock y deja Sin stock solo cuando no hay', () => {
+    expect(storeReadonlyStockCaption(true)).toBeNull();
+    expect(storeReadonlyStockCaption(false)).toBe('Sin stock');
+  });
+
+  it('sin marca y una variante no dice Precio; varias siguen en Opción N', () => {
+    expect(
+      storeReadonlyPriceCaption({ inStock: true, label: '  ', variantCount: 1, index: 0 }),
+    ).toBe('');
+    expect(
+      storeReadonlyPriceCaption({ inStock: true, label: '', variantCount: 2, index: 1 }),
+    ).toBe('Opción 2');
+    expect(
+      storeReadonlyPriceCaption({ inStock: true, label: 'Acme', variantCount: 2, index: 0 }),
+    ).toBe('Acme');
+    expect(
+      storeReadonlyPriceCaption({ inStock: false, label: 'Cal', variantCount: 1, index: 0 }),
+    ).toBe('Alternativa');
+    expect(
+      storeReadonlyPriceCaption({ inStock: false, label: '', variantCount: 1, index: 0 }),
+    ).toBe('Sin alternativa');
+  });
+
+  it('la pantalla de cotización no dice Con stock ni Precio en solo lectura', () => {
+    const screen = readFileSync('src/screens/store/StoreQuoteRequestScreen.tsx', 'utf8');
+    expect(screen).not.toContain("'Con stock'");
+    expect(screen).not.toContain('"Con stock"');
+    expect(screen).not.toContain(": 'Precio'");
+    expect(screen).toContain('storeReadonlyStockCaption(');
+    expect(screen).toContain('storeReadonlyPriceCaption(');
+    expect(screen).toContain('Precio unitario');
   });
 });
 

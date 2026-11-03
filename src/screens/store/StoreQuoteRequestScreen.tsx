@@ -47,6 +47,10 @@ import {
   storeDeliveryChoice,
   storeDeliveryDetailLabel,
 } from '../../utils/quoteFreightTotal';
+import {
+  storeReadonlyPriceCaption,
+  storeReadonlyStockCaption,
+} from '../../utils/storeQuoteDraft';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 const FREIGHT_OPTIONS: { value: FreightType; label: string }[] = [
@@ -420,6 +424,7 @@ const QuoteItemRow = memo(function QuoteItemRow({
 }) {
   const variants = draft.variants.length > 0 ? draft.variants : [{ label: '', priceText: '' }];
   const inStock = draft.inStock;
+  const stockCaption = storeReadonlyStockCaption(inStock);
   const itemNote = draft.itemNote.trim();
 
   const updateVariant = (index: number, patch: Partial<{ label: string; priceText: string }>) => {
@@ -473,12 +478,12 @@ const QuoteItemRow = memo(function QuoteItemRow({
         </View>
 
         <View style={styles.roMetaList}>
-          <View style={styles.roMetaRow}>
-            <Text style={styles.roMetaLabel}>Stock</Text>
-            <Text style={[styles.roMetaValue, !inStock && styles.roMetaValueWarn]}>
-              {inStock ? 'Con stock' : 'Sin stock'}
-            </Text>
-          </View>
+          {stockCaption ? (
+            <View style={styles.roMetaRow}>
+              <Text style={styles.roMetaLabel}>Stock</Text>
+              <Text style={[styles.roMetaValue, styles.roMetaValueWarn]}>{stockCaption}</Text>
+            </View>
+          ) : null}
           {!inStock ? (
             <Text style={styles.altHint}>
               {variants.some((v) => v.label.trim())
@@ -495,19 +500,21 @@ const QuoteItemRow = memo(function QuoteItemRow({
                   : variants.length > 1 && variantDecision === 'rejected'
                     ? 'Rechazado'
                     : null;
+              const caption = storeReadonlyPriceCaption({
+                inStock,
+                label: v.label,
+                variantCount: variants.length,
+                index: i,
+              });
               return (
-              <View key={`ro-v-${i}`} style={styles.roMetaBlock}>
-                <Text style={styles.roMetaLabel}>
-                  {!inStock
-                    ? v.label.trim()
-                      ? 'Alternativa'
-                      : 'Sin alternativa'
-                    : v.label.trim() || (variants.length > 1 ? `Opción ${i + 1}` : 'Precio')}
-                </Text>
+              <View key={`ro-v-${i}`} style={caption ? styles.roMetaBlock : styles.roMetaRow}>
+                {caption ? <Text style={styles.roMetaLabel}>{caption}</Text> : null}
                 {!inStock && v.label.trim() ? (
                   <Text style={styles.roAltText}>{v.label.trim()}</Text>
                 ) : null}
-                <Text style={styles.roMetaValue}>{formatDraftPrice(v.priceText)}</Text>
+                <Text style={[styles.roMetaValue, !caption && styles.roMetaValueEnd]}>
+                  {formatDraftPrice(v.priceText)}
+                </Text>
                 {variantDecisionLabel ? (
                   <Text
                     style={[
@@ -983,6 +990,9 @@ const styles = StyleSheet.create({
   },
   roMetaValueWarn: {
     color: colors.primary,
+  },
+  roMetaValueEnd: {
+    marginLeft: 'auto',
   },
   roAltText: {
     fontSize: 14,

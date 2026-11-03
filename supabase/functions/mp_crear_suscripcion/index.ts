@@ -2,7 +2,13 @@
 
 import { requireAuthenticatedUser } from "../_shared/requireUser.ts";
 import { createAdminClient, json } from "../_shared/supabaseAdmin.ts";
-import { getMpAccessToken, isMpSandboxMode } from "../_shared/mercadopago.ts";
+import { getMpAccessToken, getMpSandboxBuyerEmail, isMpSandboxMode } from "../_shared/mercadopago.ts";
+import {
+  mpFailureLogFields,
+  preapprovalResponseKeys,
+  resolvePreapprovalCheckoutUrl,
+  resolveSubscriptionPayerEmail,
+} from "../_shared/mpSubscription.ts";
 
 type StoreRow = {
   id: string;
@@ -117,15 +123,11 @@ Deno.serve(async (req) => {
     return json(422, { error: "category_missing", message: FEE_MISSING });
   }
 
-  const { data: userRow } = await sb.auth.admin.getUserById(auth.userId);
-  const sandboxBuyer = (Deno.env.get("MP_TEST_BUYER_EMAIL") ?? "").trim();
-  const payerEmail = sandboxBuyer || (userRow.user?.email ?? "").trim();
-  if (!payerEmail) {
-    return json(422, {
-      error: "payer_email_missing",
-      message: "Falta el mail de la cuenta de prueba de Mercado Pago.",
-    });
+  const payer = resolveSubscriptionPayerEmail(getMpSandboxBuyerEmail());
+  if ("error" in payer) {
+    return json(422, { error: payer.error, message: payer.message });
   }
+  const payerEmail = payer.email;
 
   const start = subscriptionChargeStartsAt(row.trial_ends_at);
   const mpBody = {
@@ -153,7 +155,13 @@ Deno.serve(async (req) => {
   });
   const txt = await res.text();
   if (!res.ok) {
-    console.error("[mp_crear_suscripcion] mp_failed", res.status);
+    const failure = mpFailureLogFields(res.status, txt);
+    console.error(
+      "[mp_crear_suscripcion] mp_failed",
+      failure.status,
+      failure.message,
+      failure.causeCodes.join(","),
+    );
     return json(502, {
       error: "mp_preapproval_failed",
       message: "No se pudo abrir el débito de prueba.",
@@ -167,8 +175,12 @@ Deno.serve(async (req) => {
     return json(502, { error: "mp_invalid_response", message: "Mercado Pago respondió mal." });
   }
 
-  const checkoutUrl = (created.sandbox_init_point ?? "").trim();
+  const checkoutUrl = resolvePreapprovalCheckoutUrl(created);
   if (!checkoutUrl) {
+    console.error(
+      "[mp_crear_suscripcion] checkout_missing",
+      preapprovalResponseKeys(created).join(","),
+    );
     return json(502, {
       error: "mp_sandbox_checkout_missing",
       message: "Mercado Pago no devolvió el checkout de prueba.",

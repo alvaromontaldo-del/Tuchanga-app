@@ -23,6 +23,29 @@ export type BuiltStoreQuoteItem = {
   variantLabel: string | null;
 };
 
+/** Solo lectura: «Sin stock» cuando no hay; con stock no se muestra badge. */
+export function storeReadonlyStockCaption(inStock: boolean): 'Sin stock' | null {
+  return inStock ? null : 'Sin stock';
+}
+
+/**
+ * Caption de la variante en solo lectura.
+ * Vacío = una sola variante sin marca: no decir «Precio», solo el valor a la derecha.
+ * Varias variantes sin marca siguen como «Opción N».
+ */
+export function storeReadonlyPriceCaption(input: {
+  inStock: boolean;
+  label: string;
+  variantCount: number;
+  index: number;
+}): string {
+  const brand = input.label.trim();
+  if (!input.inStock) return brand ? 'Alternativa' : 'Sin alternativa';
+  if (brand) return brand;
+  if (input.variantCount > 1) return `Opción ${input.index + 1}`;
+  return '';
+}
+
 export function emptyQuoteItemDraft(): QuoteItemDraftState {
   return {
     inStock: true,

@@ -44,7 +44,7 @@ import {
   groupQuoteItemsByRequest,
   initialSelectedItemIdsByQuote,
   isClientSelectableQuote,
-  clientQuoteOptionLabel,
+  clientQuoteRowLabel,
   isClientSelectableQuoteItem,
   materialGroupHeader,
   selectedMaterialsAmount,
@@ -936,7 +936,7 @@ const QuoteCard = memo(function QuoteCard({
                   const decided =
                     it.clientDecision === 'accepted' || it.clientDecision === 'rejected';
                   const itemSelectable = canSelectItems && isClientSelectableQuoteItem(it);
-                  const label = clientQuoteOptionLabel(it);
+                  const label = clientQuoteRowLabel(it, materialGroupHeader(group));
                   return (
                     <Pressable
                       key={it.quoteItemId}
@@ -997,18 +997,11 @@ const QuoteCard = memo(function QuoteCard({
                         ) : it.clientDecision === 'rejected' ? (
                           <Text style={styles.detailAltBadge}>Rechazado</Text>
                         ) : null}
-                        <Text
-                          style={[
-                            styles.detailAltBadge,
-                            it.inStock && styles.detailStockOk,
-                          ]}
-                        >
-                          {it.inStock
-                            ? 'Con stock'
-                            : isClientSelectableQuoteItem(it)
-                              ? 'Reemplazo sugerido'
-                              : 'Sin stock'}
-                        </Text>
+                        {!it.inStock ? (
+                          <Text style={styles.detailAltBadge}>
+                            {isClientSelectableQuoteItem(it) ? 'Reemplazo sugerido' : 'Sin stock'}
+                          </Text>
+                        ) : null}
                         {!it.inStock &&
                         !it.alternativeDescription?.trim() &&
                         !it.variantLabel?.trim() ? (
