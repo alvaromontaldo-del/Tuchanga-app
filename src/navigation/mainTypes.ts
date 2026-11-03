@@ -137,6 +137,7 @@ export type CommerceStackParamList = {
   };
   StoreCloseOrder: { orderCode?: string } | undefined;
   CommerceAccount: undefined;
+  StoreStats: undefined;
   Faq: undefined;
 };
 
