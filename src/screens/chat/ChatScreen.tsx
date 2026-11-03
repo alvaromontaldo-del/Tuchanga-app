@@ -138,6 +138,10 @@ import {
 } from '../../utils/claimChatVisibility';
 import { getSystemEvent, shouldRenderSystemMessageInChat } from '../../utils/chatSystemMessages';
 import {
+  shouldShowReviewInvite,
+  shouldShowReviewInviteMessage,
+} from '../../utils/reviewInviteVisibility';
+import {
   isRecotizacionProposalEvent,
   quoteChipForJob,
   readMetaNumber,
@@ -686,12 +690,15 @@ export function ChatScreen({
       job.offline_pago_notificado_at &&
       job.estado_pago === 'seña_pagada',
   );
+  const showReviewInvite = shouldShowReviewInvite({
+    hasReview: Boolean(review),
+    justSubmitted: reviewSubmitted,
+  });
   const showReviewForm = Boolean(
     job &&
       participants?.myRole === 'cliente' &&
       job.estado_trabajo === 'finalizado' &&
-      !reviewSubmitted &&
-      !review,
+      showReviewInvite,
   );
   const showClientConformidadBar = Boolean(
     job &&
@@ -1174,6 +1181,16 @@ export function ChatScreen({
         return false;
       }
       if (m.type !== 'system') return true;
+      if (
+        !shouldShowReviewInviteMessage({
+          hasReview: Boolean(review),
+          justSubmitted: reviewSubmitted,
+          text: String(m.text ?? ''),
+          event: getSystemEvent(meta),
+        })
+      ) {
+        return false;
+      }
       return shouldRenderSystemMessageInChat(meta, participants?.myRole ?? null);
     });
 
@@ -1302,7 +1319,7 @@ export function ChatScreen({
         storeCount: 1,
       }).show;
     });
-  }, [materialQuotesByRequest, messages, participants?.myRole]);
+  }, [materialQuotesByRequest, messages, participants?.myRole, review, reviewSubmitted]);
 
   const refreshAgendaOpciones = useCallback(async (contratacionId: string) => {
     try {
@@ -1540,7 +1557,13 @@ export function ChatScreen({
     setReviewSubmitted(false);
     void fetchReviewForJob(jobId)
       .then((r) => {
-        if (!cancelled) setReview(r);
+        if (cancelled) return;
+        // Un fetch iniciado antes del envío no debe borrar la reseña recién guardada.
+        setReview((current) => {
+          if (!r && current?.job_id === jobId) return current;
+          return r;
+        });
+        if (r) setReviewSubmitted(true);
       })
       .catch(() => undefined);
     return () => {
@@ -2687,7 +2710,14 @@ export function ChatScreen({
           </View>
         ) : null}
 
-        {isSupabaseConfigured() && conformidadAviso && job ? (
+        {isSupabaseConfigured() &&
+        conformidadAviso &&
+        job &&
+        shouldShowReviewInviteMessage({
+          hasReview: Boolean(review),
+          justSubmitted: reviewSubmitted,
+          text: conformidadAviso.paso,
+        }) ? (
           <View style={styles.completeBar}>
             <View style={styles.payBarText}>
               <Text style={styles.paySubtitle}>
@@ -2817,8 +2847,18 @@ export function ChatScreen({
                       comment: reviewComment,
                     });
                     setReviewSubmitted(true);
+                    setReview({
+                      id: `local-${job.id}`,
+                      conversation_id: conversationId,
+                      worker_id: participants.workerId,
+                      client_id: 'local',
+                      job_id: job.id,
+                      rating: Math.max(1, Math.min(5, Math.round(reviewRating))),
+                      comment: reviewComment.trim(),
+                      created_at: new Date().toISOString(),
+                    });
                     const r = await fetchReviewForJob(job.id);
-                    setReview(r);
+                    if (r) setReview(r);
                     toast.success('¡Gracias por tu reseña!', 'Reseña');
                     // Estrellas al día: leer rating actualizado del perfil + refrescar feed.
                     try {
@@ -2900,6 +2940,8 @@ export function ChatScreen({
       showClientSaldoEsperandoBar,
       showClientSaldoPagadoBar,
       showClientWaitingAvailabilityBar,
+      review,
+      reviewSubmitted,
       showPay,
       showReviewForm,
       showWorkerConformidadBar,

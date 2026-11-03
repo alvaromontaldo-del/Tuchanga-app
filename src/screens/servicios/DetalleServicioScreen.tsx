@@ -74,6 +74,8 @@ import {
   puedeNotificarSaldoOffline,
 } from '../../utils/contratacionStatus';
 import { openClientInMaps } from '../../utils/openClientMaps';
+import { shouldShowReviewInviteMessage } from '../../utils/reviewInviteVisibility';
+import { fetchReviewForJob } from '../../services/quotesSupabase';
 import {
   mensajePinBloqueado,
   parsePinBloqueadoHasta,
@@ -230,6 +232,7 @@ export function DetalleServicioScreen() {
   const [conformidadAviso, setConformidadAviso] = useState<typeof CONFORMIDAD_POSITIVA | null>(
     null,
   );
+  const [clientReviewed, setClientReviewed] = useState(false);
   const [busySlots, setBusySlots] = useState<BusyAgendaSlot[]>([]);
   const [agendaFocusSlotId, setAgendaFocusSlotId] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
@@ -415,10 +418,17 @@ export function DetalleServicioScreen() {
     useCallback(() => {
       if (!isSupabaseConfigured()) return;
       void reload();
+      let cancelled = false;
+      void fetchReviewForJob(contratacionId)
+        .then((review) => {
+          if (!cancelled) setClientReviewed(Boolean(review));
+        })
+        .catch(() => undefined);
       return () => {
+        cancelled = true;
         preserveSlotsRef.current = false;
       };
-    }, [reload]),
+    }, [contratacionId, reload]),
   );
 
   const pinLockUntil = useMemo(
@@ -928,7 +938,11 @@ export function DetalleServicioScreen() {
           </View>
         ) : null}
 
-        {conformidadAviso ? (
+        {conformidadAviso &&
+        shouldShowReviewInviteMessage({
+          hasReview: clientReviewed,
+          text: conformidadAviso.paso,
+        }) ? (
           <Text style={styles.hint}>
             Estado: {conformidadAviso.estado}. Próximo paso: {conformidadAviso.paso}
           </Text>

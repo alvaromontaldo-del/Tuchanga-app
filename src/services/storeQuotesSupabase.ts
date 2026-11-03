@@ -641,6 +641,7 @@ export async function fetchStoreBoardCards(): Promise<StoreBoardCard[]> {
         quoteItemId: String(qi.id ?? `${qi.request_item_id ?? ''}-${qi.variant_index ?? 1}`),
         requestItemId: String(qi.request_item_id ?? ri?.id ?? ''),
         description: brand ? `${base} (${brand})` : base,
+        materialName: base,
         unitPrice: Number(qi.unit_price) || 0,
         decision,
       };
