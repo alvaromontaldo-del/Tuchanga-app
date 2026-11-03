@@ -244,6 +244,19 @@ export function CommerceAccountScreen({ navigation }: Props) {
         <Text style={[styles.rowBtnText, { color: colors.text }]}>Ver pedidos</Text>
       </Pressable>
 
+      <Pressable
+        style={({ pressed }) => [styles.rowBtn, pressed && styles.pressed]}
+        onPress={() => navigation.navigate('StoreStats')}
+        accessibilityRole="button"
+        accessibilityLabel="Datos de gestión"
+      >
+        <Ionicons name="stats-chart-outline" size={22} color={colors.primary} />
+        <View style={styles.switchText}>
+          <Text style={styles.rowBtnText}>Datos de gestión</Text>
+          <Text style={styles.switchSub}>Ventas y ganancias</Text>
+        </View>
+      </Pressable>
+
       {nextRole && switchCopy ? (
         <Pressable
           style={({ pressed }) => [styles.rowBtn, pressed && styles.pressed]}

@@ -8,6 +8,7 @@ import { StoreMaterialRequestsScreen } from '../screens/store/StoreMaterialReque
 import { StoreQuoteRequestScreen } from '../screens/store/StoreQuoteRequestScreen';
 import { StoreCloseOrderScreen } from '../screens/store/StoreCloseOrderScreen';
 import { CommerceAccountScreen } from '../screens/store/CommerceAccountScreen';
+import { StoreStatsScreen } from '../screens/store/StoreStatsScreen';
 import { FaqScreen } from '../screens/account/FaqScreen';
 import type { CommerceStackParamList } from './mainTypes';
 import {
@@ -75,6 +76,11 @@ export function CommerceStack() {
         name="CommerceAccount"
         component={CommerceAccountScreen}
         options={{ title: 'Mi comercio' }}
+      />
+      <Stack.Screen
+        name="StoreStats"
+        component={StoreStatsScreen}
+        options={{ title: 'Datos de gestión' }}
       />
       <Stack.Screen
         name="Faq"
