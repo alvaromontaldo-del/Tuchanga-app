@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { ClientQuoteCard, ClientQuoteLineItem } from '../types/materials';
 import {
+  clientQuoteGroupIsSingleLine,
   clientQuoteOptionLabel,
   clientQuoteRowLabel,
   defaultSelectedItemIds,
@@ -205,7 +206,8 @@ describe('agrupación de variantes', () => {
     const groups = groupQuoteItemsByRequest([tijera]);
     expect(groups).toHaveLength(1);
     expect(groups[0].description).toBe('Tijera poda');
-    expect(materialGroupHeader(groups[0])).toBe('Tijera poda · 2 u');
+    expect(materialGroupHeader(groups[0])).toBe('Tijera poda');
+    expect(clientQuoteGroupIsSingleLine(groups[0])).toBe(false);
     expect(variantOptionLabel(groups[0].variants[0])).toBe('Jjh');
     expect(variantSelectionControl(groups[0].variants.length)).toBe('checkbox');
   });
@@ -233,14 +235,15 @@ describe('agrupación de variantes', () => {
       }),
     ]);
     expect(groups).toHaveLength(1);
-    expect(materialGroupHeader(groups[0])).toBe('Clavo · 1 u');
+    expect(materialGroupHeader(groups[0])).toBe('Clavo');
+    expect(clientQuoteGroupIsSingleLine(groups[0])).toBe(false);
     expect(variantSelectionControl(groups[0].variants.length)).toBe('radio');
     expect(variantOptionLabel(groups[0].variants[0])).toBe('');
     expect(variantOptionLabel(groups[0].variants[1])).toBe('Tornillo');
     expect(clientQuoteOptionLabel(groups[0].variants[0])).toBe('');
     expect(clientQuoteOptionLabel(groups[0].variants[1])).toBe('Alternativa: Tornillo');
     expect(clientQuoteRowLabel(groups[0].variants[0], materialGroupHeader(groups[0]))).toBe(
-      'Clavo · 1 u',
+      'Clavo',
     );
   });
 
@@ -258,7 +261,12 @@ describe('agrupación de variantes', () => {
     expect(clientQuoteOptionLabel(line)).toBe('');
     expect(
       clientQuoteRowLabel(line, materialGroupHeader({ description: line.description, variants: [line] })),
-    ).toBe('Cemento · 4 kg');
+    ).toBe('Cemento');
+    expect(
+      clientQuoteGroupIsSingleLine({
+        variants: [line],
+      }),
+    ).toBe(true);
   });
 
   it('con marca la fila muestra la marca y no el material', () => {
@@ -269,7 +277,31 @@ describe('agrupación de variantes', () => {
       variantLabel: 'Loma Negra',
       inStock: true,
     });
-    expect(clientQuoteRowLabel(line, 'Cemento · 1 u')).toBe('Loma Negra');
+    expect(clientQuoteRowLabel(line, 'Cemento')).toBe('Loma Negra');
+    expect(clientQuoteGroupIsSingleLine({ variants: [line] })).toBe(false);
+  });
+
+  it('sin stock no colapsa: sigue el reemplazo o el aviso', () => {
+    const missing = item({
+      quoteItemId: 'missing',
+      requestItemId: 'ri',
+      description: 'Arena',
+      inStock: false,
+      variantLabel: null,
+      alternativeDescription: null,
+    });
+    const replacement = item({
+      quoteItemId: 'alt',
+      requestItemId: 'ri-2',
+      description: 'Arena',
+      inStock: false,
+      variantLabel: 'Arena fina',
+      alternativeDescription: 'Arena fina',
+    });
+    expect(clientQuoteGroupIsSingleLine({ variants: [missing] })).toBe(false);
+    expect(clientQuoteGroupIsSingleLine({ variants: [replacement] })).toBe(false);
+    expect(materialGroupHeader({ description: 'Arena', variants: [missing] })).toBe('Arena');
+    expect(materialGroupHeader({ description: 'Arena', variants: [missing] })).not.toContain('1 u');
   });
 });
 
@@ -433,7 +465,9 @@ describe('datos de la comparación', () => {
     expect(screen).toContain('Horario no informado');
     expect(screen).toContain('Total materiales');
     expect(screen).toContain('materialGroupHeader(');
+    expect(screen).toContain('clientQuoteGroupIsSingleLine(');
     expect(screen).toContain('clientQuoteRowLabel(');
+    expect(screen).not.toContain('· ${qtyLabel}');
     expect(screen).not.toContain("'Con stock'");
     expect(screen).not.toContain('"Con stock"');
     expect(screen).toContain('selectedMaterialsAmount(');

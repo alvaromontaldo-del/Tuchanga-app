@@ -49,6 +49,7 @@ import {
 } from '../../utils/quoteFreightTotal';
 import {
   storeReadonlyPriceCaption,
+  storeReadonlyPriceOnTitle,
   storeReadonlyStockCaption,
 } from '../../utils/storeQuoteDraft';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -81,13 +82,6 @@ function materialsForDelivery(
     const quantity = Number.isFinite(qty) && qty > 0 ? qty : 1;
     return acc + (Number(line.unitPrice) || 0) * quantity;
   }, 0);
-}
-
-function formatItemQty(item: MaterialRequestItem): string {
-  const q = Number(item.quantity);
-  const qty = Number.isFinite(q) && q > 0 ? String(q) : '1';
-  const unit = (item.unit ?? '').trim() || 'u';
-  return `${qty} ${unit}`;
 }
 
 type Props = NativeStackScreenProps<CommerceStackParamList, 'StoreQuoteRequest'>;
@@ -449,11 +443,32 @@ const QuoteItemRow = memo(function QuoteItemRow({
         : clientDecision === 'rejected'
           ? 'Rechazado'
           : null;
+    const titleVariant = variants.length === 1 ? variants[0] : null;
+    const priceOnTitle = storeReadonlyPriceOnTitle({
+      inStock,
+      variantCount: variants.length,
+      label: titleVariant?.label ?? '',
+    });
+    const titlePrice = priceOnTitle ? formatDraftPrice(titleVariant?.priceText ?? '') : null;
+    const visibleVariants = priceOnTitle
+      ? []
+      : inStock
+        ? variants
+        : variants.filter((v) => v.label.trim() || v.priceText.trim());
+    const showEmptyAlt =
+      !inStock && variants.every((v) => !v.label.trim() && !v.priceText.trim());
+    const showMeta =
+      Boolean(stockCaption) ||
+      !inStock ||
+      visibleVariants.length > 0 ||
+      showEmptyAlt ||
+      Boolean(itemNote);
     return (
       <View
         style={[
           styles.itemCard,
           styles.itemCardReadonly,
+          priceOnTitle && styles.itemCardCompact,
           !inStock && styles.itemCardAlt,
           clientDecision === 'rejected' && styles.itemCardRejected,
         ]}
@@ -463,20 +478,25 @@ const QuoteItemRow = memo(function QuoteItemRow({
             <Text style={styles.itemDesc} numberOfLines={4}>
               {item.description}
             </Text>
-            <Text style={styles.itemQty}>{formatItemQty(item)}</Text>
           </View>
-          {decisionLabel ? (
-            <Text
-              style={[
-                styles.decisionBadge,
-                clientDecision === 'accepted' ? styles.decisionOk : styles.decisionNo,
-              ]}
-            >
-              {decisionLabel}
-            </Text>
+          {titlePrice || decisionLabel ? (
+            <View style={styles.roTitleAside}>
+              {titlePrice ? <Text style={styles.roTitlePrice}>{titlePrice}</Text> : null}
+              {decisionLabel ? (
+                <Text
+                  style={[
+                    styles.decisionBadge,
+                    clientDecision === 'accepted' ? styles.decisionOk : styles.decisionNo,
+                  ]}
+                >
+                  {decisionLabel}
+                </Text>
+              ) : null}
+            </View>
           ) : null}
         </View>
 
+        {showMeta ? (
         <View style={styles.roMetaList}>
           {stockCaption ? (
             <View style={styles.roMetaRow}>
@@ -491,7 +511,7 @@ const QuoteItemRow = memo(function QuoteItemRow({
                 : 'El cliente no puede seleccionar este pedido.'}
             </Text>
           ) : null}
-          {(inStock ? variants : variants.filter((v) => v.label.trim() || v.priceText.trim())).map(
+          {visibleVariants.map(
             (v, i) => {
               const variantDecision = variantDecisions[i];
               const variantDecisionLabel =
@@ -539,6 +559,7 @@ const QuoteItemRow = memo(function QuoteItemRow({
             </View>
           ) : null}
         </View>
+        ) : null}
       </View>
     );
   }
@@ -549,7 +570,6 @@ const QuoteItemRow = memo(function QuoteItemRow({
         <Text style={styles.itemDesc} numberOfLines={4}>
           {item.description}
         </Text>
-        <Text style={styles.itemQty}>{formatItemQty(item)}</Text>
       </View>
 
       <Pressable
@@ -898,6 +918,21 @@ const styles = StyleSheet.create({
   itemCardReadonly: {
     gap: spacing.sm,
   },
+  itemCardCompact: {
+    gap: 0,
+    paddingVertical: spacing.sm + 2,
+  },
+  roTitleAside: {
+    alignItems: 'flex-end',
+    gap: 4,
+    maxWidth: '46%',
+  },
+  roTitlePrice: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.text,
+    fontVariant: ['tabular-nums'],
+  },
   itemCardAlt: {
     borderColor: colors.primary,
     backgroundColor: '#FFF8F8',
@@ -907,8 +942,8 @@ const styles = StyleSheet.create({
   },
   roTitleRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
+    alignItems: 'center',
+    gap: 10,
   },
   decisionBadge: {
     fontSize: 11,
@@ -943,11 +978,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: colors.text,
-  },
-  itemQty: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    fontVariant: ['tabular-nums'],
   },
   fieldLabel: {
     fontSize: 12,

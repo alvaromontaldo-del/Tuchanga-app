@@ -58,6 +58,7 @@ import {
   unblockUserInSupabase,
 } from '../../services/chatSecuritySupabase';
 import { deleteConversation, loadMessages, subscribeChatMessages } from '../../services/messaging';
+import { useLeaveRemovedConversation } from '../../hooks/useLeaveRemovedConversation';
 import {
   createQuote,
   createReview,
@@ -332,6 +333,10 @@ export function ChatScreen({
     }
     navigation.goBack();
   }, [backToContractedWork, navigation]);
+  const { recheckRemovedConversation, suppressRemovedConversationNotice } =
+    useLeaveRemovedConversation(conversationId);
+  const recheckRemovedRef = useRef(recheckRemovedConversation);
+  recheckRemovedRef.current = recheckRemovedConversation;
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { refresh: refreshFeed, updateWorkerRatings } = useFeed();
@@ -1426,6 +1431,7 @@ export function ChatScreen({
         const j = await fetchLatestJobByConversation(conversationId);
         if (j) setJob(j);
         await refreshMessages();
+        recheckRemovedConversation();
         toast.success('Confirmaste el saldo que te pagó el cliente', 'Pago');
       } catch (e) {
         toast.error(
@@ -1436,7 +1442,7 @@ export function ChatScreen({
         setSaldoBusy(false);
       }
     })();
-  }, [conversationId, job?.id, refreshMessages, saldoBusy, toast]);
+  }, [conversationId, job?.id, recheckRemovedConversation, refreshMessages, saldoBusy, toast]);
 
   const handleConfirmarSaldoTrabajador = useCallback(() => {
     if (saldoBusy || !job?.id) return;
@@ -1462,6 +1468,7 @@ export function ChatScreen({
         const j = await fetchLatestJobByConversation(conversationId);
         setJob(j);
         await refreshMessages();
+        recheckRemovedConversation();
         toast.success('Le pedimos la conformidad al cliente', 'Servicio');
       })
       .catch((e) => {
@@ -1471,7 +1478,7 @@ export function ChatScreen({
         );
       })
       .finally(() => setQuoteBusy('none'));
-  }, [conversationId, job?.id, quoteBusy, refreshMessages, toast]);
+  }, [conversationId, job?.id, quoteBusy, recheckRemovedConversation, refreshMessages, toast]);
 
   const handleMarcarTrabajoFinalizado = useCallback(() => {
     if (!job?.id || quoteBusy !== 'none') return;
@@ -1499,6 +1506,7 @@ export function ChatScreen({
         const j = await fetchLatestJobByConversation(conversationId);
         if (j) setJob(j);
         await refreshMessages();
+        recheckRemovedConversation();
       } catch (e) {
         toast.error(
           textoVisibleSinSena(e instanceof Error ? e.message : 'No se pudo confirmar'),
@@ -1508,7 +1516,7 @@ export function ChatScreen({
         setConformidadBusy(false);
       }
     })();
-  }, [conformidadBusy, conversationId, job?.id, refreshMessages, toast]);
+  }, [conformidadBusy, conversationId, job?.id, recheckRemovedConversation, refreshMessages, toast]);
 
   const runMarcarTrabajoReparado = useCallback(() => {
     if (reparadoBusy || !job?.id) return;
@@ -1632,6 +1640,7 @@ export function ChatScreen({
                 .catch(() => undefined);
               void refreshMessages();
               void refreshQuotes();
+              recheckRemovedRef.current();
             }
           } else if (msg.type === 'budget' || msg.type === 'quotation') {
             void refreshQuotes();
@@ -3563,6 +3572,7 @@ export function ChatScreen({
                             onPress: () => {
                               setConfirmDelete(false);
                               setDeleting(true);
+                              suppressRemovedConversationNotice();
                               void (async () => {
                                 try {
                                   await deleteConversation(myId, conversationId);
