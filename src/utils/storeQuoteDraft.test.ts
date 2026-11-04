@@ -5,6 +5,7 @@ import { isClientSelectableQuoteItem } from './pickBestQuote';
 import {
   buildStoreQuoteItemRows,
   storeReadonlyPriceCaption,
+  storeReadonlyPriceOnTitle,
   storeReadonlyStockCaption,
   type QuoteItemDraftState,
 } from './storeQuoteDraft';
@@ -139,7 +140,18 @@ describe('labels de solo lectura (#209)', () => {
     expect(screen).not.toContain(": 'Precio'");
     expect(screen).toContain('storeReadonlyStockCaption(');
     expect(screen).toContain('storeReadonlyPriceCaption(');
+    expect(screen).toContain('storeReadonlyPriceOnTitle(');
+    expect(screen).not.toContain('formatItemQty');
     expect(screen).toContain('Precio unitario');
+  });
+
+  it('sin marca el precio va en la fila del nombre; con marca o sin stock no', () => {
+    expect(storeReadonlyPriceOnTitle({ inStock: true, variantCount: 1, label: '  ' })).toBe(true);
+    expect(storeReadonlyPriceOnTitle({ inStock: true, variantCount: 1, label: 'Acme' })).toBe(
+      false,
+    );
+    expect(storeReadonlyPriceOnTitle({ inStock: true, variantCount: 2, label: '' })).toBe(false);
+    expect(storeReadonlyPriceOnTitle({ inStock: false, variantCount: 1, label: '' })).toBe(false);
   });
 });
 

@@ -3,6 +3,7 @@ import { getSupabaseClient } from '../lib/supabase';
 import { redactOffplatformMessage } from '../utils/offplatformContact';
 import { removeSupabaseRealtimeTopic, removeSupabaseRealtimeTopicAsync } from '../lib/supabaseRealtime';
 import { jobKeepsChatOpen } from '../utils/claimChatVisibility';
+import type { ConversationJobSnapshot } from '../utils/conversationRemovedNotice';
 import { claimInboxRowLabel, warrantyClaimEventFecha } from '../utils/warrantyClaimChat';
 import { dedupeInboxByPeer } from '../utils/inboxPeers';
 import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
@@ -365,6 +366,165 @@ export async function fetchMessagesSupabase(conversationId: string): Promise<Api
     type: (row as { type?: ApiMessage['type'] }).type ?? 'text',
     metadata: (row as { metadata?: Record<string, unknown> }).metadata ?? {},
   }));
+}
+
+const REMOVAL_JOB_COLUMNS = [
+  'id',
+  'estado_trabajo',
+  'estado_pago',
+  'completed_by_worker_at',
+  'conformidad_aceptada',
+  'is_claim_open',
+  'claim_status',
+  'claim_opened_at',
+  'claim_marked_done_at',
+  'claim_resolved_at',
+].join(',');
+
+type RemovalJobRow = {
+  id?: string;
+  estado_trabajo?: string | null;
+  estado_pago?: string | null;
+  completed_by_worker_at?: string | null;
+  conformidad_aceptada?: boolean | null;
+  is_claim_open?: boolean | null;
+  claim_status?: string | null;
+  claim_opened_at?: string | null;
+  claim_marked_done_at?: string | null;
+  claim_resolved_at?: string | null;
+};
+
+function mapRemovalJob(row: RemovalJobRow): ConversationJobSnapshot {
+  return {
+    estado_trabajo: row.estado_trabajo ?? null,
+    estado_pago: row.estado_pago ?? null,
+    completed_by_worker_at: row.completed_by_worker_at ?? null,
+    conformidad_aceptada: row.conformidad_aceptada ?? null,
+    is_claim_open: row.is_claim_open ?? null,
+    claim_status: row.claim_status ?? null,
+    claim_opened_at: row.claim_opened_at ?? null,
+    claim_marked_done_at: row.claim_marked_done_at ?? null,
+    claim_resolved_at: row.claim_resolved_at ?? null,
+  };
+}
+
+export type ConversationRemovalSnapshot = {
+  removed: boolean;
+  claimContratacionId: string | null;
+  linkedJobs: ConversationJobSnapshot[];
+  pairJobs: ConversationJobSnapshot[];
+};
+
+/**
+ * Estado para decidir si el hilo abierto ya fue ocultado al terminar el trabajo.
+ * null = no se pudo leer; no se navega ni se avisa.
+ */
+export async function fetchConversationRemovalSnapshot(
+  conversationId: string,
+): Promise<ConversationRemovalSnapshot | null> {
+  const id = conversationId.trim();
+  if (!id) return null;
+  const sb = getSupabaseClient();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  if (!user?.id) return null;
+
+  const { data: conv, error: convErr } = await sb
+    .from('conversations')
+    .select('id, deleted_at, contratacion_id, cliente_id, trabajador_id')
+    .eq('id', id)
+    .maybeSingle();
+  if (convErr || !conv) return null;
+  const row = conv as {
+    id: string;
+    deleted_at?: string | null;
+    contratacion_id?: string | null;
+    cliente_id?: string | null;
+    trabajador_id?: string | null;
+  };
+  if (row.cliente_id !== user.id && row.trabajador_id !== user.id) return null;
+
+  let hiddenForMe = false;
+  const { data: hide, error: hideErr } = await sb
+    .from('conversation_hides')
+    .select('conversation_id')
+    .eq('conversation_id', id)
+    .eq('user_id', user.id)
+    .maybeSingle();
+  if (!hideErr && hide) hiddenForMe = true;
+
+  const claimContratacionId = row.contratacion_id?.trim() || null;
+  const removed = Boolean(row.deleted_at) || hiddenForMe;
+  if (!removed) {
+    return { removed: false, claimContratacionId, linkedJobs: [], pairJobs: [] };
+  }
+  if (!row.cliente_id || !row.trabajador_id) return null;
+
+  const [{ data: linkedRaw, error: linkedErr }, { data: pairRaw, error: pairErr }] =
+    await Promise.all([
+      sb.from('contrataciones').select(REMOVAL_JOB_COLUMNS).eq('conversation_id', id),
+      sb
+        .from('contrataciones')
+        .select(REMOVAL_JOB_COLUMNS)
+        .eq('client_id', row.cliente_id)
+        .eq('worker_id', row.trabajador_id),
+    ]);
+  if (linkedErr || pairErr) return null;
+
+  const linkedRows = (linkedRaw ?? []) as RemovalJobRow[];
+  if (claimContratacionId && !linkedRows.some((job) => job.id === claimContratacionId)) {
+    const { data: claimRow, error: claimErr } = await sb
+      .from('contrataciones')
+      .select(REMOVAL_JOB_COLUMNS)
+      .eq('id', claimContratacionId)
+      .maybeSingle();
+    if (claimErr) return null;
+    if (claimRow) linkedRows.push(claimRow as RemovalJobRow);
+  }
+
+  return {
+    removed: true,
+    claimContratacionId,
+    linkedJobs: linkedRows.map(mapRemovalJob),
+    pairJobs: ((pairRaw ?? []) as RemovalJobRow[]).map(mapRemovalJob),
+  };
+}
+
+/** Realtime del hilo y de sus contrataciones, para el otro participante. */
+export function subscribeConversationRemoval(
+  conversationId: string,
+  onChange: () => void,
+): () => void {
+  const sb = getSupabaseClient();
+  const channelName = `conversation-removal:${conversationId}`;
+  removeSupabaseRealtimeTopic(sb, channelName);
+  const channel = sb
+    .channel(channelName)
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'conversations',
+        filter: `id=eq.${conversationId}`,
+      },
+      () => onChange(),
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'contrataciones',
+        filter: `conversation_id=eq.${conversationId}`,
+      },
+      () => onChange(),
+    )
+    .subscribe();
+  return () => {
+    void sb.removeChannel(channel);
+  };
 }
 
 export async function fetchTotalUnreadCountSupabase(): Promise<number> {

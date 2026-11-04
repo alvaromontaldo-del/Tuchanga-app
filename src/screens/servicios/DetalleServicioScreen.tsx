@@ -40,6 +40,7 @@ import { colors, radii, spacing, typography } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useAppToast } from '../../components/toast/toast';
 import { isSupabaseConfigured } from '../../config/supabase';
+import { useLeaveRemovedConversation } from '../../hooks/useLeaveRemovedConversation';
 import {
   aceptarDisponibilidadOpcion,
   aceptarPrecioCotizado,
@@ -214,6 +215,10 @@ export function DetalleServicioScreen() {
   const { user } = useAuth();
   const toast = useAppToast();
   const [row, setRow] = useState<Contratacion | null>(null);
+  const { recheckRemovedConversation } = useLeaveRemovedConversation(
+    conversationId ?? row?.conversation_id ?? null,
+    { onlyAfterSeenVisible: true },
+  );
   const [recotizaciones, setRecotizaciones] = useState<RecotizacionHistorial[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -884,10 +889,10 @@ export function DetalleServicioScreen() {
             disabled={busy}
             onPress={() => {
               const confirm = () =>
-                void runAction(
-                  () => trabajadorConfirmarRecepcionOffline(row.id),
-                  'Pago offline confirmado',
-                );
+                void runAction(async () => {
+                  await trabajadorConfirmarRecepcionOffline(row.id);
+                  recheckRemovedConversation('action');
+                }, 'Pago offline confirmado');
               if (row.estado_trabajo !== 'finalizado') {
                 Alert.alert(
                   '¿Confirmar pago recibido?',
@@ -929,6 +934,7 @@ export function DetalleServicioScreen() {
                   void runAction(async () => {
                     await clienteResponderConformidad({ contratacionId: row.id, conforme: true });
                     setConformidadAviso(CONFORMIDAD_POSITIVA);
+                    recheckRemovedConversation('action');
                   }, 'Conformidad')
                 }
               >

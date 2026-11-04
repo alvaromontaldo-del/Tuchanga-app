@@ -44,6 +44,7 @@ import {
   groupQuoteItemsByRequest,
   initialSelectedItemIdsByQuote,
   isClientSelectableQuote,
+  clientQuoteGroupIsSingleLine,
   clientQuoteRowLabel,
   isClientSelectableQuoteItem,
   materialGroupHeader,
@@ -918,17 +919,21 @@ const QuoteCard = memo(function QuoteCard({
             const variants = group.variants;
             const control = variantSelectionControl(variants.length);
             const selectedHere = variants.some((it) => selectedItemIds.has(it.quoteItemId));
+            const header = materialGroupHeader(group);
+            const singleLine = clientQuoteGroupIsSingleLine(group);
             return (
               <View key={group.requestItemId} style={styles.detailGroup}>
-                <Text style={styles.detailDesc} numberOfLines={3}>
-                  {materialGroupHeader(group)}
-                </Text>
-                {variants.every((it) => !it.inStock) ? (
+                {singleLine ? null : (
+                  <Text style={styles.detailDesc} numberOfLines={3}>
+                    {header}
+                  </Text>
+                )}
+                {!singleLine && variants.every((it) => !it.inStock) ? (
                   <Text style={styles.detailAlt}>
                     Sin stock — no se puede pedir este ítem
                   </Text>
                 ) : null}
-                {selectedHere && duplicatedRequestItemIds.has(group.requestItemId) ? (
+                {!singleLine && selectedHere && duplicatedRequestItemIds.has(group.requestItemId) ? (
                   <Text style={styles.duplicateHint}>También seleccionado en otro comercio</Text>
                 ) : null}
                 {variants.map((it) => {
@@ -936,7 +941,12 @@ const QuoteCard = memo(function QuoteCard({
                   const decided =
                     it.clientDecision === 'accepted' || it.clientDecision === 'rejected';
                   const itemSelectable = canSelectItems && isClientSelectableQuoteItem(it);
-                  const label = clientQuoteRowLabel(it, materialGroupHeader(group));
+                  const label = clientQuoteRowLabel(it, header);
+                  const compactRow =
+                    singleLine &&
+                    !it.itemNote &&
+                    it.clientDecision !== 'accepted' &&
+                    it.clientDecision !== 'rejected';
                   return (
                     <Pressable
                       key={it.quoteItemId}
@@ -945,6 +955,7 @@ const QuoteCard = memo(function QuoteCard({
                       }}
                       style={[
                         styles.detailRow,
+                        compactRow && styles.detailRowSingle,
                         canSelectItems && !itemSelectable && styles.detailRowDisabled,
                       ]}
                       disabled={!itemSelectable}
@@ -990,6 +1001,13 @@ const QuoteCard = memo(function QuoteCard({
                         <Text style={styles.detailDesc} numberOfLines={3}>
                           {label}
                         </Text>
+                        {singleLine &&
+                        selectedHere &&
+                        duplicatedRequestItemIds.has(group.requestItemId) ? (
+                          <Text style={styles.duplicateHint}>
+                            También seleccionado en otro comercio
+                          </Text>
+                        ) : null}
                         {it.clientDecision === 'accepted' ? (
                           <Text style={[styles.detailAltBadge, styles.detailStockOk]}>
                             Aceptado
@@ -1394,7 +1412,11 @@ const styles = StyleSheet.create({
   detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
     gap: 12,
+  },
+  detailRowSingle: {
+    alignItems: 'center',
   },
   detailRowDisabled: {
     opacity: 0.55,

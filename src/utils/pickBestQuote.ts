@@ -144,21 +144,35 @@ export function initialSelectedItemIdsByQuote(
   return out;
 }
 
-/** Encabezado del material. La marca va en la fila de la variante, no acá. */
+/**
+ * Encabezado del material. La marca va en la fila de la variante.
+ * La cantidad y la unidad no se muestran (evita el «1 u» en cada ítem).
+ */
 export function materialGroupHeader(group: {
   description: string;
-  variants: Array<Pick<ClientQuoteLineItem, 'quantity' | 'unit'>>;
+  variants?: Array<Pick<ClientQuoteLineItem, 'quantity' | 'unit'>>;
 }): string {
-  const description = group.description.trim() || 'Material';
-  const sample = group.variants[0];
-  if (!sample) return description;
-  const qty = Number(sample.quantity);
-  const unit = (sample.unit ?? '').trim();
-  if (!Number.isFinite(qty) || !unit) return description;
-  const qtyLabel = Number.isInteger(qty)
-    ? String(qty)
-    : qty.toLocaleString('es-AR', { maximumFractionDigits: 2 });
-  return `${description} · ${qtyLabel} ${unit}`;
+  return group.description.trim() || 'Material';
+}
+
+/**
+ * Una sola variante con stock y sin marca: el check, el nombre y el precio
+ * van en la misma fila. Con marca, varias opciones o sin stock se mantiene
+ * el encabezado y la fila de la variante (reemplazo incluido).
+ */
+export function clientQuoteGroupIsSingleLine(group: {
+  variants: Array<{
+    variantLabel?: string | null;
+    inStock: boolean;
+    alternativeDescription?: string | null;
+  }>;
+}): boolean {
+  if (group.variants.length !== 1) return false;
+  const it = group.variants[0];
+  if (!it || !it.inStock) return false;
+  if (it.variantLabel?.trim()) return false;
+  if (it.alternativeDescription?.trim()) return false;
+  return true;
 }
 
 /**
@@ -194,8 +208,8 @@ export function clientQuoteOptionLabel(it: {
 }
 
 /**
- * Texto de la fila. Si no hay marca y hay stock, el material
- * (descripción · cantidad unidad) queda a la izquierda del valor.
+ * Texto de la fila. Si no hay marca y hay stock, el nombre del material
+ * queda a la izquierda del valor. No incluye cantidad ni unidad.
  */
 export function clientQuoteRowLabel(
   it: {

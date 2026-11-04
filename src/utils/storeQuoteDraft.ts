@@ -33,6 +33,19 @@ export function storeReadonlyStockCaption(inStock: boolean): 'Sin stock' | null 
  * Vacío = una sola variante sin marca: no decir «Precio», solo el valor a la derecha.
  * Varias variantes sin marca siguen como «Opción N».
  */
+/**
+ * Cotizadas, un solo precio sin marca: el valor va arriba a la derecha,
+ * en la misma fila del nombre. Con marca, varias opciones o sin stock
+ * el precio sigue en la fila de la variante.
+ */
+export function storeReadonlyPriceOnTitle(input: {
+  inStock: boolean;
+  variantCount: number;
+  label: string;
+}): boolean {
+  return input.inStock && input.variantCount === 1 && input.label.trim().length === 0;
+}
+
 export function storeReadonlyPriceCaption(input: {
   inStock: boolean;
   label: string;
