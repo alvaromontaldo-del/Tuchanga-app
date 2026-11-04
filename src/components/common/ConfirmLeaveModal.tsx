@@ -6,12 +6,20 @@ type Props = {
   visible: boolean;
   onAccept: () => void;
   onCancel: () => void;
+  /** iOS: el pop del stack espera a que el Modal nativo termine de cerrarse. */
+  onDismiss?: () => void;
 };
 
 /** Confirmación propia para salir del cotizador. Cancelar se queda. */
-export function ConfirmLeaveModal({ visible, onAccept, onCancel }: Props) {
+export function ConfirmLeaveModal({ visible, onAccept, onCancel, onDismiss }: Props) {
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onCancel}
+      onDismiss={onDismiss}
+    >
       <View style={styles.backdrop}>
         <View style={styles.card} accessibilityViewIsModal>
           <Text style={styles.title} accessibilityRole="header">

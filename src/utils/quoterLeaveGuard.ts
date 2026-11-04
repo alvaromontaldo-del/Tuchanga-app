@@ -81,3 +81,42 @@ export function quoterLeaveShouldAsk(input: {
   if (input.submitting || input.submitted) return false;
   return input.dirty;
 }
+
+/**
+ * En iOS el native-stack necesita `usePreventRemove` (preventNativeDismiss)
+ * antes de que el gesto arranque. En Android el atrás es de JS y esta
+ * bandera queda en false: sigue el `beforeRemove` de siempre.
+ */
+export function quoterLeavePreventRemove(input: {
+  platform: string;
+  dirty: boolean;
+  busy: boolean;
+  leaving: boolean;
+  blockGesture: boolean;
+}): boolean {
+  if (input.platform !== 'ios') return false;
+  if (input.leaving || input.busy) return false;
+  return input.dirty || input.blockGesture;
+}
+
+/** Con el guard activo el swipe de iOS no puede arrancar. */
+export function quoterLeaveIosGestureEnabled(preventRemove: boolean): boolean {
+  return !preventRemove;
+}
+
+export type QuoterLeaveIosBackAction = 'close-picker' | 'ask' | 'allow';
+
+/**
+ * Si el pageSheet del rubro está abierto, el atrás solo lo cierra.
+ * Si no, y hay datos, se pregunta. Android no usa este criterio.
+ */
+export function quoterLeaveIosBackAction(input: {
+  pickerOpen: boolean;
+  dirty: boolean;
+  busy: boolean;
+}): QuoterLeaveIosBackAction {
+  if (input.busy) return 'allow';
+  if (input.pickerOpen) return 'close-picker';
+  if (input.dirty) return 'ask';
+  return 'allow';
+}

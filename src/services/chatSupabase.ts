@@ -425,9 +425,11 @@ export async function fetchConversationRemovalSnapshot(
   const id = conversationId.trim();
   if (!id) return null;
   const sb = getSupabaseClient();
+  // Sesión local: este chequeo corre cada 3 s y getUser() pegaría a la red.
   const {
-    data: { user },
-  } = await sb.auth.getUser();
+    data: { session },
+  } = await sb.auth.getSession();
+  const user = session?.user;
   if (!user?.id) return null;
 
   const { data: conv, error: convErr } = await sb

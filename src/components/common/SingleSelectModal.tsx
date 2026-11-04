@@ -43,6 +43,7 @@ export function SingleSelectModal({ visible, title, options, value, onClose, onS
       animationType="slide"
       presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
       onRequestClose={onClose}
+      onDismiss={Platform.OS === 'ios' ? onClose : undefined}
     >
       <View style={[styles.sheet, { paddingTop: insets.top + spacing.sm }]}>
         <View style={styles.sheetHeader}>

@@ -199,4 +199,13 @@ describe('pantallas', () => {
     expect(detail).toContain("recheckRemovedConversation('action')");
     expect(chat).not.toContain('onlyAfterSeenVisible');
   });
+
+  it('el chequeo periódico usa la sesión local y no auth.getUser', () => {
+    const src = readFileSync('src/services/chatSupabase.ts', 'utf8');
+    const start = src.indexOf('export async function fetchConversationRemovalSnapshot');
+    const end = src.indexOf('export function subscribeConversationRemoval');
+    const fn = src.slice(start, end);
+    expect(fn).toContain('auth.getSession()');
+    expect(fn).not.toContain('auth.getUser(');
+  });
 });
