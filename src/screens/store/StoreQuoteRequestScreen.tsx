@@ -231,14 +231,14 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
       });
       toast.success('Presupuesto enviado al cliente.', 'Enviado');
       sentRef.current = true;
-      navigation.goBack();
+      leaveGuard.commitLeave();
     } catch (e) {
       toast.error(
         e instanceof Error ? e.message : 'No se pudo enviar el presupuesto.',
         'Error',
       );
     }
-  }, [detail, freightType, freightCostText, submit, toast, navigation]);
+  }, [detail, freightType, freightCostText, submit, toast, leaveGuard]);
 
   if ((loading && !detail) || (detail && !formReady)) {
     return (
@@ -396,6 +396,7 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
         visible={leaveGuard.visible}
         onCancel={leaveGuard.stay}
         onAccept={leaveGuard.leave}
+        onDismiss={leaveGuard.onModalDismiss}
       />
     </AppKeyboardAvoidingView>
   );

@@ -16,6 +16,7 @@ import { AppButton } from '../../components/common/AppButton';
 import { ConfirmLeaveModal } from '../../components/common/ConfirmLeaveModal';
 import { useQuoterLeaveGuard } from '../../hooks/useQuoterLeaveGuard';
 import { materialRequestIsDirty } from '../../utils/quoterLeaveGuard';
+import { materialRequestDraftShouldPersist } from '../../utils/materialRequestDraft';
 import { OffplatformNotice } from '../../components/chat/OffplatformNotice';
 import { offplatformSubmitText } from '../../utils/offplatformContact';
 import { AppKeyboardAvoidingView } from '../../components/common/AppKeyboardAvoidingView';
@@ -31,6 +32,11 @@ import type {
   MessagesStackParamList,
   SearchStackParamList,
 } from '../../navigation/mainTypes';
+import {
+  clearMaterialRequestDraft,
+  loadMaterialRequestDraft,
+  saveMaterialRequestDraft,
+} from '../../services/materialRequestDraftStorage';
 import { fetchRubrosWithActiveStores } from '../../services/materialRequestsSupabase';
 import type { MaterialItemDraft, StoreRubro } from '../../types/materials';
 
@@ -78,8 +84,16 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
   const [rubroPickerOpen, setRubroPickerOpen] = useState(false);
   const [focusLocalId, setFocusLocalId] = useState<string | null>(null);
   const [rubroTouched, setRubroTouched] = useState(false);
+  const draftScope = `${user?.id ?? ''}|${conversationId ?? ''}|${clientId ?? ''}`;
+  const [draftScopeReady, setDraftScopeReady] = useState<string | null>(null);
+  const draftReady = !user?.id || draftScopeReady === draftScope;
   const sentRef = useRef(false);
+  const skipSaveRef = useRef(false);
+  const dirtySinceReadyRef = useRef(false);
   const inputRefs = useRef<Map<string, TextInputType>>(new Map());
+  const rubrosRef = useRef(rubros);
+  rubrosRef.current = rubros;
+  const closeRubroPicker = useCallback(() => setRubroPickerOpen(false), []);
   const leaveGuard = useQuoterLeaveGuard(
     navigation,
     () =>
@@ -90,6 +104,10 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
         rubroTouched,
       }),
     () => submitting,
+    {
+      iosBlockGesture: rubroPickerOpen,
+      onIosBlocked: closeRubroPicker,
+    },
   );
 
   useEffect(() => {
@@ -101,7 +119,9 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
         const list = await fetchRubrosWithActiveStores();
         if (cancelled) return;
         setRubros(list);
-        if (list.length === 1) setSelectedRubroId(list[0].id);
+        if (list.length === 1) {
+          setSelectedRubroId((current) => current ?? list[0].id);
+        }
       } catch (e) {
         if (!cancelled) {
           setRubros([]);
@@ -117,6 +137,57 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    const scope = draftScope;
+    dirtySinceReadyRef.current = false;
+    setItems([emptyItem()]);
+    setRubroTouched(false);
+    setSelectedRubroId(rubrosRef.current.length === 1 ? rubrosRef.current[0].id : null);
+    void (async () => {
+      try {
+        const draft = await loadMaterialRequestDraft({
+          userId: user.id,
+          conversationId,
+          clientId,
+        });
+        if (cancelled) return;
+        if (draft) {
+          setItems(draft.items);
+          setRubroTouched(draft.rubroTouched);
+          if (draft.rubroId) setSelectedRubroId(draft.rubroId);
+          else if (rubrosRef.current.length === 1) setSelectedRubroId(rubrosRef.current[0].id);
+          else setSelectedRubroId(null);
+        }
+      } finally {
+        if (!cancelled) setDraftScopeReady(scope);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId, conversationId, draftScope, user?.id]);
+
+  useEffect(() => {
+    if (!draftReady || skipSaveRef.current || !user?.id) return;
+    const draft = {
+      version: 1 as const,
+      rubroId: selectedRubroId,
+      rubroTouched,
+      items,
+    };
+    if (!materialRequestDraftShouldPersist(draft)) {
+      if (!dirtySinceReadyRef.current) return;
+    } else {
+      dirtySinceReadyRef.current = true;
+    }
+    void saveMaterialRequestDraft(
+      { userId: user.id, conversationId, clientId },
+      draft,
+    );
+  }, [clientId, conversationId, draftReady, items, rubroTouched, selectedRubroId, user?.id]);
 
   const selectedRubro = useMemo(
     () => rubros.find((r) => r.id === selectedRubroId) ?? null,
@@ -195,7 +266,15 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
         'Listo',
       );
       sentRef.current = true;
-      navigation.goBack();
+      skipSaveRef.current = true;
+      if (user?.id) {
+        void clearMaterialRequestDraft({
+          userId: user.id,
+          conversationId,
+          clientId,
+        });
+      }
+      leaveGuard.commitLeave();
     } catch (e) {
       toast.error(
         e instanceof Error ? e.message : 'No se pudo enviar la solicitud.',
@@ -211,7 +290,7 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
     clientId,
     conversationId,
     toast,
-    navigation,
+    leaveGuard,
   ]);
 
   if (!isWorker) {
@@ -221,6 +300,14 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
           Solo profesionales pueden crear solicitudes de materiales.
         </Text>
         <AppButton title="Volver" onPress={() => navigation.goBack()} />
+      </View>
+    );
+  }
+
+  if (!draftReady) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator color={colors.primary} />
       </View>
     );
   }
@@ -327,6 +414,7 @@ export function CreateMaterialRequestScreen({ navigation, route }: Props) {
         visible={leaveGuard.visible}
         onCancel={leaveGuard.stay}
         onAccept={leaveGuard.leave}
+        onDismiss={leaveGuard.onModalDismiss}
       />
     </AppKeyboardAvoidingView>
   );

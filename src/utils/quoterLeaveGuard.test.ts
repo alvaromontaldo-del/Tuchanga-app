@@ -4,6 +4,9 @@ import {
   EMPTY_SERVICE_QUOTE,
   QUOTER_LEAVE_TITLE,
   materialRequestIsDirty,
+  quoterLeaveIosBackAction,
+  quoterLeaveIosGestureEnabled,
+  quoterLeavePreventRemove,
   quoterLeaveShouldAsk,
   recotizarDraftIsDirty,
   serviceQuoteIsDirty,
@@ -105,6 +108,64 @@ describe('salida del cotizador', () => {
     expect(quoterLeaveShouldAsk({ dirty: true, submitting: false, submitted: false })).toBe(true);
   });
 
+  it('en iOS frena el swipe nativo y en Android no cambia el criterio', () => {
+    expect(
+      quoterLeavePreventRemove({
+        platform: 'android',
+        dirty: true,
+        busy: false,
+        leaving: false,
+        blockGesture: true,
+      }),
+    ).toBe(false);
+    expect(
+      quoterLeavePreventRemove({
+        platform: 'ios',
+        dirty: true,
+        busy: false,
+        leaving: false,
+        blockGesture: false,
+      }),
+    ).toBe(true);
+    expect(
+      quoterLeavePreventRemove({
+        platform: 'ios',
+        dirty: false,
+        busy: false,
+        leaving: false,
+        blockGesture: true,
+      }),
+    ).toBe(true);
+    expect(
+      quoterLeavePreventRemove({
+        platform: 'ios',
+        dirty: true,
+        busy: true,
+        leaving: false,
+        blockGesture: false,
+      }),
+    ).toBe(false);
+    expect(
+      quoterLeavePreventRemove({
+        platform: 'ios',
+        dirty: true,
+        busy: false,
+        leaving: true,
+        blockGesture: false,
+      }),
+    ).toBe(false);
+    expect(quoterLeaveIosGestureEnabled(true)).toBe(false);
+    expect(quoterLeaveIosGestureEnabled(false)).toBe(true);
+    expect(quoterLeaveIosBackAction({ pickerOpen: true, dirty: true, busy: false })).toBe(
+      'close-picker',
+    );
+    expect(quoterLeaveIosBackAction({ pickerOpen: false, dirty: true, busy: false })).toBe('ask');
+    expect(quoterLeaveIosBackAction({ pickerOpen: false, dirty: false, busy: false })).toBe(
+      'allow',
+    );
+    expect(quoterLeaveIosBackAction({ pickerOpen: true, dirty: true, busy: true })).toBe('allow');
+  });
+
   it('las pantallas usan el modal propio y el atrás', () => {
     const modal = readFileSync('src/components/common/ConfirmLeaveModal.tsx', 'utf8');
     expect(modal).toContain('QUOTER_LEAVE_TITLE');
@@ -115,6 +176,9 @@ describe('salida del cotizador', () => {
     const guard = readFileSync('src/hooks/useQuoterLeaveGuard.ts', 'utf8');
     expect(guard).toContain('BackHandler');
     expect(guard).toContain("'beforeRemove'");
+    expect(guard).toContain('usePreventRemove');
+    expect(guard).toContain('gestureEnabled');
+    expect(guard).toContain("Platform.OS !== 'ios'");
 
     const materials = readFileSync('src/screens/materials/CreateMaterialRequestScreen.tsx', 'utf8');
     const store = readFileSync('src/screens/store/StoreQuoteRequestScreen.tsx', 'utf8');
