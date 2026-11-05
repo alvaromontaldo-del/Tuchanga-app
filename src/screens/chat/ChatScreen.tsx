@@ -117,6 +117,7 @@ import {
   clienteResponderConformidad,
   trabajadorConfirmarRecepcionOffline,
   trabajadorMarcarTrabajoReparado,
+  fetchContratacionesByConversation,
   fetchDisponibilidadOpciones,
   aceptarRecotizacion,
   fetchRecotizaciones,
@@ -133,6 +134,11 @@ import { openPagoCheckout } from '../../navigation/openPagoCheckout';
 import { crearPreferenciaSeña, sincronizarSeñaSiPendiente } from '../../services/pagosMercadoPago';
 import { computeSaldoPendiente } from '../../types/contrataciones';
 import { ESTADOS_PUEDEN_NOTIFICAR_SALDO } from '../../utils/contratacionStatus';
+import {
+  claimChatActions,
+  jobUsesWarrantyRevisitAgenda,
+  type ClaimChatJob,
+} from '../../utils/claimChatActions';
 import {
   CHAT_CERRADO_POR_RECLAMO,
   CHAT_CERRADO_POR_RECLAMO_DETALLE,
@@ -584,6 +590,8 @@ export function ChatScreen({
   > | null>(null);
   const [materialQuoteTick, setMaterialQuoteTick] = useState(0);
   const [job, setJob] = useState<ServiceJob | null>(null);
+  const [conversationJobs, setConversationJobs] = useState<ClaimChatJob[]>([]);
+  const [conversationJobsReady, setConversationJobsReady] = useState(false);
   const [quoteStreet, setQuoteStreet] = useState<string | null>(null);
   const [recotizaciones, setRecotizaciones] = useState<RecotizacionHistorial[]>([]);
   const [clientPin, setClientPin] = useState<string | null>(null);
@@ -631,28 +639,54 @@ export function ChatScreen({
       job.payment_status === 'PAID' &&
       job.estado_trabajo === 'aceptado',
   );
+  const claimDecision = useMemo(() => {
+    const focusSeed: ClaimChatJob[] = job
+      ? [
+          {
+            id: job.id,
+            estadoTrabajo: job.estado_trabajo,
+            isClaimOpen: job.is_claim_open,
+            claimStatus: job.claim_status,
+          },
+        ]
+      : [];
+    // Hasta leer el resto del hilo no se ocultan Materiales ni Cotizar:
+    // otro trabajo vivo del mismo chat tiene que conservarlas.
+    const jobs = !conversationJobsReady
+      ? focusSeed
+      : conversationJobs.length
+        ? conversationJobs
+        : focusSeed;
+    const decision = claimChatActions({ focusJobId: job?.id ?? null, jobs });
+    if (!conversationJobsReady) {
+      return { ...decision, blockOwnQuoteAndMaterials: false };
+    }
+    return decision;
+  }, [conversationJobs, conversationJobsReady, job]);
+  const claimLocksOwnActions = claimDecision.blockOwnQuoteAndMaterials;
+  const claimAgenda = claimDecision.showAgenda;
   const showWorkerAvailabilityBar = Boolean(
     job &&
       participants?.myRole === 'trabajador' &&
-      job.estado_trabajo === 'precio_aceptado' &&
+      (job.estado_trabajo === 'precio_aceptado' || claimAgenda) &&
       agendaOpciones.length === 0,
   );
   const showWorkerAgendaSentBar = Boolean(
     job &&
       participants?.myRole === 'trabajador' &&
-      job.estado_trabajo === 'precio_aceptado' &&
+      (job.estado_trabajo === 'precio_aceptado' || claimAgenda) &&
       agendaOpciones.length > 0,
   );
   const showClientWaitingAvailabilityBar = Boolean(
     job &&
       participants?.myRole === 'cliente' &&
-      job.estado_trabajo === 'precio_aceptado' &&
+      (job.estado_trabajo === 'precio_aceptado' || claimAgenda) &&
       agendaOpciones.length === 0,
   );
   const showClientAgendaBar = Boolean(
     job &&
       participants?.myRole === 'cliente' &&
-      job.estado_trabajo === 'precio_aceptado' &&
+      (job.estado_trabajo === 'precio_aceptado' || claimAgenda) &&
       agendaOpciones.length > 0,
   );
   const showWorkerJobBar = Boolean(
@@ -1114,6 +1148,49 @@ export function ChatScreen({
     };
   }, [conversationId]);
 
+  useEffect(() => {
+    setConversationJobs([]);
+    setConversationJobsReady(false);
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !conversationId) return;
+    let cancelled = false;
+    void fetchContratacionesByConversation(conversationId)
+      .then((rows) => {
+        if (cancelled) return;
+        setConversationJobs(
+          rows.map((row) => ({
+            id: row.id,
+            estadoTrabajo: row.estado_trabajo,
+            isClaimOpen: row.is_claim_open,
+            claimStatus: row.claim_status,
+          })),
+        );
+        setConversationJobsReady(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        const current = jobRef.current;
+        setConversationJobs(
+          current
+            ? [
+                {
+                  id: current.id,
+                  estadoTrabajo: current.estado_trabajo,
+                  isClaimOpen: current.is_claim_open,
+                  claimStatus: current.claim_status,
+                },
+              ]
+            : [],
+        );
+        setConversationJobsReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, job?.id, job?.updated_at, job?.estado_trabajo, job?.is_claim_open, job?.claim_status]);
+
   const materialRequestIds = useMemo(() => {
     const ids = new Set<string>();
     for (const message of messages) {
@@ -1337,29 +1414,53 @@ export function ChatScreen({
 
   useEffect(() => {
     const role = participants?.myRole;
+    const revisit = jobUsesWarrantyRevisitAgenda({
+      estadoTrabajo: job?.estado_trabajo,
+      isClaimOpen: job?.is_claim_open,
+      claimStatus: job?.claim_status,
+    });
     if (
       !job?.id ||
-      job.estado_trabajo !== 'precio_aceptado' ||
+      (job.estado_trabajo !== 'precio_aceptado' && !revisit) ||
       (role !== 'cliente' && role !== 'trabajador')
     ) {
       setAgendaOpciones([]);
       return;
     }
     void refreshAgendaOpciones(job.id);
-  }, [job?.id, job?.estado_trabajo, participants?.myRole, refreshAgendaOpciones]);
+  }, [
+    job?.id,
+    job?.estado_trabajo,
+    job?.is_claim_open,
+    job?.claim_status,
+    participants?.myRole,
+    refreshAgendaOpciones,
+  ]);
 
   useFocusEffect(
     useCallback(() => {
       const role = participants?.myRole;
+      const revisit = jobUsesWarrantyRevisitAgenda({
+        estadoTrabajo: job?.estado_trabajo,
+        isClaimOpen: job?.is_claim_open,
+        claimStatus: job?.claim_status,
+      });
       if (
         !job?.id ||
-        job.estado_trabajo !== 'precio_aceptado' ||
+        (job.estado_trabajo !== 'precio_aceptado' && !revisit) ||
         (role !== 'cliente' && role !== 'trabajador')
       ) {
         return;
       }
       void refreshAgendaOpciones(job.id);
-    }, [job?.id, job?.estado_trabajo, participants?.myRole, refreshAgendaOpciones]),
+    }, [
+      job?.id,
+      job?.estado_trabajo,
+      job?.is_claim_open,
+      job?.claim_status,
+      participants?.myRole,
+      refreshAgendaOpciones,
+    ]),
   );
 
   const handleConfirmAgenda = useCallback(
@@ -1651,8 +1752,13 @@ export function ChatScreen({
               .catch(() => undefined);
           } else if (
             p?.myRole === 'cliente' &&
-            j?.estado_trabajo === 'precio_aceptado' &&
-            j.id &&
+            j?.id &&
+            (j.estado_trabajo === 'precio_aceptado' ||
+              jobUsesWarrantyRevisitAgenda({
+                estadoTrabajo: j.estado_trabajo,
+                isClaimOpen: j.is_claim_open,
+                claimStatus: j.claim_status,
+              })) &&
             msg.sender_id !== myId
           ) {
             void refreshAgendaOpciones(j.id);
@@ -2190,7 +2296,7 @@ export function ChatScreen({
                     />
                   ) : null}
 
-                  {participants?.myRole === 'trabajador' && q.status === 'pending' ? (
+                  {participants?.myRole === 'trabajador' && !claimLocksOwnActions && q.status === 'pending' ? (
                     <Pressable
                       style={({ pressed }) => [
                         styles.quoteBtn,
@@ -2315,6 +2421,7 @@ export function ChatScreen({
                   ) : null}
 
                   {participants?.myRole === 'trabajador' &&
+                  !claimLocksOwnActions &&
                   q.status === 'rejected' &&
                   !hasActiveQuote &&
                   latestRejected?.id === q.id &&
@@ -2394,6 +2501,7 @@ export function ChatScreen({
       );
     },
     [
+      claimLocksOwnActions,
       conversationId,
       hasActiveQuote,
       job?.estado_pago,
@@ -2428,7 +2536,9 @@ export function ChatScreen({
           <View style={styles.completeBar}>
             <View style={styles.payBarText}>
               <Text style={styles.paySubtitle}>
-                Envíe hasta 5 opciones para coordinar la visita.
+                {claimAgenda
+                  ? 'Envíe hasta 5 opciones para coordinar la revisión de la garantía.'
+                  : 'Envíe hasta 5 opciones para coordinar la visita.'}
               </Text>
             </View>
             <Pressable
@@ -2467,7 +2577,9 @@ export function ChatScreen({
           <View style={styles.completeBar}>
             <View style={styles.payBarText}>
               <Text style={styles.paySubtitle}>
-                Aguarde hasta que el profesional le envíe su disponibilidad horaria.
+                {claimAgenda
+                  ? 'Aguarde hasta que el profesional le envíe horarios para la revisión.'
+                  : 'Aguarde hasta que el profesional le envíe su disponibilidad horaria.'}
               </Text>
             </View>
           </View>
@@ -2480,7 +2592,7 @@ export function ChatScreen({
               busy={agendaBusy}
               embedded
               onConfirm={handleConfirmAgenda}
-              onReject={handleRejectAgenda}
+              onReject={claimAgenda ? undefined : handleRejectAgenda}
             />
           </View>
         ) : null}
@@ -2921,6 +3033,7 @@ export function ChatScreen({
       agendaOpciones,
       clientPin,
       conversationId,
+      claimAgenda,
       handleConfirmAgenda,
       handleConfirmarSaldoTrabajador,
       handleMarcarTrabajoFinalizado,
@@ -3680,7 +3793,7 @@ export function ChatScreen({
                   </Text>
                 ) : null}
               </View>
-              {isSupabaseConfigured() && participants?.myRole === 'trabajador' && !chatBlocked ? (
+              {isSupabaseConfigured() && participants?.myRole === 'trabajador' && !chatBlocked && !claimLocksOwnActions ? (
                 <View style={styles.headerChipsInline}>
                   <Pressable
                     onPress={() => {

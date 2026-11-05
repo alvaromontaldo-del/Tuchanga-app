@@ -35,6 +35,10 @@ export type ServiceJob = {
   offline_pago_confirmado_at: string | null;
   conformidad_aceptada: boolean | null;
   disputa_motivo: string;
+  /** Reclamo de garantía de esta contratación. No es del par. */
+  is_claim_open: boolean;
+  /** none | open | pending_approval | closed */
+  claim_status: string;
   completed_by_worker_at: string | null;
   created_at: string;
   updated_at: string;
@@ -73,6 +77,8 @@ export function contratacionToServiceJob(c: Contratacion): ServiceJob {
     offline_pago_confirmado_at: c.offline_pago_confirmado_at,
     conformidad_aceptada: c.conformidad_aceptada,
     disputa_motivo: c.disputa_motivo,
+    is_claim_open: c.is_claim_open === true,
+    claim_status: c.claim_status ?? 'none',
     completed_by_worker_at: c.completed_by_worker_at ?? c.finalizado_at,
     created_at: c.created_at,
     updated_at: c.updated_at,

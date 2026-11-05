@@ -83,6 +83,7 @@ import {
   resultadoVerificacionPin,
 } from '../../utils/pinBloqueo';
 import { formatArs, formatMoneyCeilAr } from '../../utils/formatMoney';
+import { jobUsesWarrantyRevisitAgenda } from '../../utils/claimChatActions';
 import { recotizacionStatusForRow } from '../../utils/recotizarUi';
 import {
   AGENDA_DEFAULT_DURATION_MINUTES,
@@ -311,6 +312,16 @@ export function DetalleServicioScreen() {
     return null;
   }, [row, user?.id]);
 
+  const warrantyRevisitAgenda = Boolean(
+    row &&
+      jobUsesWarrantyRevisitAgenda({
+        estadoTrabajo: row.estado_trabajo,
+        isClaimOpen: row.is_claim_open,
+        claimStatus: row.claim_status,
+      }),
+  );
+  const showAgendaForm = row?.estado_trabajo === 'precio_aceptado' || warrantyRevisitAgenda;
+
   const showNotificarPagoOffline = useMemo(() => {
     if (!row || myRole !== 'cliente') return false;
     return puedeNotificarSaldoOffline(row);
@@ -325,7 +336,12 @@ export function DetalleServicioScreen() {
       } catch {
         /* se mantiene el historial ya cargado */
       }
-      if (data?.estado_trabajo === 'precio_aceptado') {
+      const revisitAgenda = jobUsesWarrantyRevisitAgenda({
+        estadoTrabajo: data?.estado_trabajo,
+        isClaimOpen: data?.is_claim_open,
+        claimStatus: data?.claim_status,
+      });
+      if (data && (data.estado_trabajo === 'precio_aceptado' || revisitAgenda)) {
         const ops = await fetchDisponibilidadOpciones(contratacionId);
         setOpcionesAgenda(ops);
         if (data.worker_id === user?.id && !preserveSlotsRef.current) {
@@ -600,17 +616,23 @@ export function DetalleServicioScreen() {
           </View>
         ) : null}
 
-        {myRole === 'trabajador' && row.estado_trabajo === 'precio_aceptado' ? (
+        {myRole === 'trabajador' && showAgendaForm ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>
-              {opcionesAgenda.length > 0
-                ? 'Opciones enviadas al cliente'
-                : 'Proponer disponibilidad (hasta 5)'}
+              {warrantyRevisitAgenda
+                ? opcionesAgenda.length > 0
+                  ? 'Horarios enviados para la revisión'
+                  : 'Proponer horarios para la revisión (hasta 5)'
+                : opcionesAgenda.length > 0
+                  ? 'Opciones enviadas al cliente'
+                  : 'Proponer disponibilidad (hasta 5)'}
             </Text>
             <Text style={styles.hint}>
               {opcionesAgenda.length > 0
                 ? 'Podés agregar, quitar o modificar horarios y volver a enviar.'
-                : 'El cliente elegirá una opción o rechazará todas.'}
+                : warrantyRevisitAgenda
+                  ? 'El cliente elegirá un horario para la revisión de la garantía.'
+                  : 'El cliente elegirá una opción o rechazará todas.'}
             </Text>
             {slots.map((slot, index) => (
               <View
@@ -758,9 +780,11 @@ export function DetalleServicioScreen() {
           </View>
         ) : null}
 
-        {myRole === 'cliente' && row.estado_trabajo === 'precio_aceptado' && opcionesAgenda.length === 0 ? (
+        {myRole === 'cliente' && showAgendaForm && opcionesAgenda.length === 0 ? (
           <Text style={styles.hint}>
-            Las opciones de horario aparecen en el chat cuando el profesional las envíe.
+            {warrantyRevisitAgenda
+              ? 'Los horarios de la revisión aparecen en el chat cuando el profesional los envíe.'
+              : 'Las opciones de horario aparecen en el chat cuando el profesional las envíe.'}
           </Text>
         ) : null}
 
