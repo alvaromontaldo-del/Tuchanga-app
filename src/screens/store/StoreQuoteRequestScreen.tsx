@@ -2,6 +2,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -48,6 +49,8 @@ import {
   storeDeliveryDetailLabel,
 } from '../../utils/quoteFreightTotal';
 import {
+  storeChosenReplacementLabel,
+  storeQuoteScreenTitle,
   storeReadonlyPriceCaption,
   storeReadonlyPriceOnTitle,
   storeReadonlyStockCaption,
@@ -119,6 +122,10 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
   const [formReady, setFormReady] = useState(false);
   const [notesInitial, setNotesInitial] = useState('');
   const sentRef = useRef(false);
+  const viewingSentQuote = route.params.viewing === true || Boolean(detail?.existingQuote);
+  useLayoutEffect(() => {
+    navigation.setOptions({ title: storeQuoteScreenTitle(viewingSentQuote) });
+  }, [navigation, viewingSentQuote]);
   const leaveGuard = useQuoterLeaveGuard(
     navigation,
     () =>
@@ -438,6 +445,42 @@ const QuoteItemRow = memo(function QuoteItemRow({
   };
 
   if (!editable) {
+    const chosenReplacement = storeChosenReplacementLabel({
+      inStock,
+      clientDecision,
+      label: variants.find((v) => v.label.trim())?.label ?? '',
+    });
+    if (chosenReplacement) {
+      const chosenPrice =
+        variants.find((v) => v.label.trim() === chosenReplacement)?.priceText ??
+        variants[0]?.priceText ??
+        '';
+      return (
+        <View
+          style={[styles.itemCard, styles.itemCardReadonly, styles.itemCardAlt]}
+          accessible
+          accessibilityLabel={[
+            item.description,
+            `Reemplazo elegido por el cliente: ${chosenReplacement}`,
+            formatDraftPrice(chosenPrice),
+            itemNote ? `Nota: ${itemNote}` : '',
+          ]
+            .filter(Boolean)
+            .join('. ')}
+        >
+          <Text style={styles.replacedOriginal} numberOfLines={3}>
+            {item.description}
+          </Text>
+          <View style={styles.replacementHead}>
+            <Text style={styles.replacementKicker}>Reemplazo elegido por el cliente</Text>
+            <Text style={styles.roTitlePrice}>{formatDraftPrice(chosenPrice)}</Text>
+          </View>
+          <Text style={styles.replacementName}>{chosenReplacement}</Text>
+          {itemNote ? <Text style={styles.roNoteText}>{itemNote}</Text> : null}
+        </View>
+      );
+    }
+
     const decisionLabel =
       clientDecision === 'accepted'
         ? 'Aceptado'
@@ -654,8 +697,15 @@ const QuoteItemRow = memo(function QuoteItemRow({
                 />
                 <OffplatformNotice text={v.label} />
               </View>
-              <View style={styles.unitPriceField}>
-                <Text style={styles.fieldLabel}>Precio unitario $</Text>
+              <View style={styles.variantPriceField}>
+                <Text
+                  style={styles.fieldLabel}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                >
+                  Precio unitario $
+                </Text>
                 <TextInput
                   value={v.priceText}
                   editable={editable}
@@ -929,6 +979,7 @@ const styles = StyleSheet.create({
     maxWidth: '46%',
   },
   roTitlePrice: {
+    flexShrink: 0,
     fontSize: 15,
     fontWeight: '800',
     color: colors.text,
@@ -987,14 +1038,42 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   brandField: {
-    flexGrow: 1,
-    flexBasis: 140,
-    minWidth: 140,
+    flex: 1,
+    minWidth: 0,
   },
   unitPriceField: {
     flexGrow: 1,
     flexBasis: 140,
     minWidth: 140,
+  },
+  variantPriceField: {
+    width: 136,
+    flexShrink: 0,
+  },
+  replacedOriginal: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.textSecondary,
+    textDecorationLine: 'line-through',
+  },
+  replacementHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  replacementKicker: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  replacementName: {
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '800',
+    color: colors.text,
   },
   roMetaList: {
     gap: 8,
@@ -1125,8 +1204,10 @@ const styles = StyleSheet.create({
   },
   variantFields: {
     flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
+    alignItems: 'flex-start',
     gap: 8,
   },
   variantRemoveBtn: {

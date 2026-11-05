@@ -174,6 +174,7 @@ export function StoreMaterialRequestsScreen({ navigation, route }: Props) {
       navigation.navigate('StoreQuoteRequest', {
         requestId: card.requestId,
         storeId: card.storeId,
+        viewing: card.column !== 'nuevas',
       });
     },
     [navigation],

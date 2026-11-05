@@ -4,6 +4,8 @@ import type { MaterialRequestItem } from '../types/materials';
 import { isClientSelectableQuoteItem } from './pickBestQuote';
 import {
   buildStoreQuoteItemRows,
+  storeChosenReplacementLabel,
+  storeQuoteScreenTitle,
   storeReadonlyPriceCaption,
   storeReadonlyPriceOnTitle,
   storeReadonlyStockCaption,
@@ -152,6 +154,79 @@ describe('labels de solo lectura (#209)', () => {
     );
     expect(storeReadonlyPriceOnTitle({ inStock: true, variantCount: 2, label: '' })).toBe(false);
     expect(storeReadonlyPriceOnTitle({ inStock: false, variantCount: 1, label: '' })).toBe(false);
+  });
+});
+
+describe('ver cotización del comercio (#211 #215)', () => {
+  it('Ver cotización titula Volver y el alta sigue en Cotizar pedido', () => {
+    expect(storeQuoteScreenTitle(true)).toBe('Volver');
+    expect(storeQuoteScreenTitle(false)).toBe('Cotizar pedido');
+  });
+
+  it('el reemplazo elegido se muestra solo cuando el cliente ya lo aceptó', () => {
+    expect(
+      storeChosenReplacementLabel({
+        inStock: false,
+        clientDecision: 'accepted',
+        label: '  Cal en bolsa  ',
+      }),
+    ).toBe('Cal en bolsa');
+    expect(
+      storeChosenReplacementLabel({
+        inStock: false,
+        clientDecision: 'pending',
+        label: 'Cal en bolsa',
+      }),
+    ).toBeNull();
+    expect(
+      storeChosenReplacementLabel({
+        inStock: false,
+        clientDecision: 'rejected',
+        label: 'Cal en bolsa',
+      }),
+    ).toBeNull();
+    expect(
+      storeChosenReplacementLabel({
+        inStock: true,
+        clientDecision: 'accepted',
+        label: 'Acme',
+      }),
+    ).toBeNull();
+    expect(
+      storeChosenReplacementLabel({
+        inStock: false,
+        clientDecision: 'accepted',
+        label: '   ',
+      }),
+    ).toBeNull();
+  });
+
+  it('la pantalla no explica la regla cuando ya hay reemplazo y mantiene marca junto al precio', () => {
+    const screen = readFileSync('src/screens/store/StoreQuoteRequestScreen.tsx', 'utf8');
+    const stack = readFileSync('src/navigation/CommerceStack.tsx', 'utf8');
+    const board = readFileSync('src/screens/store/StoreMaterialRequestsScreen.tsx', 'utf8');
+    expect(screen).toContain('storeChosenReplacementLabel(');
+    expect(screen).toContain('Reemplazo elegido por el cliente');
+    expect(screen).toContain("textDecorationLine: 'line-through'");
+    expect(screen).toContain('storeQuoteScreenTitle(viewingSentQuote)');
+    expect(screen).toContain('useQuoterLeaveGuard');
+    expect(screen).toContain('storeQuoteDraftIsDirty');
+    expect(screen).not.toContain('gestureEnabled');
+    expect(screen).toContain("flexWrap: 'nowrap'");
+    expect(screen).not.toContain("flexWrap: 'wrap'");
+    expect(screen).toContain('variantPriceField');
+    expect(screen).toContain('Precio unitario');
+    expect(screen).toContain('Agregar otra marca');
+    expect(stack).toContain('storeQuoteScreenTitle(route.params.viewing === true)');
+    expect(board).toContain("viewing: card.column !== 'nuevas'");
+    const chosenBranch = screen.slice(
+      screen.indexOf('if (chosenReplacement)'),
+      screen.indexOf('const decisionLabel ='),
+    );
+    expect(chosenBranch).toContain('formatDraftPrice(chosenPrice)');
+    expect(chosenBranch).not.toContain('El cliente solo puede elegir el reemplazo');
+    expect(chosenBranch).not.toContain('Sin stock');
+    expect(screen).toContain('El cliente solo puede elegir el reemplazo, no el pedido original.');
   });
 });
 

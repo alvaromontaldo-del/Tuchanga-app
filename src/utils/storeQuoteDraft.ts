@@ -46,6 +46,26 @@ export function storeReadonlyPriceOnTitle(input: {
   return input.inStock && input.variantCount === 1 && input.label.trim().length === 0;
 }
 
+/** Alta: «Cotizar pedido». Ver cotización: el header junto al atrás dice «Volver». */
+export function storeQuoteScreenTitle(viewingSentQuote: boolean): 'Volver' | 'Cotizar pedido' {
+  return viewingSentQuote ? 'Volver' : 'Cotizar pedido';
+}
+
+/**
+ * El cliente ya eligió el reemplazo de un ítem sin stock.
+ * Devuelve ese nombre para mostrarlo solo; null si todavía no hay decisión
+ * o no hay producto alternativo. No cambia precio ni selección.
+ */
+export function storeChosenReplacementLabel(input: {
+  inStock: boolean;
+  clientDecision: 'pending' | 'accepted' | 'rejected';
+  label: string;
+}): string | null {
+  if (input.inStock || input.clientDecision !== 'accepted') return null;
+  const name = input.label.trim();
+  return name.length > 0 ? name : null;
+}
+
 export function storeReadonlyPriceCaption(input: {
   inStock: boolean;
   label: string;

@@ -77,15 +77,6 @@ function formatCloseRate(rate: number | null): string {
   return `${rounded.toFixed(1).replace('.', ',')}%`;
 }
 
-function formatQty(value: number): string {
-  if (!Number.isFinite(value)) return '0';
-  const rounded = Math.round(value * 1000) / 1000;
-  const [intRaw, dec] = String(Math.abs(rounded)).split('.');
-  const grouped = (intRaw ?? '0').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-  const body = dec ? `${grouped},${dec}` : grouped;
-  return rounded < 0 ? `-${body}` : body;
-}
-
 function periodCaption(from: string, to: string): string {
   if (from === to) return formatYmdShort(from);
   return `${formatYmdShort(from)} – ${formatYmdShort(to)}`;
@@ -113,8 +104,6 @@ function SoftSkeleton() {
         <Animated.View style={[styles.skelTile, { opacity }]} />
         <Animated.View style={[styles.skelTile, { opacity }]} />
       </View>
-      <Animated.View style={[styles.skelLine, { opacity }]} />
-      <Animated.View style={[styles.skelLineShort, { opacity }]} />
     </View>
   );
 }
@@ -314,7 +303,7 @@ export function StoreStatsScreen(_props: Props) {
                 {formatArs(stats.earnings)}
               </Text>
               <Text style={styles.heroHint}>
-                {periodCaption(stats.from, stats.to)} · ventas cerradas, sin el costo de servicio.
+                {periodCaption(stats.from, stats.to)} · ventas cerradas.
               </Text>
             </View>
 
@@ -350,38 +339,7 @@ export function StoreStatsScreen(_props: Props) {
                 <Ionicons name="bar-chart-outline" size={26} color={colors.primary} />
                 <Text style={styles.stateTitle}>Todavía no hay ventas cerradas en este período</Text>
               </View>
-            ) : (
-              <View style={styles.listCard}>
-                <Text style={styles.listTitle}>Materiales más vendidos</Text>
-                <Text style={styles.listLead}>Los cinco que más salieron en ventas cerradas.</Text>
-                {stats.top_materials.length === 0 ? (
-                  <Text style={styles.listEmpty}>No hay materiales para mostrar.</Text>
-                ) : (
-                  stats.top_materials.map((item, index) => (
-                    <View
-                      key={`${item.description}-${item.unit}-${index}`}
-                      style={[styles.matRow, index > 0 && styles.matRowBorder]}
-                    >
-                      <View style={styles.rank}>
-                        <Text style={styles.rankText}>{index + 1}</Text>
-                      </View>
-                      <View style={styles.matBody}>
-                        <Text style={styles.matName} numberOfLines={2}>
-                          {item.description || 'Material'}
-                        </Text>
-                        <Text style={styles.matMeta}>
-                          {formatQty(item.quantity)}
-                          {item.unit ? ` ${item.unit}` : ''}
-                        </Text>
-                      </View>
-                      <Text style={styles.matSales}>
-                        {item.sales} {item.sales === 1 ? 'venta' : 'ventas'}
-                      </Text>
-                    </View>
-                  ))
-                )}
-              </View>
-            )}
+            ) : null}
           </View>
         ) : null}
       </ScrollView>
@@ -561,67 +519,6 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     color: colors.textSecondary,
   },
-  listCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
-  },
-  listTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: colors.text,
-  },
-  listLead: {
-    marginTop: 2,
-    marginBottom: spacing.sm,
-    fontSize: 13,
-    color: colors.textSecondary,
-  },
-  listEmpty: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    paddingVertical: spacing.sm,
-  },
-  matRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingVertical: 10,
-  },
-  matRowBorder: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-  },
-  rank: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#FDECEA',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rankText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: colors.primary,
-  },
-  matBody: { flex: 1, gap: 2 },
-  matName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  matMeta: {
-    fontSize: 13,
-    color: colors.textSecondary,
-  },
-  matSales: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: colors.text,
-  },
   stateCard: {
     backgroundColor: colors.surface,
     borderRadius: radii.card,
@@ -664,17 +561,6 @@ const styles = StyleSheet.create({
   skelTile: {
     flex: 1,
     height: 96,
-    borderRadius: radii.card,
-    backgroundColor: '#E4E4E4',
-  },
-  skelLine: {
-    height: 64,
-    borderRadius: radii.card,
-    backgroundColor: '#E4E4E4',
-  },
-  skelLineShort: {
-    height: 44,
-    width: '72%',
     borderRadius: radii.card,
     backgroundColor: '#E4E4E4',
   },

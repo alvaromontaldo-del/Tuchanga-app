@@ -134,6 +134,8 @@ export type CommerceStackParamList = {
   StoreQuoteRequest: {
     requestId: string;
     storeId: string;
+    /** true desde «Ver cotización»: el header dice Volver. */
+    viewing?: boolean;
   };
   StoreCloseOrder: { orderCode?: string } | undefined;
   CommerceAccount: undefined;

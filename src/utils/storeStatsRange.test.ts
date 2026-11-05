@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { normalizeStoreStats } from '../services/storeStats';
 import { storeStatsRange, validateCustomRange } from './storeStatsRange';
@@ -108,5 +109,18 @@ describe('normalizeStoreStats', () => {
     expect(stats.close_rate).toBeNull();
     expect(stats.top_materials).toEqual([]);
     expect(stats.earnings).toBe(0);
+  });
+});
+
+describe('datos de gestión en pantalla (#210)', () => {
+  const screen = readFileSync('src/screens/store/StoreStatsScreen.tsx', 'utf8');
+
+  it('quita la leyenda del costo de servicio y no lista materiales', () => {
+    expect(screen).toContain('ventas cerradas.');
+    expect(screen).not.toContain('sin el costo de servicio');
+    expect(screen).not.toContain('Materiales más vendidos');
+    expect(screen).not.toContain('top_materials');
+    expect(screen).toContain('Ganancias');
+    expect(screen).toContain('fetchStoreStats');
   });
 });
