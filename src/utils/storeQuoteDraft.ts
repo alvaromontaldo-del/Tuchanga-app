@@ -51,19 +51,51 @@ export function storeQuoteScreenTitle(viewingSentQuote: boolean): 'Volver' | 'Co
   return viewingSentQuote ? 'Volver' : 'Cotizar pedido';
 }
 
+export type ChosenStoreReplacement = {
+  label: string;
+  priceText: string;
+};
+
 /**
- * El cliente ya eligió el reemplazo de un ítem sin stock.
- * Devuelve ese nombre para mostrarlo solo; null si todavía no hay decisión
- * o no hay producto alternativo. No cambia precio ni selección.
+ * Reemplazo a mostrar solo, con su propio nombre y precio.
+ * Una sola alternativa: alcanza `clientDecision === accepted`.
+ * Varias: solo si `variantDecisions` marca exactamente una como accepted.
+ * null = vista completa (con stock, sin elección inequívoca, o más de una aceptada).
+ * No elige ni recalcula: devuelve el texto de esa variante o null.
  */
 export function storeChosenReplacementLabel(input: {
   inStock: boolean;
   clientDecision: 'pending' | 'accepted' | 'rejected';
-  label: string;
-}): string | null {
-  if (input.inStock || input.clientDecision !== 'accepted') return null;
-  const name = input.label.trim();
-  return name.length > 0 ? name : null;
+  variants: ReadonlyArray<{ label: string; priceText: string }>;
+  variantDecisions?: ReadonlyArray<'pending' | 'accepted' | 'rejected' | null | undefined>;
+}): ChosenStoreReplacement | null {
+  if (input.inStock || input.variants.length === 0) return null;
+
+  const picked =
+    input.variants.length === 1
+      ? input.clientDecision === 'accepted'
+        ? input.variants[0]
+        : null
+      : exactlyOneAccepted(input.variants, input.variantDecisions);
+
+  if (!picked) return null;
+  const label = picked.label.trim();
+  if (!label) return null;
+  return { label, priceText: picked.priceText };
+}
+
+function exactlyOneAccepted(
+  variants: ReadonlyArray<{ label: string; priceText: string }>,
+  decisions: ReadonlyArray<'pending' | 'accepted' | 'rejected' | null | undefined> | undefined,
+): { label: string; priceText: string } | null {
+  const marks = decisions ?? [];
+  let chosen: { label: string; priceText: string } | null = null;
+  for (let i = 0; i < variants.length; i += 1) {
+    if (marks[i] !== 'accepted') continue;
+    if (chosen) return null;
+    chosen = variants[i];
+  }
+  return chosen;
 }
 
 export function storeReadonlyPriceCaption(input: {

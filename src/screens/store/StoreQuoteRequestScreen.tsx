@@ -448,20 +448,18 @@ const QuoteItemRow = memo(function QuoteItemRow({
     const chosenReplacement = storeChosenReplacementLabel({
       inStock,
       clientDecision,
-      label: variants.find((v) => v.label.trim())?.label ?? '',
+      variants,
+      variantDecisions,
     });
     if (chosenReplacement) {
-      const chosenPrice =
-        variants.find((v) => v.label.trim() === chosenReplacement)?.priceText ??
-        variants[0]?.priceText ??
-        '';
+      const chosenPrice = chosenReplacement.priceText;
       return (
         <View
           style={[styles.itemCard, styles.itemCardReadonly, styles.itemCardAlt]}
           accessible
           accessibilityLabel={[
             item.description,
-            `Reemplazo elegido por el cliente: ${chosenReplacement}`,
+            `Reemplazo elegido por el cliente: ${chosenReplacement.label}`,
             formatDraftPrice(chosenPrice),
             itemNote ? `Nota: ${itemNote}` : '',
           ]
@@ -475,7 +473,7 @@ const QuoteItemRow = memo(function QuoteItemRow({
             <Text style={styles.replacementKicker}>Reemplazo elegido por el cliente</Text>
             <Text style={styles.roTitlePrice}>{formatDraftPrice(chosenPrice)}</Text>
           </View>
-          <Text style={styles.replacementName}>{chosenReplacement}</Text>
+          <Text style={styles.replacementName}>{chosenReplacement.label}</Text>
           {itemNote ? <Text style={styles.roNoteText}>{itemNote}</Text> : null}
         </View>
       );

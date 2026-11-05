@@ -163,40 +163,106 @@ describe('ver cotización del comercio (#211 #215)', () => {
     expect(storeQuoteScreenTitle(false)).toBe('Cotizar pedido');
   });
 
-  it('el reemplazo elegido se muestra solo cuando el cliente ya lo aceptó', () => {
+  it('una alternativa aceptada muestra su nombre y su precio', () => {
     expect(
       storeChosenReplacementLabel({
         inStock: false,
         clientDecision: 'accepted',
-        label: '  Cal en bolsa  ',
+        variants: [{ label: '  Cal en bolsa  ', priceText: '90' }],
       }),
-    ).toBe('Cal en bolsa');
+    ).toEqual({ label: 'Cal en bolsa', priceText: '90' });
     expect(
       storeChosenReplacementLabel({
         inStock: false,
         clientDecision: 'pending',
-        label: 'Cal en bolsa',
+        variants: [{ label: 'Cal en bolsa', priceText: '90' }],
       }),
     ).toBeNull();
     expect(
       storeChosenReplacementLabel({
         inStock: false,
         clientDecision: 'rejected',
-        label: 'Cal en bolsa',
-      }),
-    ).toBeNull();
-    expect(
-      storeChosenReplacementLabel({
-        inStock: true,
-        clientDecision: 'accepted',
-        label: 'Acme',
+        variants: [{ label: 'Cal en bolsa', priceText: '90' }],
       }),
     ).toBeNull();
     expect(
       storeChosenReplacementLabel({
         inStock: false,
         clientDecision: 'accepted',
-        label: '   ',
+        variants: [{ label: '   ', priceText: '90' }],
+      }),
+    ).toBeNull();
+  });
+
+  it('con tres alternativas muestra la segunda aceptada y su precio', () => {
+    expect(
+      storeChosenReplacementLabel({
+        inStock: false,
+        clientDecision: 'accepted',
+        variants: [
+          { label: 'Marca A', priceText: '100' },
+          { label: 'Marca B', priceText: '250' },
+          { label: 'Marca C', priceText: '80' },
+        ],
+        variantDecisions: ['rejected', 'accepted', 'pending'],
+      }),
+    ).toEqual({ label: 'Marca B', priceText: '250' });
+  });
+
+  it('dos alternativas sin decisión individual no inventan elección aunque el ítem figure accepted', () => {
+    const variants = [
+      { label: 'Marca A', priceText: '100' },
+      { label: 'Marca B', priceText: '250' },
+    ];
+    expect(
+      storeChosenReplacementLabel({
+        inStock: false,
+        clientDecision: 'accepted',
+        variants,
+      }),
+    ).toBeNull();
+    expect(
+      storeChosenReplacementLabel({
+        inStock: false,
+        clientDecision: 'accepted',
+        variants,
+        variantDecisions: ['pending', 'pending'],
+      }),
+    ).toBeNull();
+  });
+
+  it('más de una alternativa aceptada vuelve a la vista completa', () => {
+    expect(
+      storeChosenReplacementLabel({
+        inStock: false,
+        clientDecision: 'accepted',
+        variants: [
+          { label: 'Marca A', priceText: '100' },
+          { label: 'Marca B', priceText: '250' },
+        ],
+        variantDecisions: ['accepted', 'accepted'],
+      }),
+    ).toBeNull();
+  });
+
+  it('un ítem con stock no muestra la tarjeta de reemplazo', () => {
+    expect(
+      storeChosenReplacementLabel({
+        inStock: true,
+        clientDecision: 'accepted',
+        variants: [{ label: 'Acme', priceText: '100' }],
+        variantDecisions: ['accepted'],
+      }),
+    ).toBeNull();
+    expect(
+      storeChosenReplacementLabel({
+        inStock: true,
+        clientDecision: 'accepted',
+        variants: [
+          { label: 'Acme', priceText: '100' },
+          { label: 'Otra', priceText: '80' },
+        ],
+        variantDecisions: ['rejected', 'accepted'],
       }),
     ).toBeNull();
   });
@@ -219,11 +285,20 @@ describe('ver cotización del comercio (#211 #215)', () => {
     expect(screen).toContain('Agregar otra marca');
     expect(stack).toContain('storeQuoteScreenTitle(route.params.viewing === true)');
     expect(board).toContain("viewing: card.column !== 'nuevas'");
+    const chosenCall = screen.slice(
+      screen.indexOf('storeChosenReplacementLabel({'),
+      screen.indexOf('if (chosenReplacement)'),
+    );
+    expect(chosenCall).toContain('variantDecisions');
+    expect(chosenCall).not.toContain('.find(');
     const chosenBranch = screen.slice(
       screen.indexOf('if (chosenReplacement)'),
       screen.indexOf('const decisionLabel ='),
     );
+    expect(chosenBranch).toContain('chosenReplacement.priceText');
+    expect(chosenBranch).toContain('chosenReplacement.label');
     expect(chosenBranch).toContain('formatDraftPrice(chosenPrice)');
+    expect(chosenBranch).not.toContain('.find(');
     expect(chosenBranch).not.toContain('El cliente solo puede elegir el reemplazo');
     expect(chosenBranch).not.toContain('Sin stock');
     expect(screen).toContain('El cliente solo puede elegir el reemplazo, no el pedido original.');
