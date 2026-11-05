@@ -236,14 +236,29 @@ export type OficioMatriculaState = {
   fotos: { id: string; status: MatriculaFotoStatus; identidadVersion: number }[];
 };
 
+export const MATRICULA_IDENTIDAD_SIN_LUGAR =
+  'Para cambiar el número o entidad, eliminá una foto anterior para cargar la nueva.';
+
+export const MATRICULA_RECHAZO_SIN_FOTO =
+  'Para volver a enviar una matrícula rechazada tenés que sumar una foto nueva.';
+
 export function problemaEnvioMatriculaOficio(input: {
-  estado: { numero: string; entidad: string };
+  estado: { numero: string; entidad: string; status?: string; fotos?: unknown[] };
   numero: string;
   entidad: string;
   fotosNuevas: number;
 }): string | null {
-  if (identidadMatriculaDistinta(input.estado, input) && input.fotosNuevas < 1) {
+  const cambio = identidadMatriculaDistinta(input.estado, input);
+  const guardadas = input.estado.fotos?.length ?? 0;
+  const nuevas = Math.max(0, Math.floor(input.fotosNuevas));
+  if (cambio && guardadas + Math.max(nuevas, 1) > MATRICULA_MAX_PHOTOS) {
+    return MATRICULA_IDENTIDAD_SIN_LUGAR;
+  }
+  if (cambio && nuevas < 1) {
     return 'Para cambiar el número o la entidad tenés que sumar una foto nueva.';
+  }
+  if (input.estado.status === 'rechazada' && nuevas < 1) {
+    return MATRICULA_RECHAZO_SIN_FOTO;
   }
   return null;
 }

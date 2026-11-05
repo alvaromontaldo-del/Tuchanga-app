@@ -165,6 +165,18 @@ REVOKE ALL ON TABLE public.matricula_fotos FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON TABLE public.matricula_fotos TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.matricula_fotos TO service_role;
 
+-- Paths ya aceptados. No se borran al eliminar la foto: un objeto que sigue en
+-- Storage no puede volver a entrar como evidencia nueva.
+CREATE TABLE public.matricula_paths_usados (
+  storage_path text PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES public.profiles (id) ON DELETE CASCADE,
+  creado_en timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT matricula_paths_usados_path_chk
+    CHECK (storage_path ~ ('^' || user_id::text || '/[0-9]{13}-[a-z0-9]{6,12}\.jpg$'))
+);
+ALTER TABLE public.matricula_paths_usados ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.matricula_paths_usados FROM PUBLIC, anon, authenticated;
+
 -- Copia la evidencia y el estado del envío. No elige oficio.
 INSERT INTO public.matricula_fotos (
   user_id, oficio_codigo, storage_path, identidad_version, status, rejection_reason, reviewed_at, reviewed_by, created_at
@@ -183,6 +195,14 @@ FROM public.matriculas m
 CROSS JOIN LATERAL unnest(m.storage_paths) AS p(path)
 WHERE m.oficio_codigo = 'sin_vincular'
   AND btrim(coalesce(p.path, '')) <> '';
+
+INSERT INTO public.matricula_paths_usados (storage_path, user_id)
+SELECT btrim(p.path), m.user_id
+FROM public.matriculas m
+CROSS JOIN LATERAL unnest(m.storage_paths) AS p(path)
+WHERE m.oficio_codigo = 'sin_vincular'
+  AND btrim(coalesce(p.path, '')) <> ''
+ON CONFLICT (storage_path) DO NOTHING;
 
 DO $$
 DECLARE
@@ -377,6 +397,98 @@ REVOKE ALL ON FUNCTION public._matriculas_oficios_verificados(uuid) FROM PUBLIC,
 REVOKE ALL ON FUNCTION public._worker_antecedentes_aprobado(uuid) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._matricula_fotos_json(uuid, text) FROM PUBLIC, anon, authenticated, service_role;
 
+CREATE OR REPLACE FUNCTION public._matricula_reservar_paths(
+  p_user_id uuid,
+  p_oficio text,
+  p_paths text[]
+)
+ RETURNS void
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF coalesce(cardinality(p_paths), 0) = 0 THEN
+    RETURN;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM unnest(p_paths) AS p(path)
+    WHERE EXISTS (
+      SELECT 1
+      FROM public.matricula_paths_usados u
+      WHERE u.storage_path = p.path
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.matricula_fotos f
+      WHERE f.storage_path = p.path
+        AND f.user_id = p_user_id
+        AND f.oficio_codigo = p_oficio
+    )
+  ) THEN
+    RAISE EXCEPTION 'Esa foto ya se usó. Sacala de nuevo.';
+  END IF;
+
+  INSERT INTO public.matricula_paths_usados (storage_path, user_id)
+  SELECT p.path, p_user_id
+  FROM unnest(p_paths) AS p(path)
+  ON CONFLICT (storage_path) DO NOTHING;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public._matricula_revision_vigente(
+  p_user_id uuid,
+  p_oficio text,
+  p_identidad_version integer,
+  p_foto_ids uuid[]
+)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_version integer;
+  v_actual uuid[];
+  v_pedido uuid[];
+BEGIN
+  SELECT m.identidad_version
+    INTO v_version
+  FROM public.matriculas m
+  WHERE m.user_id = p_user_id
+    AND m.oficio_codigo = p_oficio
+  FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'No hay una matrícula para este usuario.';
+  END IF;
+
+  SELECT coalesce(array_agg(f.id ORDER BY f.id), '{}'::uuid[])
+    INTO v_actual
+  FROM public.matricula_fotos f
+  WHERE f.user_id = p_user_id
+    AND f.oficio_codigo = p_oficio
+    AND f.status = 'pendiente'
+    AND f.identidad_version = v_version;
+
+  SELECT coalesce(array_agg(s.id ORDER BY s.id), '{}'::uuid[])
+    INTO v_pedido
+  FROM (
+    SELECT DISTINCT u AS id
+    FROM unnest(coalesce(p_foto_ids, '{}'::uuid[])) AS u
+    WHERE u IS NOT NULL
+  ) s;
+
+  IF p_identidad_version IS DISTINCT FROM v_version OR v_actual IS DISTINCT FROM v_pedido THEN
+    RAISE EXCEPTION 'La revisión quedó vieja. Recargá antes de aprobar o rechazar.';
+  END IF;
+
+  RETURN v_version;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public._matricula_reservar_paths(uuid, text, text[]) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public._matricula_revision_vigente(uuid, text, integer, uuid[]) FROM PUBLIC, anon, authenticated, service_role;
+
 CREATE OR REPLACE FUNCTION public.get_my_matricula()
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -518,6 +630,8 @@ BEGIN
     RAISE EXCEPTION 'Una foto no corresponde a esta matrícula.';
   END IF;
 
+  PERFORM public._matricula_reservar_paths(v_uid, 'sin_vincular', v_paths);
+
   SELECT m.storage_paths, m.numero, m.entidad, m.identidad_version
     INTO v_old, v_old_numero, v_old_entidad, v_version
   FROM public.matriculas m
@@ -655,9 +769,6 @@ BEGIN
     );
   ELSE
     v_changed := v_numero IS DISTINCT FROM v_old_numero OR v_entidad IS DISTINCT FROM v_old_entidad;
-    IF v_changed AND coalesce(cardinality(v_paths), 0) < 1 THEN
-      RAISE EXCEPTION 'Para cambiar el número o la entidad tenés que sumar una foto nueva.';
-    END IF;
     IF v_changed THEN
       v_version := v_version + 1;
     END IF;
@@ -669,9 +780,20 @@ BEGIN
   WHERE f.user_id = v_uid
     AND f.oficio_codigo = v_oficio;
 
+  IF v_changed AND v_count + greatest(coalesce(cardinality(v_paths), 0), 1) > 3 THEN
+    RAISE EXCEPTION 'Para cambiar el número o entidad, eliminá una foto anterior para cargar la nueva.';
+  END IF;
+  IF v_status = 'rechazada' AND NOT v_changed AND coalesce(cardinality(v_paths), 0) < 1 THEN
+    RAISE EXCEPTION 'Para volver a enviar una matrícula rechazada tenés que sumar una foto nueva.';
+  END IF;
+  IF v_changed AND coalesce(cardinality(v_paths), 0) < 1 THEN
+    RAISE EXCEPTION 'Para cambiar el número o la entidad tenés que sumar una foto nueva.';
+  END IF;
   IF v_count + coalesce(cardinality(v_paths), 0) > 3 THEN
     RAISE EXCEPTION 'Podés cargar hasta 3 fotos.';
   END IF;
+
+  PERFORM public._matricula_reservar_paths(v_uid, v_oficio, v_paths);
 
   IF coalesce(cardinality(v_paths), 0) > 0 AND EXISTS (
     SELECT 1 FROM public.matricula_fotos f WHERE f.storage_path = ANY (v_paths)
@@ -1079,7 +1201,7 @@ BEGIN
 END;
 $function$;
 
-CREATE OR REPLACE FUNCTION public.admin_aprobar_matricula_foto(p_foto_id uuid)
+CREATE OR REPLACE FUNCTION public.admin_aprobar_matricula_foto(p_foto_id uuid, p_identidad_version integer)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -1120,6 +1242,9 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'No hay una matrícula para esa foto.';
   END IF;
+  IF p_identidad_version IS DISTINCT FROM v_version THEN
+    RAISE EXCEPTION 'La revisión quedó vieja. Recargá antes de aprobar o rechazar.';
+  END IF;
   IF v_lic IS DISTINCT FROM 'aprobada' THEN
     RAISE EXCEPTION 'Primero hay que aprobar la matrícula. Una foto no aprueba el número ni la entidad.';
   END IF;
@@ -1154,7 +1279,7 @@ BEGIN
 END;
 $function$;
 
-CREATE OR REPLACE FUNCTION public.admin_rechazar_matricula_foto(p_foto_id uuid, p_motivo text)
+CREATE OR REPLACE FUNCTION public.admin_rechazar_matricula_foto(p_foto_id uuid, p_motivo text, p_identidad_version integer)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -1202,6 +1327,9 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'No hay una matrícula para esa foto.';
   END IF;
+  IF p_identidad_version IS DISTINCT FROM v_version THEN
+    RAISE EXCEPTION 'La revisión quedó vieja. Recargá antes de aprobar o rechazar.';
+  END IF;
   IF v_foto_version IS DISTINCT FROM v_version THEN
     RAISE EXCEPTION 'Esa foto es de una matrícula anterior.';
   END IF;
@@ -1240,7 +1368,12 @@ BEGIN
 END;
 $function$;
 
-CREATE OR REPLACE FUNCTION public.admin_aprobar_matricula_oficio(p_user_id uuid, p_oficio text)
+CREATE OR REPLACE FUNCTION public.admin_aprobar_matricula_oficio(
+  p_user_id uuid,
+  p_oficio text,
+  p_identidad_version integer,
+  p_foto_ids uuid[]
+)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -1263,23 +1396,8 @@ BEGIN
     RAISE EXCEPTION 'El oficio de la matrícula no es válido.';
   END IF;
 
-  SELECT m.identidad_version
-    INTO v_version
-  FROM public.matriculas m
-  WHERE m.user_id = p_user_id
-    AND m.oficio_codigo = v_oficio
-  FOR UPDATE;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'No hay una matrícula para este usuario.';
-  END IF;
-  IF NOT EXISTS (
-    SELECT 1
-    FROM public.matricula_fotos f
-    WHERE f.user_id = p_user_id
-      AND f.oficio_codigo = v_oficio
-      AND f.status = 'pendiente'
-      AND f.identidad_version = v_version
-  ) THEN
+  v_version := public._matricula_revision_vigente(p_user_id, v_oficio, p_identidad_version, p_foto_ids);
+  IF coalesce(cardinality(p_foto_ids), 0) < 1 THEN
     RAISE EXCEPTION 'No hay una foto nueva de esta matrícula para revisar.';
   END IF;
 
@@ -1312,7 +1430,13 @@ BEGIN
 END;
 $function$;
 
-CREATE OR REPLACE FUNCTION public.admin_rechazar_matricula_oficio(p_user_id uuid, p_oficio text, p_motivo text)
+CREATE OR REPLACE FUNCTION public.admin_rechazar_matricula_oficio(
+  p_user_id uuid,
+  p_oficio text,
+  p_motivo text,
+  p_identidad_version integer,
+  p_foto_ids uuid[]
+)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -1343,15 +1467,7 @@ BEGIN
     RAISE EXCEPTION 'El motivo puede tener hasta 300 caracteres.';
   END IF;
 
-  SELECT m.identidad_version
-    INTO v_version
-  FROM public.matriculas m
-  WHERE m.user_id = p_user_id
-    AND m.oficio_codigo = v_oficio
-  FOR UPDATE;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'No hay una matrícula para este usuario.';
-  END IF;
+  v_version := public._matricula_revision_vigente(p_user_id, v_oficio, p_identidad_version, p_foto_ids);
 
   UPDATE public.matriculas
   SET status = 'rechazada',
@@ -1393,20 +1509,20 @@ REVOKE ALL ON FUNCTION public.submit_my_matricula_oficio(text, text, text, text[
 REVOKE ALL ON FUNCTION public.delete_my_matricula_foto(uuid) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.delete_my_antecedentes_penales() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.admin_list_matriculas_revision() FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.admin_aprobar_matricula_foto(uuid) FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.admin_rechazar_matricula_foto(uuid, text) FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.admin_aprobar_matricula_oficio(uuid, text) FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.admin_rechazar_matricula_oficio(uuid, text, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.admin_aprobar_matricula_foto(uuid, integer) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.admin_rechazar_matricula_foto(uuid, text, integer) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.admin_aprobar_matricula_oficio(uuid, text, integer, uuid[]) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.admin_rechazar_matricula_oficio(uuid, text, text, integer, uuid[]) FROM PUBLIC, anon;
 
 GRANT EXECUTE ON FUNCTION public.get_my_matriculas() TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.submit_my_matricula_oficio(text, text, text, text[]) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.delete_my_matricula_foto(uuid) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.delete_my_antecedentes_penales() TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_list_matriculas_revision() TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.admin_aprobar_matricula_foto(uuid) TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.admin_rechazar_matricula_foto(uuid, text) TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.admin_aprobar_matricula_oficio(uuid, text) TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.admin_rechazar_matricula_oficio(uuid, text, text) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.admin_aprobar_matricula_foto(uuid, integer) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.admin_rechazar_matricula_foto(uuid, text, integer) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.admin_aprobar_matricula_oficio(uuid, text, integer, uuid[]) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.admin_rechazar_matricula_oficio(uuid, text, text, integer, uuid[]) TO authenticated, service_role;
 
 -- Funciones públicas: mismo cuerpo vivo, solo el cálculo de matrícula y las columnas del feed.
 CREATE OR REPLACE FUNCTION public.search_workers_for_client(p_client_lat double precision, p_client_lng double precision, p_query text DEFAULT ''::text, p_category_names text[] DEFAULT NULL::text[], p_exclude_user_id uuid DEFAULT NULL::uuid, p_limit integer DEFAULT 80)
@@ -1817,6 +1933,11 @@ AS $function$
            nullif(btrim(coalesce(f.storage_path, '')), '')
     FROM public.matricula_fotos f
     WHERE coalesce(f.storage_path, '') <> ''
+    UNION ALL
+    SELECT 'matriculas',
+           nullif(btrim(coalesce(u.storage_path, '')), '')
+    FROM public.matricula_paths_usados u
+    WHERE coalesce(u.storage_path, '') <> ''
   ) x
   WHERE object_path IS NOT NULL AND object_path <> '';
 $function$;

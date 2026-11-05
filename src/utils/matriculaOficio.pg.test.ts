@@ -55,6 +55,30 @@ function claim(userId: string): string {
   return `SELECT set_config('request.jwt.claims', '{"sub":"${userId}","role":"authenticated"}', false);`;
 }
 
+function versionDe(oficio: string): string {
+  return `(SELECT identidad_version FROM public.matriculas WHERE user_id = '${WORKER}' AND oficio_codigo = '${oficio}')`;
+}
+
+function pendientesDe(oficio: string): string {
+  return `ARRAY(SELECT f.id FROM public.matricula_fotos f JOIN public.matriculas m ON m.user_id = f.user_id AND m.oficio_codigo = f.oficio_codigo WHERE f.user_id = '${WORKER}' AND f.oficio_codigo = '${oficio}' AND f.status = 'pendiente' AND f.identidad_version = m.identidad_version)`;
+}
+
+function aprobarOficio(oficio: string): string {
+  return `SELECT public.admin_aprobar_matricula_oficio('${WORKER}'::uuid, '${oficio}', ${versionDe(oficio)}, ${pendientesDe(oficio)});`;
+}
+
+function rechazarOficio(oficio: string, motivo: string): string {
+  return `SELECT public.admin_rechazar_matricula_oficio('${WORKER}'::uuid, '${oficio}', '${motivo}', ${versionDe(oficio)}, ${pendientesDe(oficio)});`;
+}
+
+function aprobarFoto(id: string, oficio: string): string {
+  return `SELECT public.admin_aprobar_matricula_foto('${id}'::uuid, ${versionDe(oficio)});`;
+}
+
+function rechazarFoto(id: string, oficio: string, motivo: string): string {
+  return `SELECT public.admin_rechazar_matricula_foto('${id}'::uuid, '${motivo}', ${versionDe(oficio)});`;
+}
+
 function raises(sql: string, pattern: RegExp): void {
   let message = '';
   try {
@@ -124,6 +148,9 @@ describe.skipIf(!hasPg)('matrícula por oficio en Postgres', () => {
     );
     raises(`SET ROLE authenticated; TRUNCATE public.matricula_fotos;`, /permission denied/i);
     raises(`SET ROLE anon; SELECT public.get_my_matriculas();`, /permission denied/i);
+    expect(psql(`SELECT has_table_privilege('authenticated', 'public.matricula_paths_usados', 'SELECT')`)).toBe('f');
+    expect(psql(`SELECT has_table_privilege('anon', 'public.matricula_paths_usados', 'INSERT')`)).toBe('f');
+    expect(psql(`SELECT to_regprocedure('public.admin_aprobar_matricula_oficio(uuid,text)') IS NULL`)).toBe('t');
   });
 
   it('no recicla fotos viejas y las RPC de admin no aprueban ni reescriben de más', () => {
@@ -138,8 +165,8 @@ describe.skipIf(!hasPg)('matrícula por oficio en Postgres', () => {
       SELECT public.submit_my_matricula_oficio('gas', 'GAS-10', 'ENARGAS', ARRAY['${WORKER}/1730000000001-gasfoto.jpg']);
       SELECT public.submit_my_matricula_oficio('electricidad', 'ELEC-1', 'ERSEP', ARRAY['${WORKER}/1730000000005-elecfot.jpg']);
       ${claim(ADMIN)}
-      SELECT public.admin_aprobar_matricula_oficio('${WORKER}'::uuid, 'gas');
-      SELECT public.admin_aprobar_matricula_oficio('${WORKER}'::uuid, 'electricidad');
+      ${aprobarOficio('gas')}
+      ${aprobarOficio('electricidad')}
     `);
 
     const gasFoto = psql(
@@ -152,7 +179,7 @@ describe.skipIf(!hasPg)('matrícula por oficio en Postgres', () => {
     const gasMisma = psql(
       `SELECT id::text FROM public.matricula_fotos WHERE storage_path LIKE '%gasfotb.jpg'`,
     );
-    psql(`${claim(ADMIN)} SELECT public.admin_aprobar_matricula_foto('${gasMisma}'::uuid);`);
+    psql(`${claim(ADMIN)} ${aprobarFoto(gasMisma, 'gas')}`);
     expect(psql(`SELECT status FROM public.matriculas WHERE oficio_codigo = 'gas'`)).toBe('aprobada');
     expect(psql(`SELECT status || ':' || identidad_version::text FROM public.matricula_fotos WHERE id = '${gasMisma}'`)).toBe(
       'aprobada:1',
@@ -184,7 +211,7 @@ describe.skipIf(!hasPg)('matrícula por oficio en Postgres', () => {
       'LEG-1:aprobada',
     );
     raises(
-      `${claim(ADMIN)} SELECT public.admin_aprobar_matricula_foto('${fotoNueva}'::uuid);`,
+      `${claim(ADMIN)} ${aprobarFoto(fotoNueva, 'gas')}`,
       /no aprueba el número/,
     );
     expect(psql(`SELECT status FROM public.matriculas WHERE oficio_codigo = 'gas'`)).toBe('pendiente');
@@ -207,8 +234,8 @@ describe.skipIf(!hasPg)('matrícula por oficio en Postgres', () => {
     );
     psql(`
       ${claim(ADMIN)}
-      SELECT public.admin_rechazar_matricula_foto('${elecRechazo}'::uuid, 'Foto cortada');
-      SELECT public.admin_aprobar_matricula_oficio('${WORKER}'::uuid, 'electricidad');
+      ${rechazarFoto(elecRechazo, 'electricidad', 'Foto cortada')}
+      ${aprobarOficio('electricidad')}
     `);
     expect(psql(`SELECT status FROM public.matricula_fotos WHERE id = '${elecRechazo}'`)).toBe('rechazada');
     expect(psql(`SELECT status || ':' || identidad_version::text FROM public.matricula_fotos WHERE id = '${elecPendiente}'`)).toBe(
@@ -222,7 +249,7 @@ describe.skipIf(!hasPg)('matrícula por oficio en Postgres', () => {
 
     psql(`
       ${claim(ADMIN)}
-      SELECT public.admin_rechazar_matricula_oficio('${WORKER}'::uuid, 'electricidad', 'No coincide el número');
+      ${rechazarOficio('electricidad', 'No coincide el número')}
     `);
     expect(psql(`SELECT status FROM public.matriculas WHERE oficio_codigo = 'electricidad'`)).toBe('rechazada');
     expect(psql(`SELECT status FROM public.matricula_fotos WHERE id = '${elecPendiente}'`)).toBe('aprobada');
@@ -233,7 +260,7 @@ describe.skipIf(!hasPg)('matrícula por oficio en Postgres', () => {
     expect(psql(`SELECT status FROM public.matriculas WHERE oficio_codigo = 'sin_vincular'`)).toBe('aprobada');
 
     raises(
-      `${claim(ADMIN)} SELECT public.admin_aprobar_matricula_oficio('${WORKER}'::uuid, 'electricidad');`,
+      `${claim(ADMIN)} ${aprobarOficio('electricidad')}`,
       /foto nueva/,
     );
 
@@ -250,5 +277,47 @@ describe.skipIf(!hasPg)('matrícula por oficio en Postgres', () => {
     expect(versiones.split('\n').filter(Boolean).pop()).toBe('4');
     expect(psql(`SELECT identidad_version::text FROM public.matriculas WHERE oficio_codigo = 'gas'`)).toBe('2');
     expect(psql(`SELECT count(*) FROM public.matricula_fotos WHERE oficio_codigo = 'gas'`)).toBe('3');
+
+    expect(psql(`SELECT to_regprocedure('public.admin_aprobar_matricula_oficio(uuid,text)') IS NULL`)).toBe('t');
+    expect(psql(`SELECT to_regprocedure('public.admin_rechazar_matricula_oficio(uuid,text,text)') IS NULL`)).toBe('t');
+
+    const vistaVersion = psql(`SELECT identidad_version::text FROM public.matriculas WHERE oficio_codigo = 'gas'`);
+    const vistaFoto = fotoNueva;
+    psql(`
+      ${claim(WORKER)}
+      SELECT public.delete_my_matricula_foto('${gasMisma}'::uuid);
+      SELECT public.submit_my_matricula_oficio('gas', 'CAMBIADO-9', 'Otra', ARRAY['${WORKER}/1730000000004-gasfotd.jpg']);
+    `);
+    raises(
+      `${claim(ADMIN)} SELECT public.admin_aprobar_matricula_oficio('${WORKER}'::uuid, 'gas', ${vistaVersion}::int, ARRAY['${vistaFoto}'::uuid]);`,
+      /revisión quedó vieja/,
+    );
+    expect(psql(`SELECT numero || ':' || identidad_version::text || ':' || status FROM public.matriculas WHERE oficio_codigo = 'gas'`)).toBe(
+      'CAMBIADO-9:3:pendiente',
+    );
+    expect(psql(`SELECT status FROM public.matricula_fotos WHERE storage_path LIKE '%gasfotd.jpg'`)).toBe('pendiente');
+    expect(psql(`SELECT public._oficio_verificado('${WORKER}'::uuid, 'gas')`)).toBe('f');
+    expect(psql(`SELECT status FROM public.matriculas WHERE oficio_codigo = 'sin_vincular'`)).toBe('aprobada');
+    raises(
+      `${claim(WORKER)} SELECT public.submit_my_matricula_oficio('gas', 'OTRO-1', 'ENARGAS', ARRAY['${WORKER}/1730000000008-elecfotd.jpg']);`,
+      /eliminá una foto anterior/,
+    );
+    expect(psql(`SELECT numero FROM public.matriculas WHERE oficio_codigo = 'gas'`)).toBe('CAMBIADO-9');
+    expect(psql(`SELECT count(*) FROM public.matricula_fotos WHERE oficio_codigo = 'gas'`)).toBe('3');
+
+    psql(`${claim(WORKER)} SELECT public.delete_my_matricula_foto('${fotoNueva}'::uuid);`);
+    raises(
+      `${claim(WORKER)} SELECT public.submit_my_matricula_oficio('gas', 'CAMBIADO-9', 'Otra', ARRAY['${WORKER}/1730000000003-gasfotc.jpg']);`,
+      /ya se usó/,
+    );
+    expect(psql(`SELECT count(*) FROM public.matricula_fotos WHERE storage_path LIKE '%gasfotc.jpg'`)).toBe('0');
+    expect(psql(`SELECT count(*) FROM public.matricula_paths_usados WHERE storage_path LIKE '%gasfotc.jpg'`)).toBe('1');
+
+    raises(
+      `${claim(WORKER)} SELECT public.submit_my_matricula_oficio('electricidad', 'ELEC-2', 'ERSEP', ARRAY[]::text[]);`,
+      /rechazada/,
+    );
+    expect(psql(`SELECT status FROM public.matriculas WHERE oficio_codigo = 'electricidad'`)).toBe('rechazada');
+    expect(psql(`SELECT count(*) FROM public.matricula_fotos WHERE oficio_codigo = 'gas'`)).toBe('2');
   });
 });

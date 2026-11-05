@@ -191,12 +191,6 @@ export function MatriculaCard({ oficio, row, puedeCargar, onReload }: Props) {
   }
 
   async function send() {
-    const total = saved + photos.length;
-    const fieldProblem = matriculaDraftProblem({ numero, entidad, photos: Math.max(total, 0) });
-    if (fieldProblem) {
-      toast.error(fieldProblem, catalog.titulo);
-      return;
-    }
     if (row) {
       const identidad = problemaEnvioMatriculaOficio({
         estado: row,
@@ -208,6 +202,12 @@ export function MatriculaCard({ oficio, row, puedeCargar, onReload }: Props) {
         toast.error(identidad, catalog.titulo);
         return;
       }
+    }
+    const total = saved + photos.length;
+    const fieldProblem = matriculaDraftProblem({ numero, entidad, photos: Math.max(total, 0) });
+    if (fieldProblem) {
+      toast.error(fieldProblem, catalog.titulo);
+      return;
     }
     if (row && photos.length === 0 && numero.trim() === row.numero && entidad.trim() === row.entidad) {
       toast.error('No hay fotos nuevas ni cambios para enviar.', catalog.titulo);

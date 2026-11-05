@@ -33,6 +33,8 @@ import {
   parseMyMatriculas,
   aplicarEnvioMatriculaOficio,
   problemaEnvioMatriculaOficio,
+  MATRICULA_IDENTIDAD_SIN_LUGAR,
+  MATRICULA_RECHAZO_SIN_FOTO,
   type OficioMatriculaState,
 } from './matriculaVerificada';
 import { feedPublicationLine, feedTrustIcons } from './feedTrust';
@@ -382,6 +384,33 @@ describe('matrícula verificada', () => {
     ]);
     expect(oficioVerificado(otraEntidad)).toBe(false);
     expect(oficioVerificado(electricidad)).toBe(true);
+
+    const llena: OficioMatriculaState = {
+      ...gas,
+      fotos: [
+        { id: 'g1', status: 'aprobada', identidadVersion: 1 },
+        { id: 'g2', status: 'aprobada', identidadVersion: 1 },
+        { id: 'g3', status: 'pendiente', identidadVersion: 1 },
+      ],
+    };
+    expect(
+      problemaEnvioMatriculaOficio({
+        estado: llena,
+        numero: 'G-9',
+        entidad: 'ENARGAS',
+        fotosNuevas: 1,
+      }),
+    ).toBe(MATRICULA_IDENTIDAD_SIN_LUGAR);
+    expect(llena.fotos).toHaveLength(3);
+
+    expect(
+      problemaEnvioMatriculaOficio({
+        estado: { ...gas, status: 'rechazada' },
+        numero: 'G-1',
+        entidad: 'ENARGAS',
+        fotosNuevas: 0,
+      }),
+    ).toBe(MATRICULA_RECHAZO_SIN_FOTO);
 
     expect(
       parseMyMatriculas({
