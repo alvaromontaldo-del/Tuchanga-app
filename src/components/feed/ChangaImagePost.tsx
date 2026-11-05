@@ -10,8 +10,9 @@ import { colors, radii, spacing, typography } from '../../constants/theme';
 import { formatPostDate } from '../../utils/formatDate';
 import type { FeedPost } from '../../types/feed';
 import { APP_NAME } from '../../constants/brand';
-import { feedPublicationLine } from '../../utils/feedTrust';
+import { feedHomeShowsNuevo, feedPublicationLine } from '../../utils/feedTrust';
 import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
+import { StarRating } from '../profile/StarRating';
 import { FeedPublicationMeta } from './FeedPublicationMeta';
 
 type Props = {
@@ -42,11 +43,11 @@ export function ChangaImagePost({
 
   const showMenu = Boolean(onRequestDelete || onRequestHide);
   const workerName = professionalDisplayNameForClient(post.workerFirstName);
-  const publicationLine = feedPublicationLine(
-    post.workerFirstName,
-    post.workerRatingAverage,
-    post.workerTotalJobsDone,
-  );
+  const jobsDone = post.workerTotalJobsDone;
+  const showNuevo = feedHomeShowsNuevo(jobsDone);
+  const publicationLine = showNuevo
+    ? `${workerName} Nuevo`
+    : feedPublicationLine(post.workerFirstName, post.workerRatingAverage, jobsDone);
 
   async function onShare() {
     try {
@@ -88,11 +89,21 @@ export function ChangaImagePost({
               <Text style={styles.name} numberOfLines={1}>
                 {workerName}
               </Text>
+              {showNuevo ? (
+                <StarRating
+                  completedJobs={jobsDone}
+                  score={post.workerRatingAverage}
+                  inline
+                  size={12}
+                  textSize={12}
+                />
+              ) : null}
               <FeedPublicationMeta
                 score={post.workerRatingAverage}
-                jobs={post.workerTotalJobsDone}
+                jobs={jobsDone}
                 antecedentesAprobado={post.workerAntecedentesAprobado}
                 oficios={post.workerMatriculasVerificadas}
+                showScore={!showNuevo}
               />
             </View>
             <View style={styles.tradeRow}>

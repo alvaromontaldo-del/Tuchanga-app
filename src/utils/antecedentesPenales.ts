@@ -83,6 +83,23 @@ export function parseMyAntecedentes(raw: unknown): MyAntecedentes | null {
   };
 }
 
+/** El alta no devuelve la ruta. Se conserva la que acaba de subir la app. */
+export function certificateAfterUpload(
+  raw: unknown,
+  uploaded: { storagePath: string; mimeType: string },
+): MyAntecedentes {
+  const parsed = parseMyAntecedentes(raw);
+  const storagePath = parsed?.storagePath || uploaded.storagePath.trim();
+  const mimeType = parsed?.mimeType || uploaded.mimeType;
+  return {
+    status: parsed?.status ?? 'pendiente',
+    asunto: parsed?.asunto ?? null,
+    mimeType,
+    updatedAt: parsed?.updatedAt ?? '',
+    storagePath: storagePath || null,
+  };
+}
+
 export function antecedentesUploadErrorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error ?? '');
   if (/native module|ExponentDocumentPicker|expo-document-picker/i.test(raw)) {

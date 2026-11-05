@@ -12,6 +12,7 @@ import {
   antecedentesImageResize,
   antecedentesObjectName,
   antecedentesPdfRejected,
+  certificateAfterUpload,
   parseMyAntecedentes,
   type MyAntecedentes,
 } from '../utils/antecedentesPenales';
@@ -165,15 +166,7 @@ export async function uploadMyAntecedentesPenales(input: {
       : null;
   if (previous && previous !== path) await removeQuiet(previous);
 
-  return (
-    parseMyAntecedentes(data) ?? {
-      status: 'pendiente',
-      asunto: null,
-      mimeType: mime,
-      updatedAt: '',
-      storagePath: path,
-    }
-  );
+  return certificateAfterUpload(data, { storagePath: path, mimeType: mime });
 }
 
 export async function signedAntecedentesUrl(path: string): Promise<string | null> {
