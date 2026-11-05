@@ -270,6 +270,10 @@ BEGIN
 END;
 $function$;
 
+-- El sello exige que el admin haya aprobado la identidad actual (número y entidad)
+-- y que quede al menos una foto aprobada. Sumar fotos no cambia el status.
+-- Cambiar número o entidad lo pasa a pendiente: las fotos viejas no se borran
+-- ni se rechazan, pero no alcanzan para mostrar verificado el dato nuevo.
 CREATE OR REPLACE FUNCTION public._oficio_verificado(p_user_id uuid, p_oficio text)
  RETURNS boolean
  LANGUAGE sql
@@ -281,7 +285,7 @@ AS $function$
     FROM public.matriculas m
     WHERE m.user_id = p_user_id
       AND m.oficio_codigo = p_oficio
-      AND m.status IS DISTINCT FROM 'rechazada'
+      AND m.status = 'aprobada'
       AND EXISTS (
         SELECT 1
         FROM public.matricula_fotos f
@@ -644,6 +648,9 @@ BEGIN
     FROM unnest(v_paths) AS p;
   END IF;
 
+  -- Identidad distinta (número o entidad): no se borra ninguna foto ni se le cambia
+  -- el estado. El sello cae porque el status deja de ser 'aprobada' hasta una revisión.
+  -- No se tocan otros oficios: el UPDATE filtra por v_oficio.
   IF v_status = 'rechazada' OR v_changed THEN
     UPDATE public.matriculas
     SET numero = v_numero,

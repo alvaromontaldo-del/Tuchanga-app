@@ -190,15 +190,59 @@ export function matriculaOficiosFromTrades(trades: MatriculaTradeRef[]): Matricu
 }
 
 /**
- * Oficio verificado: la matrícula no está rechazada y queda al menos una foto aprobada.
- * Sin foto aprobada no hay tilde, aunque el estado histórico siga diciendo aprobada.
+ * Sello del oficio: el admin aprobó la identidad actual y queda al menos una foto aprobada.
+ * Un envío pendiente, aunque conserve fotos aprobadas de la identidad anterior, no se muestra.
  */
 export function oficioVerificado(input: {
   status: string | null | undefined;
   fotos: { status: string }[];
 }): boolean {
-  if (input.status === 'rechazada' || !input.status) return false;
+  if (input.status !== 'aprobada') return false;
   return input.fotos.some((foto) => foto.status === 'aprobada');
+}
+
+export function identidadMatriculaDistinta(
+  actual: { numero: string; entidad: string },
+  siguiente: { numero: string; entidad: string },
+): boolean {
+  return (
+    actual.numero.trim() !== siguiente.numero.trim() || actual.entidad.trim() !== siguiente.entidad.trim()
+  );
+}
+
+export type OficioMatriculaState = {
+  oficio: MatriculaOficioCodigo;
+  status: MatriculaStatus;
+  numero: string;
+  entidad: string;
+  fotos: { id: string; status: MatriculaFotoStatus }[];
+};
+
+/**
+ * Sumar fotos no cambia las ya guardadas ni el status aprobado.
+ * Cambiar número o entidad deja el envío pendiente y conserva cada foto anterior.
+ * El oficio de la fila no se mueve.
+ */
+export function aplicarEnvioMatriculaOficio(input: {
+  estado: OficioMatriculaState;
+  numero: string;
+  entidad: string;
+  fotosNuevas: number;
+}): OficioMatriculaState {
+  const cambio = identidadMatriculaDistinta(input.estado, input);
+  const fotos = fotosTrasAgregar(input.estado.fotos, input.fotosNuevas).map((foto) => ({
+    id: foto.id,
+    status: foto.status as MatriculaFotoStatus,
+  }));
+  const status: MatriculaStatus =
+    cambio || input.estado.status === 'rechazada' ? 'pendiente' : input.estado.status;
+  return {
+    oficio: input.estado.oficio,
+    status,
+    numero: input.numero.trim(),
+    entidad: input.entidad.trim(),
+    fotos,
+  };
 }
 
 export function quedaVerificadaAlBorrar(

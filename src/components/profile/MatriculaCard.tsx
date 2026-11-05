@@ -200,6 +200,10 @@ export function MatriculaCard({ oficio, row, puedeCargar, onReload }: Props) {
       toast.error('No hay fotos nuevas ni cambios para enviar.', catalog.titulo);
       return;
     }
+    const identidadNueva = Boolean(
+      row && (numero.trim() !== row.numero || entidad.trim() !== row.entidad),
+    );
+    const fotosNuevas = photos.length;
     setBusy(true);
     try {
       await uploadMyMatriculaOficio({
@@ -211,9 +215,11 @@ export function MatriculaCard({ oficio, row, puedeCargar, onReload }: Props) {
       setPhotos([]);
       await onReload();
       toast.success(
-        photos.length > 0
-          ? 'Las fotos nuevas quedaron en revisión. Las que ya estaban aprobadas siguen igual.'
-          : 'Quedó en revisión. Te avisamos si hace falta corregir algo.',
+        identidadNueva
+          ? 'El número o la entidad quedaron en revisión. Las fotos anteriores siguen guardadas.'
+          : fotosNuevas > 0
+            ? 'Las fotos nuevas quedaron en revisión. Las que ya estaban aprobadas siguen igual.'
+            : 'Quedó en revisión. Te avisamos si hace falta corregir algo.',
         catalog.titulo,
       );
     } catch (e) {
@@ -273,6 +279,13 @@ export function MatriculaCard({ oficio, row, puedeCargar, onReload }: Props) {
           <Text style={styles.rejectedTitle}>No se aprobó. Podés enviar otra.</Text>
           {row.motivo ? <Text style={styles.rejectedBody}>{row.motivo}</Text> : null}
         </View>
+      ) : null}
+
+      {row?.status === 'pendiente' && row.fotos.some((foto) => foto.status === 'aprobada') ? (
+        <Text style={styles.hint}>
+          El número o la entidad están en revisión. El sello no se muestra hasta que los veamos. Las
+          fotos anteriores siguen guardadas.
+        </Text>
       ) : null}
 
       {row?.fotos.some((foto) => foto.status === 'rechazada' && foto.motivo) ? (

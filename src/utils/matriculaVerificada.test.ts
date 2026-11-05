@@ -31,6 +31,8 @@ import {
   fotosTrasAgregar,
   excedeTopeMatricula,
   parseMyMatriculas,
+  aplicarEnvioMatriculaOficio,
+  type OficioMatriculaState,
 } from './matriculaVerificada';
 import { feedPublicationLine, feedTrustIcons } from './feedTrust';
 
@@ -277,6 +279,7 @@ describe('matrícula verificada', () => {
       { id: 'b', status: 'aprobada' },
     ];
     expect(oficioVerificado({ status: 'aprobada', fotos: aprobadas })).toBe(true);
+    expect(oficioVerificado({ status: 'pendiente', fotos: aprobadas })).toBe(false);
     expect(quedaVerificadaAlBorrar({ status: 'aprobada', fotos: aprobadas }, 'a')).toBe(true);
     expect(quedaVerificadaAlBorrar({ status: 'aprobada', fotos: [aprobadas[0]], }, 'a')).toBe(false);
     expect(oficioVerificado({ status: 'rechazada', fotos: aprobadas })).toBe(false);
@@ -295,6 +298,60 @@ describe('matrícula verificada', () => {
       'electricidad',
     ]);
     expect(feedTrustIcons(false, ['fumigacion'])).toEqual(['fumigacion']);
+    const gas: OficioMatriculaState = {
+      oficio: 'gas',
+      status: 'aprobada',
+      numero: 'G-1',
+      entidad: 'ENARGAS',
+      fotos: [{ id: 'gas-1', status: 'aprobada' }],
+    };
+    const electricidad: OficioMatriculaState = {
+      oficio: 'electricidad',
+      status: 'aprobada',
+      numero: 'E-9',
+      entidad: 'ERSEP',
+      fotos: [{ id: 'elec-1', status: 'aprobada' }],
+    };
+
+    const soloFoto = aplicarEnvioMatriculaOficio({
+      estado: gas,
+      numero: 'G-1',
+      entidad: 'ENARGAS',
+      fotosNuevas: 1,
+    });
+    expect(soloFoto.oficio).toBe('gas');
+    expect(soloFoto.status).toBe('aprobada');
+    expect(soloFoto.fotos.map((foto) => foto.status)).toEqual(['aprobada', 'pendiente']);
+    expect(oficioVerificado(soloFoto)).toBe(true);
+    expect(oficioVerificado(electricidad)).toBe(true);
+
+    const otroNumero = aplicarEnvioMatriculaOficio({
+      estado: gas,
+      numero: 'G-2',
+      entidad: 'ENARGAS',
+      fotosNuevas: 0,
+    });
+    expect(otroNumero.status).toBe('pendiente');
+    expect(otroNumero.numero).toBe('G-2');
+    expect(otroNumero.fotos).toEqual([{ id: 'gas-1', status: 'aprobada' }]);
+    expect(oficioVerificado(otroNumero)).toBe(false);
+    expect(electricidad.numero).toBe('E-9');
+    expect(oficioVerificado(electricidad)).toBe(true);
+
+    const otraEntidad = aplicarEnvioMatriculaOficio({
+      estado: gas,
+      numero: 'G-1',
+      entidad: 'Otro ente',
+      fotosNuevas: 1,
+    });
+    expect(otraEntidad.status).toBe('pendiente');
+    expect(otraEntidad.fotos.map((foto) => [foto.id, foto.status])).toEqual([
+      ['gas-1', 'aprobada'],
+      ['nueva-1', 'pendiente'],
+    ]);
+    expect(oficioVerificado(otraEntidad)).toBe(false);
+    expect(oficioVerificado(electricidad)).toBe(true);
+
     expect(
       parseMyMatriculas({
         oficios: [{ oficio: 'sin_vincular', status: 'aprobada', fotos: [{ id: '1', status: 'aprobada', storage_path: 'a/b.jpg' }] }],
