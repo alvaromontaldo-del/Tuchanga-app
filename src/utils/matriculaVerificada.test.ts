@@ -24,7 +24,20 @@ import {
   matriculaCardMode,
   profileOffersMatricula,
   tradeRequiresMatricula,
+  matriculaOficioCodigo,
+  matriculaOficiosFromTrades,
+  oficioVerificado,
+  quedaVerificadaAlBorrar,
+  fotosTrasAgregar,
+  excedeTopeMatricula,
+  parseMyMatriculas,
+  aplicarEnvioMatriculaOficio,
+  problemaEnvioMatriculaOficio,
+  MATRICULA_IDENTIDAD_SIN_LUGAR,
+  MATRICULA_RECHAZO_SIN_FOTO,
+  type OficioMatriculaState,
 } from './matriculaVerificada';
+import { feedPublicationLine, feedTrustIcons } from './feedTrust';
 
 const ROOT = resolve(__dirname, '../..');
 
@@ -231,9 +244,185 @@ describe('matrícula verificada', () => {
 
     const abm = read('src/screens/account/WorkerABMScreen.tsx');
     expect(abm).toContain('matriculaCardMode');
-    expect(abm).toContain('MATRICULA_SAVE_FIRST');
-    expect(abm).toContain('<MatriculaCard />');
+    expect(abm).toContain('MatriculasPorOficio');
     expect(abm).toContain('<AntecedentesPenalesCard />');
+    const section = read('src/components/profile/MatriculasPorOficio.tsx');
+    expect(section).toContain('MATRICULA_SAVE_FIRST');
+    const sql214 = read('supabase/card_77_214_matriculas_por_oficio.sql');
+    expect(sql214).toContain("SET oficio_codigo = 'sin_vincular'");
+    expect(sql214).not.toMatch(/UPDATE public\.matriculas[\s\S]{0,240}es_principal/);
+    expect(sql214).not.toMatch(/DELETE FROM public\.matriculas/i);
+    expect(sql214).not.toMatch(/DELETE FROM storage\.objects/i);
+    expect(sql214).not.toMatch(/eyJ/);
+    expect(sql214).not.toMatch(/invoke_vault_edge_webhook/);
+    expect(sql214).toContain('REVOKE ALL ON FUNCTION public.get_my_matriculas() FROM PUBLIC, anon');
+    expect(sql214).toContain('GRANT EXECUTE ON FUNCTION public.fetch_feed_posts(integer) TO anon, authenticated, service_role');
+    expect(sql214).toContain('worker_matriculas_verificadas text[]');
+    expect(sql214).toContain('worker_antecedentes_aprobado boolean');
+    expect(sql214).not.toMatch(/GRANT EXECUTE ON FUNCTION public\.get_my_matriculas\(\) TO anon/);
+    expect(sql214).not.toMatch(/GRANT EXECUTE ON FUNCTION public\._matricula_publica_verificada\(uuid\) TO anon/);
+  });
+
+  it('el tope es por oficio, borrar la última aprobada saca el tilde y el feed no inventa oficios', () => {
+    expect(matriculaOficioCodigo({ rubroSlug: 'gasista', name: 'Gas' })).toBe('gas');
+    expect(matriculaOficioCodigo({ name: 'Plomería' })).toBe('plomeria');
+    expect(
+      matriculaOficiosFromTrades([
+        { name: 'Gas', rubroSlug: 'gasista' },
+        { name: 'Gasista' },
+        { name: 'Electricidad', rubroSlug: 'electricidad' },
+      ]),
+    ).toEqual(['gas', 'electricidad']);
+    expect(excedeTopeMatricula(3, 1)).toBe(true);
+    expect(excedeTopeMatricula(2, 1)).toBe(false);
+    expect(excedeTopeMatricula(0, 3)).toBe(false);
+
+    const aprobadas = [
+      { id: 'a', status: 'aprobada' },
+      { id: 'b', status: 'aprobada' },
+    ];
+    expect(oficioVerificado({ status: 'aprobada', fotos: aprobadas })).toBe(true);
+    expect(oficioVerificado({ status: 'pendiente', fotos: aprobadas })).toBe(false);
+    expect(quedaVerificadaAlBorrar({ status: 'aprobada', fotos: aprobadas }, 'a')).toBe(true);
+    expect(quedaVerificadaAlBorrar({ status: 'aprobada', fotos: [aprobadas[0]], }, 'a')).toBe(false);
+    expect(oficioVerificado({ status: 'rechazada', fotos: aprobadas })).toBe(false);
+    expect(oficioVerificado({ status: 'aprobada', fotos: [] })).toBe(false);
+
+    const trasAgregar = fotosTrasAgregar(aprobadas, 1);
+    expect(trasAgregar[0]).toMatchObject({ id: 'a', status: 'aprobada' });
+    expect(trasAgregar[1]).toMatchObject({ id: 'b', status: 'aprobada' });
+    expect(trasAgregar[2]).toMatchObject({ status: 'pendiente' });
+
+    expect(feedPublicationLine('Horacio T.', 4.3, 6)).toBe('Horacio ★ 4.3 (6)');
+    expect(feedPublicationLine('Ana María Á.', 5, 2)).toBe('Ana María ★ 5.0 (2)');
+    expect(feedTrustIcons(true, ['gas', 'sin_vincular', 'electricidad', 'pendiente'])).toEqual([
+      'antecedentes',
+      'gas',
+      'electricidad',
+    ]);
+    expect(feedTrustIcons(false, ['fumigacion'])).toEqual(['fumigacion']);
+    const gas: OficioMatriculaState = {
+      oficio: 'gas',
+      status: 'aprobada',
+      numero: 'G-1',
+      entidad: 'ENARGAS',
+      identidadVersion: 1,
+      fotos: [{ id: 'gas-1', status: 'aprobada', identidadVersion: 1 }],
+    };
+    const electricidad: OficioMatriculaState = {
+      oficio: 'electricidad',
+      status: 'aprobada',
+      numero: 'E-9',
+      entidad: 'ERSEP',
+      identidadVersion: 1,
+      fotos: [{ id: 'elec-1', status: 'aprobada', identidadVersion: 1 }],
+    };
+
+    const soloFoto = aplicarEnvioMatriculaOficio({
+      estado: gas,
+      numero: 'G-1',
+      entidad: 'ENARGAS',
+      fotosNuevas: 1,
+    });
+    expect(soloFoto.oficio).toBe('gas');
+    expect(soloFoto.status).toBe('aprobada');
+    expect(soloFoto.identidadVersion).toBe(1);
+    expect(soloFoto.fotos.map((foto) => [foto.status, foto.identidadVersion])).toEqual([
+      ['aprobada', 1],
+      ['pendiente', 1],
+    ]);
+    expect(oficioVerificado(soloFoto)).toBe(true);
+    expect(oficioVerificado(electricidad)).toBe(true);
+
+    expect(
+      problemaEnvioMatriculaOficio({
+        estado: gas,
+        numero: 'G-2',
+        entidad: 'ENARGAS',
+        fotosNuevas: 0,
+      }),
+    ).toMatch(/foto nueva/);
+    expect(() =>
+      aplicarEnvioMatriculaOficio({
+        estado: gas,
+        numero: 'G-2',
+        entidad: 'ENARGAS',
+        fotosNuevas: 0,
+      }),
+    ).toThrow(/foto nueva/);
+
+    const otroNumero = aplicarEnvioMatriculaOficio({
+      estado: gas,
+      numero: 'G-2',
+      entidad: 'ENARGAS',
+      fotosNuevas: 1,
+    });
+    expect(otroNumero.status).toBe('pendiente');
+    expect(otroNumero.numero).toBe('G-2');
+    expect(otroNumero.identidadVersion).toBe(2);
+    expect(otroNumero.fotos).toEqual([
+      { id: 'gas-1', status: 'aprobada', identidadVersion: 1 },
+      { id: 'nueva-1', status: 'pendiente', identidadVersion: 2 },
+    ]);
+    expect(oficioVerificado(otroNumero)).toBe(false);
+    expect(oficioVerificado({ ...otroNumero, status: 'aprobada' })).toBe(false);
+    expect(electricidad.numero).toBe('E-9');
+    expect(electricidad.identidadVersion).toBe(1);
+    expect(oficioVerificado(electricidad)).toBe(true);
+
+    const otraEntidad = aplicarEnvioMatriculaOficio({
+      estado: gas,
+      numero: 'G-1',
+      entidad: 'Otro ente',
+      fotosNuevas: 1,
+    });
+    expect(otraEntidad.status).toBe('pendiente');
+    expect(otraEntidad.identidadVersion).toBe(2);
+    expect(otraEntidad.fotos.map((foto) => [foto.id, foto.status, foto.identidadVersion])).toEqual([
+      ['gas-1', 'aprobada', 1],
+      ['nueva-1', 'pendiente', 2],
+    ]);
+    expect(oficioVerificado(otraEntidad)).toBe(false);
+    expect(oficioVerificado(electricidad)).toBe(true);
+
+    const llena: OficioMatriculaState = {
+      ...gas,
+      fotos: [
+        { id: 'g1', status: 'aprobada', identidadVersion: 1 },
+        { id: 'g2', status: 'aprobada', identidadVersion: 1 },
+        { id: 'g3', status: 'pendiente', identidadVersion: 1 },
+      ],
+    };
+    expect(
+      problemaEnvioMatriculaOficio({
+        estado: llena,
+        numero: 'G-9',
+        entidad: 'ENARGAS',
+        fotosNuevas: 1,
+      }),
+    ).toBe(MATRICULA_IDENTIDAD_SIN_LUGAR);
+    expect(llena.fotos).toHaveLength(3);
+
+    expect(
+      problemaEnvioMatriculaOficio({
+        estado: { ...gas, status: 'rechazada' },
+        numero: 'G-1',
+        entidad: 'ENARGAS',
+        fotosNuevas: 0,
+      }),
+    ).toBe(MATRICULA_RECHAZO_SIN_FOTO);
+
+    expect(
+      parseMyMatriculas({
+        oficios: [{ oficio: 'sin_vincular', status: 'aprobada', fotos: [{ id: '1', status: 'aprobada', storage_path: 'a/b.jpg' }] }],
+        legado: {
+          status: 'aprobada',
+          numero: '1',
+          entidad: 'Ente',
+          fotos: [{ id: '1', status: 'aprobada', storage_path: 'a/b.jpg' }],
+        },
+      }).oficios,
+    ).toEqual([]);
   });
 
   it('smoke: login, roles, búsqueda, perfil, chat, cotizar, materiales y antecedentes', () => {

@@ -1,12 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, radii, spacing } from '../../constants/theme';
 import { isSupabaseConfigured } from '../../config/supabase';
 import {
+  deleteMyAntecedentesPenales,
   fetchMyAntecedentesPenales,
+  signedAntecedentesUrl,
   uploadMyAntecedentesPenales,
 } from '../../services/antecedentesPenalesSupabase';
 import {
@@ -38,6 +40,7 @@ async function pickPdf(): Promise<string | null> {
 export function AntecedentesPenalesCard() {
   const toast = useAppToast();
   const [row, setRow] = useState<MyAntecedentes | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
@@ -51,6 +54,11 @@ export function AntecedentesPenalesCard() {
       const next = await fetchMyAntecedentesPenales();
       setRow(next);
       setUnavailable(false);
+      if (next?.storagePath && next.mimeType !== 'application/pdf') {
+        setPreviewUrl(await signedAntecedentesUrl(next.storagePath));
+      } else {
+        setPreviewUrl(null);
+      }
     } catch (e) {
       const message = antecedentesUploadErrorMessage(e);
       if (/no está habilitada/i.test(message)) setUnavailable(true);
@@ -138,7 +146,40 @@ export function AntecedentesPenalesCard() {
     });
   }
 
+  function onDelete() {
+    if (!row?.storagePath) return;
+    const run = () => {
+      void (async () => {
+        setBusy(true);
+        try {
+          await deleteMyAntecedentesPenales();
+          setRow(null);
+          setPreviewUrl(null);
+        } catch (e) {
+          toast.error(antecedentesUploadErrorMessage(e), 'No se pudo borrar', { durationMs: 4600 });
+        } finally {
+          setBusy(false);
+        }
+      })();
+    };
+    Alert.alert('Eliminar certificado', 'Se deja de mostrar hasta que cargues otro archivo.', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Eliminar', style: 'destructive', onPress: run },
+    ]);
+  }
+
+  async function openFile() {
+    if (!row?.storagePath) return;
+    const url = previewUrl ?? (await signedAntecedentesUrl(row.storagePath));
+    if (!url) {
+      toast.error('No se pudo abrir el archivo.', 'Certificado');
+      return;
+    }
+    await Linking.openURL(url);
+  }
+
   const rejected = row?.status === 'rechazado';
+  const isPdf = row?.mimeType === 'application/pdf';
 
   return (
     <View style={styles.wrap}>
@@ -189,6 +230,33 @@ export function AntecedentesPenalesCard() {
           <View style={styles.rejected}>
             <Text style={styles.rejectedTitle}>No se aprobó. Podés enviar otro archivo.</Text>
             {row?.asunto ? <Text style={styles.rejectedBody}>{row.asunto}</Text> : null}
+          </View>
+        ) : null}
+
+        {row?.storagePath ? (
+          <View style={styles.filePreview}>
+            <Pressable
+              onPress={() => void openFile()}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel={isPdf ? 'Abrir el PDF del certificado' : 'Ver la foto del certificado'}
+              style={styles.fileOpen}
+            >
+              {isPdf || !previewUrl ? (
+                <Ionicons name="document-text-outline" size={28} color={colors.primary} />
+              ) : (
+                <Image source={{ uri: previewUrl }} style={styles.fileImage} />
+              )}
+            </Pressable>
+            <Pressable
+              onPress={onDelete}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel="Quitar certificado"
+              style={styles.fileRemove}
+            >
+              <Ionicons name="close" size={14} color={colors.text} />
+            </Pressable>
           </View>
         ) : null}
 
@@ -322,4 +390,26 @@ const styles = StyleSheet.create({
   },
   secondaryText: { color: colors.text, fontWeight: '800', fontSize: 14 },
   pressed: { opacity: 0.88 },
+  filePreview: {
+    marginTop: spacing.md,
+    width: 84,
+    height: 84,
+    borderRadius: 14,
+    backgroundColor: '#F6F6F6',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  fileOpen: { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 14, overflow: 'hidden' },
+  fileImage: { width: '100%', height: '100%' },
+  fileRemove: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.92)',
+  },
 });

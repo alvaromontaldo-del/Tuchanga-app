@@ -1,6 +1,7 @@
 import { File as ExpoFsFile } from 'expo-file-system';
 import { getSupabaseClient } from '../lib/supabase';
 import { mapContentModerationError } from '../utils/contentModerationErrors';
+import { parseFeedOficioCodes } from '../utils/feedTrust';
 import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
 import { completedJobsFromPayload } from '../utils/workerReputation';
 import { fetchCompletedJobsByProfileIds } from './workerCompletedJobs';
@@ -140,6 +141,8 @@ type PostFeedRow = {
   worker_total_jobs_done?: number | null;
   like_count?: number | null;
   liked_by_me?: boolean | null;
+  worker_antecedentes_aprobado?: boolean | null;
+  worker_matriculas_verificadas?: unknown;
 };
 
 function mapPostFeedRow(x: PostFeedRow) {
@@ -167,6 +170,8 @@ function mapPostFeedRow(x: PostFeedRow) {
     createdAt: x.created_at,
     likeCount: Math.max(0, Number(x.like_count ?? 0) || 0),
     likedByMe: Boolean(x.liked_by_me),
+    workerAntecedentesAprobado: x.worker_antecedentes_aprobado === true,
+    workerMatriculasVerificadas: parseFeedOficioCodes(x.worker_matriculas_verificadas),
   };
 }
 

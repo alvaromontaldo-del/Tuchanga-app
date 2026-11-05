@@ -8,6 +8,7 @@ import {
   ANTECEDENTES_IMAGE_TARGET_BYTES,
   ANTECEDENTES_JPEG_QUALITIES,
   ANTECEDENTES_PDF_MAX_BYTES,
+  ANTECEDENTES_SIGNED_URL_TTL_SEC,
   antecedentesImageResize,
   antecedentesObjectName,
   antecedentesPdfRejected,
@@ -170,6 +171,30 @@ export async function uploadMyAntecedentesPenales(input: {
       asunto: null,
       mimeType: mime,
       updatedAt: '',
+      storagePath: path,
     }
   );
+}
+
+export async function signedAntecedentesUrl(path: string): Promise<string | null> {
+  const name = path.trim();
+  if (!name) return null;
+  const sb = getSupabaseClient();
+  const { data, error } = await sb.storage
+    .from(ANTECEDENTES_BUCKET)
+    .createSignedUrl(name, ANTECEDENTES_SIGNED_URL_TTL_SEC);
+  if (error || !data?.signedUrl) return null;
+  return data.signedUrl;
+}
+
+/** Borra la fila del certificado. El estado vuelve a no tener envío; no hay revisión por archivo. */
+export async function deleteMyAntecedentesPenales(): Promise<void> {
+  const sb = getSupabaseClient();
+  const { data, error } = await sb.rpc('delete_my_antecedentes_penales');
+  if (error) throw new Error(error.message);
+  const path =
+    data && typeof data === 'object' && typeof (data as { storage_path?: unknown }).storage_path === 'string'
+      ? (data as { storage_path: string }).storage_path
+      : '';
+  if (path) await removeQuiet(path);
 }

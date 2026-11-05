@@ -15,6 +15,10 @@ export type FeedPost = {
   workerReviewCount?: number;
   /** Trabajos finalizados (`profiles.total_jobs_done`). Ausente = dato legacy. */
   workerTotalJobsDone?: number;
+  /** Certificado aprobado. Sin archivo. */
+  workerAntecedentesAprobado?: boolean;
+  /** Oficios con matrícula verificada. Nunca incluye el legado sin vínculo. */
+  workerMatriculasVerificadas?: string[];
   /** Hasta 3 fotos por publicación */
   workImageUrls: string[];
   description: string;

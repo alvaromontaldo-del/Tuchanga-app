@@ -70,6 +70,62 @@ export type MyMatricula = {
   updatedAt: string;
 };
 
+/** Códigos persistidos. No incluyen el legado `sin_vincular`. */
+export const MATRICULA_OFICIO_CODIGOS = ['gas', 'electricidad', 'plomeria', 'fumigacion'] as const;
+
+export type MatriculaOficioCodigo = (typeof MATRICULA_OFICIO_CODIGOS)[number];
+
+export type MatriculaFotoStatus = 'pendiente' | 'aprobada' | 'rechazada';
+
+export const MATRICULA_OFICIO_CATALOG: Record<
+  MatriculaOficioCodigo,
+  { titulo: string; descripcion: string }
+> = {
+  gas: { titulo: 'Gas', descripcion: 'Matrícula de gasista.' },
+  electricidad: { titulo: 'Electricidad', descripcion: 'Matrícula de electricista.' },
+  plomeria: { titulo: 'Plomería', descripcion: 'Matrícula de plomería.' },
+  fumigacion: { titulo: 'Fumigación', descripcion: 'Matrícula de fumigación.' },
+};
+
+export const MATRICULA_DELETE_APPROVED_WARNING =
+  'Si borrás esta foto aprobada y cargás otra, la vamos a tener que volver a revisar.';
+
+export type MyMatriculaFoto = {
+  id: string;
+  status: MatriculaFotoStatus;
+  motivo: string | null;
+  storagePath: string;
+  /** Versión de número/entidad con la que se cargó. Null si el payload no la trae: no cuenta para el sello. */
+  identidadVersion: number | null;
+};
+
+export type MyMatriculaOficio = {
+  oficio: MatriculaOficioCodigo;
+  status: MatriculaStatus;
+  numero: string;
+  entidad: string;
+  motivo: string | null;
+  identidadVersion: number | null;
+  verificada: boolean;
+  fotos: MyMatriculaFoto[];
+};
+
+export type MyMatriculaLegado = {
+  vinculo: 'sin_evidencia';
+  status: MatriculaStatus;
+  numero: string;
+  entidad: string;
+  motivo: string | null;
+  identidadVersion: number | null;
+  verificada: boolean;
+  fotos: MyMatriculaFoto[];
+};
+
+export type MyMatriculasBundle = {
+  oficios: MyMatriculaOficio[];
+  legado: MyMatriculaLegado | null;
+};
+
 export type MatriculaTradeRef = {
   name?: string | null;
   rubroSlug?: string | null;
@@ -111,6 +167,168 @@ export function matriculaCardMode(
   if (profileOffersMatricula(saved)) return 'ready';
   if (profileOffersMatricula(draft)) return 'save-first';
   return 'hidden';
+}
+
+export function matriculaOficioCodigo(trade: MatriculaTradeRef): MatriculaOficioCodigo | null {
+  const slug = String(trade.rubroSlug ?? '').trim().toLowerCase();
+  if (slug === 'gasista') return 'gas';
+  if (slug === 'electricidad') return 'electricidad';
+  if (slug === 'plomeria') return 'plomeria';
+  if (slug === 'control-plagas-fumigacion') return 'fumigacion';
+  const name = foldMatriculaTradeName(String(trade.name ?? ''));
+  if (name === 'gas' || name === 'gasista') return 'gas';
+  if (name === 'electricidad' || name === 'electricista') return 'electricidad';
+  if (name === 'plomeria' || name === 'plomero') return 'plomeria';
+  if (name === 'control de plagas y fumigacion' || name === 'fumigacion') return 'fumigacion';
+  return null;
+}
+
+/** Un código por oficio guardado, sin duplicar gas/gasista ni inventar uno que no esté. */
+export function matriculaOficiosFromTrades(trades: MatriculaTradeRef[]): MatriculaOficioCodigo[] {
+  const out: MatriculaOficioCodigo[] = [];
+  for (const trade of trades) {
+    const code = matriculaOficioCodigo(trade);
+    if (code && !out.includes(code)) out.push(code);
+  }
+  return out;
+}
+
+/**
+ * Sello del oficio: el admin aprobó la identidad actual y queda al menos una foto aprobada.
+ * Un envío pendiente, aunque conserve fotos aprobadas de la identidad anterior, no se muestra.
+ */
+function versionEntera(value: unknown): number | null {
+  const version = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(version) || version < 1) return null;
+  return version;
+}
+
+export function oficioVerificado(input: {
+  status: string | null | undefined;
+  identidadVersion?: number | null;
+  fotos: { status: string; identidadVersion?: number | null }[];
+}): boolean {
+  if (input.status !== 'aprobada') return false;
+  const version = input.identidadVersion ?? null;
+  return input.fotos.some((foto) => {
+    if (foto.status !== 'aprobada') return false;
+    const fotoVersion = foto.identidadVersion ?? null;
+    if (version == null) return fotoVersion == null;
+    return fotoVersion === version;
+  });
+}
+
+export function identidadMatriculaDistinta(
+  actual: { numero: string; entidad: string },
+  siguiente: { numero: string; entidad: string },
+): boolean {
+  return (
+    actual.numero.trim() !== siguiente.numero.trim() || actual.entidad.trim() !== siguiente.entidad.trim()
+  );
+}
+
+export type OficioMatriculaState = {
+  oficio: MatriculaOficioCodigo;
+  status: MatriculaStatus;
+  numero: string;
+  entidad: string;
+  identidadVersion: number;
+  fotos: { id: string; status: MatriculaFotoStatus; identidadVersion: number }[];
+};
+
+export const MATRICULA_IDENTIDAD_SIN_LUGAR =
+  'Para cambiar el número o entidad, eliminá una foto anterior para cargar la nueva.';
+
+export const MATRICULA_RECHAZO_SIN_FOTO =
+  'Para volver a enviar una matrícula rechazada tenés que sumar una foto nueva.';
+
+export function problemaEnvioMatriculaOficio(input: {
+  estado: { numero: string; entidad: string; status?: string; fotos?: unknown[] };
+  numero: string;
+  entidad: string;
+  fotosNuevas: number;
+}): string | null {
+  const cambio = identidadMatriculaDistinta(input.estado, input);
+  const guardadas = input.estado.fotos?.length ?? 0;
+  const nuevas = Math.max(0, Math.floor(input.fotosNuevas));
+  if (cambio && guardadas + Math.max(nuevas, 1) > MATRICULA_MAX_PHOTOS) {
+    return MATRICULA_IDENTIDAD_SIN_LUGAR;
+  }
+  if (cambio && nuevas < 1) {
+    return 'Para cambiar el número o la entidad tenés que sumar una foto nueva.';
+  }
+  if (input.estado.status === 'rechazada' && nuevas < 1) {
+    return MATRICULA_RECHAZO_SIN_FOTO;
+  }
+  return null;
+}
+
+/**
+ * Sumar fotos no cambia las ya guardadas ni su versión.
+ * Cambiar número o entidad exige una foto nueva, sube la versión y deja el envío pendiente.
+ * Las fotos viejas conservan versión y estado. El oficio de la fila no se mueve.
+ */
+export function aplicarEnvioMatriculaOficio(input: {
+  estado: OficioMatriculaState;
+  numero: string;
+  entidad: string;
+  fotosNuevas: number;
+}): OficioMatriculaState {
+  const problema = problemaEnvioMatriculaOficio(input);
+  if (problema) throw new Error(problema);
+  const cambio = identidadMatriculaDistinta(input.estado, input);
+  const version = cambio ? input.estado.identidadVersion + 1 : input.estado.identidadVersion;
+  const previas = input.estado.fotos.map((foto) => ({ ...foto }));
+  const fotos = previas;
+  const added = Math.max(0, Math.floor(input.fotosNuevas));
+  for (let i = 0; i < added; i += 1) {
+    fotos.push({ id: `nueva-${i + 1}`, status: 'pendiente', identidadVersion: version });
+  }
+  const status: MatriculaStatus =
+    cambio || input.estado.status === 'rechazada' ? 'pendiente' : input.estado.status;
+  return {
+    oficio: input.estado.oficio,
+    status,
+    numero: input.numero.trim(),
+    entidad: input.entidad.trim(),
+    identidadVersion: version,
+    fotos,
+  };
+}
+
+export function quedaVerificadaAlBorrar(
+  input: { status: string | null | undefined; fotos: { id: string; status: string }[] },
+  fotoId: string,
+): boolean {
+  return oficioVerificado({
+    status: input.status,
+    fotos: input.fotos.filter((foto) => foto.id !== fotoId),
+  });
+}
+
+/** Las fotos nuevas entran pendientes y no cambian el estado de las que ya estaban. */
+export function fotosTrasAgregar<T extends { id: string; status: string }>(
+  previas: T[],
+  cantidadNueva: number,
+): Array<T | { id: string; status: 'pendiente' }> {
+  const next: Array<T | { id: string; status: 'pendiente' }> = previas.map((foto) => ({ ...foto }));
+  const added = Math.max(0, Math.floor(cantidadNueva));
+  for (let i = 0; i < added; i += 1) {
+    next.push({ id: `nueva-${i + 1}`, status: 'pendiente' });
+  }
+  return next;
+}
+
+export function excedeTopeMatricula(guardadas: number, nuevas: number): boolean {
+  const saved = Math.max(0, Math.floor(guardadas));
+  const added = Math.max(0, Math.floor(nuevas));
+  return saved + added > MATRICULA_MAX_PHOTOS;
+}
+
+export function matriculaRoom(guardadas: number, borradores: number): number {
+  const saved = Math.max(0, Math.floor(Number(guardadas) || 0));
+  const drafts = Math.max(0, Math.floor(Number(borradores) || 0));
+  return Math.max(0, MATRICULA_MAX_PHOTOS - saved - drafts);
 }
 
 export function matriculaImageResize(
@@ -175,6 +393,92 @@ export function matriculaUploadErrorMessage(error: unknown): string {
     return 'La carga de la matrícula todavía no está habilitada.';
   }
   return raw.trim() || 'No se pudo cargar la matrícula.';
+}
+
+function parseMatriculaFoto(raw: unknown): MyMatriculaFoto | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const row = raw as Record<string, unknown>;
+  const id = typeof row.id === 'string' ? row.id.trim() : '';
+  const storagePath = typeof row.storage_path === 'string' ? row.storage_path.trim() : '';
+  const status = row.status;
+  if (!id || !storagePath) return null;
+  if (status !== 'pendiente' && status !== 'aprobada' && status !== 'rechazada') return null;
+  const motivoRaw = typeof row.motivo === 'string' ? row.motivo.trim() : '';
+  return {
+    id,
+    status,
+    storagePath,
+    motivo: status === 'rechazada' && motivoRaw ? motivoRaw : null,
+    identidadVersion: versionEntera(row.identidad_version),
+  };
+}
+
+function parseMatriculaStatus(raw: unknown): MatriculaStatus | null {
+  return raw === 'pendiente' || raw === 'aprobada' || raw === 'rechazada' ? raw : null;
+}
+
+function parseOficioRow(raw: unknown): MyMatriculaOficio | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const row = raw as Record<string, unknown>;
+  const oficio = row.oficio;
+  if (
+    oficio !== 'gas' &&
+    oficio !== 'electricidad' &&
+    oficio !== 'plomeria' &&
+    oficio !== 'fumigacion'
+  ) {
+    return null;
+  }
+  const status = parseMatriculaStatus(row.status);
+  if (!status) return null;
+  const fotos = Array.isArray(row.fotos)
+    ? row.fotos.map(parseMatriculaFoto).filter((foto): foto is MyMatriculaFoto => foto != null)
+    : [];
+  const motivoRaw = typeof row.motivo === 'string' ? row.motivo.trim() : '';
+  const identidadVersion = versionEntera(row.identidad_version);
+  return {
+    oficio,
+    status,
+    numero: typeof row.numero === 'string' ? row.numero.trim() : '',
+    entidad: typeof row.entidad === 'string' ? row.entidad.trim() : '',
+    motivo: status === 'rechazada' && motivoRaw ? motivoRaw : null,
+    identidadVersion,
+    verificada: oficioVerificado({ status, identidadVersion, fotos }),
+    fotos,
+  };
+}
+
+/** Ignora oficios desconocidos y no convierte el legado en un oficio. */
+export function parseMyMatriculas(raw: unknown): MyMatriculasBundle {
+  const empty: MyMatriculasBundle = { oficios: [], legado: null };
+  if (!raw || typeof raw !== 'object') return empty;
+  const row = raw as Record<string, unknown>;
+  const oficios = Array.isArray(row.oficios)
+    ? row.oficios.map(parseOficioRow).filter((item): item is MyMatriculaOficio => item != null)
+    : [];
+  let legado: MyMatriculaLegado | null = null;
+  if (row.legado && typeof row.legado === 'object') {
+    const legacy = row.legado as Record<string, unknown>;
+    const status = parseMatriculaStatus(legacy.status);
+    if (status) {
+      const fotos = Array.isArray(legacy.fotos)
+        ? legacy.fotos.map(parseMatriculaFoto).filter((foto): foto is MyMatriculaFoto => foto != null)
+        : [];
+      const motivoRaw = typeof legacy.motivo === 'string' ? legacy.motivo.trim() : '';
+      const identidadVersion = versionEntera(legacy.identidad_version);
+      legado = {
+        vinculo: 'sin_evidencia',
+        status,
+        numero: typeof legacy.numero === 'string' ? legacy.numero.trim() : '',
+        entidad: typeof legacy.entidad === 'string' ? legacy.entidad.trim() : '',
+        motivo: status === 'rechazada' && motivoRaw ? motivoRaw : null,
+        identidadVersion,
+        verificada: oficioVerificado({ status, identidadVersion, fotos }),
+        fotos,
+      };
+    }
+  }
+  return { oficios, legado };
 }
 
 export function previousMatriculaPaths(raw: unknown): string[] {

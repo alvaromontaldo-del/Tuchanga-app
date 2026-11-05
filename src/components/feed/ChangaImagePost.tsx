@@ -9,9 +9,10 @@ import { PostImageCarousel } from './PostImageCarousel';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { formatPostDate } from '../../utils/formatDate';
 import type { FeedPost } from '../../types/feed';
-import { StarRating } from '../profile/StarRating';
 import { APP_NAME } from '../../constants/brand';
+import { feedPublicationLine } from '../../utils/feedTrust';
 import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
+import { FeedPublicationMeta } from './FeedPublicationMeta';
 
 type Props = {
   post: FeedPost;
@@ -41,8 +42,11 @@ export function ChangaImagePost({
 
   const showMenu = Boolean(onRequestDelete || onRequestHide);
   const workerName = professionalDisplayNameForClient(post.workerFirstName);
-  const rating = post.workerRatingAverage;
-  const reviewCount = post.workerReviewCount;
+  const publicationLine = feedPublicationLine(
+    post.workerFirstName,
+    post.workerRatingAverage,
+    post.workerTotalJobsDone,
+  );
 
   async function onShare() {
     try {
@@ -77,16 +81,18 @@ export function ChangaImagePost({
         >
           <ClickableAvatar uri={post.workerAvatarUrl} style={styles.avatar} />
           <View style={styles.headerText}>
-            <View style={styles.nameRow}>
+            <View
+              style={styles.nameRow}
+              accessibilityLabel={publicationLine}
+            >
               <Text style={styles.name} numberOfLines={1}>
                 {workerName}
               </Text>
-              <StarRating
-                score={rating}
-                reviewCount={reviewCount}
-                completedJobs={post.workerTotalJobsDone}
-                size={12}
-                textSize={12}
+              <FeedPublicationMeta
+                score={post.workerRatingAverage}
+                jobs={post.workerTotalJobsDone}
+                antecedentesAprobado={post.workerAntecedentesAprobado}
+                oficios={post.workerMatriculasVerificadas}
               />
             </View>
             <View style={styles.tradeRow}>
@@ -277,6 +283,7 @@ const styles = StyleSheet.create({
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     minWidth: 0,
     gap: 8,
   },

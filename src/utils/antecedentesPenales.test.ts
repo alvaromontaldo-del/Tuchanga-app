@@ -67,6 +67,7 @@ describe('antecedentes penales', () => {
       asunto: 'La foto está cortada',
       mimeType: 'image/jpeg',
       updatedAt: '2026-10-09T12:00:00Z',
+      storagePath: null,
     });
   });
 
