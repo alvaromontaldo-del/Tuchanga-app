@@ -1,29 +1,28 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { useCallback, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppTextInput } from '../common/AppTextInput';
 import { colors, radii, spacing } from '../../constants/theme';
-import { isSupabaseConfigured } from '../../config/supabase';
-import { fetchMyMatricula, uploadMyMatricula } from '../../services/matriculaVerificadaSupabase';
 import {
-  MATRICULA_MAX_PHOTOS,
+  deleteMyMatriculaFoto,
+  signedMatriculaUrl,
+  uploadMyMatriculaOficio,
+} from '../../services/matriculaVerificadaSupabase';
+import {
+  MATRICULA_DELETE_APPROVED_WARNING,
+  MATRICULA_OFICIO_CATALOG,
   matriculaDraftProblem,
+  matriculaRoom,
   matriculaUploadErrorMessage,
-  type MyMatricula,
+  type MatriculaOficioCodigo,
+  type MyMatriculaFoto,
+  type MyMatriculaOficio,
 } from '../../utils/matriculaVerificada';
 import { ensureCameraPermission, ensureGalleryPermission } from '../../utils/mediaPermissions';
 import { useAppToast } from '../toast/toast';
 import { MatriculaVerificadaBadge } from './MatriculaVerificadaBadge';
+import { OficioMatriculaIcon } from './OficioMatriculaIcon';
 
 type DraftPhoto = { id: string; uri: string };
 
@@ -31,75 +30,151 @@ function photoId(): string {
   return `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function MatriculaCard() {
-  const toast = useAppToast();
-  const [row, setRow] = useState<MyMatricula | null>(null);
-  const [numero, setNumero] = useState('');
-  const [entidad, setEntidad] = useState('');
-  const [photos, setPhotos] = useState<DraftPhoto[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [unavailable, setUnavailable] = useState(false);
-  const hydrated = useRef(false);
+const FOTO_LABEL: Record<MyMatriculaFoto['status'], string> = {
+  pendiente: 'En revisión',
+  aprobada: 'Aprobada',
+  rechazada: 'Rechazada',
+};
 
-  const reload = useCallback(async () => {
-    if (!isSupabaseConfigured()) {
-      setLoading(false);
+function FotoEstado({ foto }: { foto: MyMatriculaFoto }) {
+  return (
+    <View
+      style={[
+        styles.fotoChip,
+        foto.status === 'aprobada' && styles.fotoChipOk,
+        foto.status === 'rechazada' && styles.fotoChipNo,
+      ]}
+    >
+      <Text
+        style={[
+          styles.fotoChipText,
+          foto.status === 'aprobada' && styles.fotoChipTextOk,
+          foto.status === 'rechazada' && styles.fotoChipTextNo,
+        ]}
+        numberOfLines={1}
+      >
+        {FOTO_LABEL[foto.status]}
+      </Text>
+    </View>
+  );
+}
+
+export function MatriculaPhotoTile({
+  uri,
+  label,
+  status,
+  busy,
+  onRemove,
+}: {
+  uri: string | null;
+  label: string;
+  status?: MyMatriculaFoto['status'];
+  busy?: boolean;
+  onRemove?: () => void;
+}) {
+  return (
+    <View style={styles.photo}>
+      {uri ? (
+        <Image source={{ uri }} style={styles.photoImg} />
+      ) : (
+        <View style={styles.photoFallback}>
+          <Ionicons name="image-outline" size={18} color="#C4B39A" />
+        </View>
+      )}
+      {status ? (
+        <View style={styles.fotoChipWrap}>
+          <FotoEstado foto={{ id: 'x', status, motivo: null, storagePath: '' }} />
+        </View>
+      ) : null}
+      {onRemove ? (
+        <Pressable
+          onPress={onRemove}
+          disabled={busy}
+          accessibilityRole="button"
+          accessibilityLabel={label}
+          style={styles.photoRemove}
+        >
+          <Ionicons name="close" size={14} color="#2C2416" />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+type Props = {
+  oficio: MatriculaOficioCodigo;
+  row: MyMatriculaOficio | null;
+  puedeCargar: boolean;
+  onReload: () => Promise<void>;
+};
+
+export function MatriculaCard({ oficio, row, puedeCargar, onReload }: Props) {
+  const toast = useAppToast();
+  const catalog = MATRICULA_OFICIO_CATALOG[oficio];
+  const [numero, setNumero] = useState(row?.numero ?? '');
+  const [entidad, setEntidad] = useState(row?.entidad ?? '');
+  const [photos, setPhotos] = useState<DraftPhoto[]>([]);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setNumero(row?.numero ?? '');
+    setEntidad(row?.entidad ?? '');
+  }, [row?.numero, row?.entidad, row?.status]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fotos = row?.fotos ?? [];
+    if (!fotos.length) {
+      setUrls({});
       return;
     }
-    try {
-      const next = await fetchMyMatricula();
-      setRow(next);
-      setUnavailable(false);
-      if (!hydrated.current) {
-        setNumero(next?.numero ?? '');
-        setEntidad(next?.entidad ?? '');
-        hydrated.current = true;
-      }
-    } catch (e) {
-      const message = matriculaUploadErrorMessage(e);
-      if (/no está habilitada/i.test(message)) setUnavailable(true);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    void (async () => {
+      const next: Record<string, string> = {};
+      await Promise.all(
+        fotos.map(async (foto) => {
+          const url = await signedMatriculaUrl(foto.storagePath);
+          if (url) next[foto.id] = url;
+        }),
+      );
+      if (!cancelled) setUrls(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [row?.fotos]);
 
-  useFocusEffect(
-    useCallback(() => {
-      void reload();
-    }, [reload]),
-  );
+  const saved = row?.fotos.length ?? 0;
+  const room = matriculaRoom(saved, photos.length);
+  const verificada = row?.verificada === true;
 
   function addUris(uris: string[]) {
     const incoming = uris.map((uri) => uri.trim()).filter(Boolean);
     if (!incoming.length) return;
     setPhotos((prev) => {
-      const room = MATRICULA_MAX_PHOTOS - prev.length;
-      if (room <= 0) return prev;
-      const next = incoming.slice(0, room).map((uri) => ({ id: photoId(), uri }));
-      return [...prev, ...next];
+      const space = matriculaRoom(saved, prev.length);
+      if (space <= 0) return prev;
+      return [...prev, ...incoming.slice(0, space).map((uri) => ({ id: photoId(), uri }))];
     });
   }
 
   async function onCamera() {
-    if (photos.length >= MATRICULA_MAX_PHOTOS) {
-      toast.error('Podés cargar hasta 3 fotos.', 'Matrícula');
+    if (!puedeCargar) return;
+    if (room <= 0) {
+      toast.error('Podés cargar hasta 3 fotos.', catalog.titulo);
       return;
     }
     const ok = await ensureCameraPermission();
     if (!ok) return;
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
-      quality: 1,
-    });
+    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 });
     if (result.canceled || !result.assets?.[0]?.uri) return;
     addUris([result.assets[0].uri]);
   }
 
   async function onGallery() {
-    const room = MATRICULA_MAX_PHOTOS - photos.length;
+    if (!puedeCargar) return;
     if (room <= 0) {
-      toast.error('Podés cargar hasta 3 fotos.', 'Matrícula');
+      toast.error('Podés cargar hasta 3 fotos.', catalog.titulo);
       return;
     }
     const ok = await ensureGalleryPermission();
@@ -115,29 +190,32 @@ export function MatriculaCard() {
   }
 
   async function send() {
-    const problem = matriculaDraftProblem({
-      numero,
-      entidad,
-      photos: photos.length,
-    });
-    if (problem) {
-      toast.error(problem, 'Matrícula');
+    const total = saved + photos.length;
+    const fieldProblem = matriculaDraftProblem({ numero, entidad, photos: Math.max(total, 0) });
+    if (fieldProblem) {
+      toast.error(fieldProblem, catalog.titulo);
+      return;
+    }
+    if (row && photos.length === 0 && numero.trim() === row.numero && entidad.trim() === row.entidad) {
+      toast.error('No hay fotos nuevas ni cambios para enviar.', catalog.titulo);
       return;
     }
     setBusy(true);
     try {
-      const next = await uploadMyMatricula({
+      await uploadMyMatriculaOficio({
+        oficio,
         numero,
         entidad,
         uris: photos.map((photo) => photo.uri),
       });
-      setRow(next);
-      setNumero(next.numero || numero.trim());
-      setEntidad(next.entidad || entidad.trim());
       setPhotos([]);
-      setUnavailable(false);
-      hydrated.current = true;
-      toast.success('Quedó en revisión. Te avisamos si hace falta corregir algo.', 'Matrícula');
+      await onReload();
+      toast.success(
+        photos.length > 0
+          ? 'Las fotos nuevas quedaron en revisión. Las que ya estaban aprobadas siguen igual.'
+          : 'Quedó en revisión. Te avisamos si hace falta corregir algo.',
+        catalog.titulo,
+      );
     } catch (e) {
       toast.error(matriculaUploadErrorMessage(e), 'No se pudo cargar', { durationMs: 4600 });
     } finally {
@@ -145,171 +223,167 @@ export function MatriculaCard() {
     }
   }
 
-  function onSubmit() {
-    if (row?.status !== 'aprobada') {
-      void send();
+  function removeSaved(foto: MyMatriculaFoto) {
+    const run = () => {
+      void (async () => {
+        setBusy(true);
+        try {
+          await deleteMyMatriculaFoto(foto.id);
+          await onReload();
+        } catch (e) {
+          toast.error(matriculaUploadErrorMessage(e), 'No se pudo borrar', { durationMs: 4600 });
+        } finally {
+          setBusy(false);
+        }
+      })();
+    };
+    if (foto.status !== 'aprobada') {
+      run();
       return;
     }
-    Alert.alert(
-      'Volver a enviar la matrícula',
-      'Si la cargás de nuevo, la insignia se oculta hasta que YaChanga la apruebe otra vez.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Enviar', onPress: () => void send() },
-      ],
-    );
+    Alert.alert('Borrar foto aprobada', MATRICULA_DELETE_APPROVED_WARNING, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Borrar', style: 'destructive', onPress: run },
+    ]);
   }
 
-  const rejected = row?.status === 'rechazada';
-  const room = MATRICULA_MAX_PHOTOS - photos.length;
-
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.sectionTitle}>Matrícula</Text>
-      <View style={styles.card}>
-        <View style={styles.rule} />
-        <View style={styles.lead}>
-          <View style={styles.seal}>
-            <Ionicons name="ribbon-outline" size={20} color="#8C6A3D" />
-          </View>
-          <View style={styles.leadCopy}>
-            <Text style={styles.kicker}>Opcional</Text>
-            <Text style={styles.copy}>
-              Cargá el número, la entidad que la emitió y hasta tres fotos. Cuando la aprobemos, tu
-              perfil muestra la insignia Matrícula verificada.
-            </Text>
-          </View>
+    <View style={styles.card}>
+      <View style={styles.rule} />
+      <View style={styles.lead}>
+        <OficioMatriculaIcon code={oficio} size={36} />
+        <View style={styles.leadCopy}>
+          <Text style={styles.kicker}>Opcional</Text>
+          <Text style={styles.title}>{catalog.titulo}</Text>
+          <Text style={styles.copy}>{catalog.descripcion}</Text>
         </View>
+      </View>
 
+      {verificada ? (
+        <View style={styles.statusBlock} accessibilityLabel="Matrícula verificada">
+          <MatriculaVerificadaBadge />
+        </View>
+      ) : row?.status === 'pendiente' ? (
+        <View style={styles.pending}>
+          <Ionicons name="time-outline" size={16} color="#8A5A2B" />
+          <Text style={styles.pendingText}>En revisión</Text>
+        </View>
+      ) : row?.status === 'rechazada' ? (
+        <View style={styles.rejected}>
+          <Text style={styles.rejectedTitle}>No se aprobó. Podés enviar otra.</Text>
+          {row.motivo ? <Text style={styles.rejectedBody}>{row.motivo}</Text> : null}
+        </View>
+      ) : null}
+
+      {row?.fotos.some((foto) => foto.status === 'rechazada' && foto.motivo) ? (
         <Text style={styles.hint}>
-          Las fotos se achican para ocupar poco lugar y que se sigan leyendo. Si volvés a enviar, se
-          borran las anteriores.
+          {row.fotos
+            .filter((foto) => foto.status === 'rechazada' && foto.motivo)
+            .map((foto) => foto.motivo)
+            .join(' ')}
         </Text>
+      ) : null}
 
-        {loading ? (
-          <ActivityIndicator color="#8C6A3D" style={styles.loader} />
-        ) : unavailable ? (
-          <Text style={styles.hint}>La carga de la matrícula todavía no está habilitada.</Text>
-        ) : (
-          <>
-            {row?.status === 'aprobada' ? (
-              <View style={styles.statusBlock}>
-                <MatriculaVerificadaBadge />
-                <Text style={styles.statusOk}>Ya está visible en tu perfil.</Text>
-              </View>
-            ) : row?.status === 'pendiente' ? (
-              <View style={styles.pending}>
-                <Ionicons name="time-outline" size={16} color="#8A5A2B" />
-                <Text style={styles.pendingText}>En revisión</Text>
-              </View>
-            ) : rejected ? (
-              <View style={styles.rejected}>
-                <Text style={styles.rejectedTitle}>No se aprobó. Podés enviar otra.</Text>
-                {row?.motivo ? <Text style={styles.rejectedBody}>{row.motivo}</Text> : null}
-              </View>
-            ) : null}
+      <AppTextInput
+        label="Número de matrícula"
+        value={numero}
+        onChangeText={setNumero}
+        autoCapitalize="characters"
+        autoCorrect={false}
+        maxLength={40}
+        editable={puedeCargar && !busy}
+        placeholder="Ej.: 12345"
+        placeholderTextColor={colors.textSecondary}
+        containerStyle={styles.field}
+      />
+      <AppTextInput
+        label="Entidad emisora"
+        value={entidad}
+        onChangeText={setEntidad}
+        autoCorrect={false}
+        maxLength={80}
+        editable={puedeCargar && !busy}
+        placeholder="Ej.: Gobierno de la Ciudad"
+        placeholderTextColor={colors.textSecondary}
+        containerStyle={styles.field}
+      />
 
-            {row && row.fotos > 0 ? (
-              <Text style={styles.hint}>
-                {row.fotos === 1 ? 'Hay 1 foto guardada.' : `Hay ${row.fotos} fotos guardadas.`} Si
-                enviás de nuevo, se reemplazan.
-              </Text>
-            ) : null}
+      <Text style={styles.photosLabel}>Fotos</Text>
+      <View style={styles.photos}>
+        {(row?.fotos ?? []).map((foto) => (
+          <MatriculaPhotoTile
+            key={foto.id}
+            uri={urls[foto.id] ?? null}
+            status={foto.status}
+            label={`Quitar foto ${FOTO_LABEL[foto.status].toLowerCase()}`}
+            busy={busy}
+            onRemove={() => removeSaved(foto)}
+          />
+        ))}
+        {photos.map((photo) => (
+          <MatriculaPhotoTile
+            key={photo.id}
+            uri={photo.uri}
+            label="Quitar foto"
+            busy={busy}
+            onRemove={() => setPhotos((prev) => prev.filter((item) => item.id !== photo.id))}
+          />
+        ))}
+        {Array.from({ length: room }, (_, index) => (
+          <View key={`empty-${index}`} style={styles.photoEmpty}>
+            <Ionicons name="image-outline" size={18} color="#C4B39A" />
+          </View>
+        ))}
+      </View>
 
-            <AppTextInput
-              label="Número de matrícula"
-              value={numero}
-              onChangeText={setNumero}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              maxLength={40}
-              placeholder="Ej.: 12345"
-              placeholderTextColor={colors.textSecondary}
-              containerStyle={styles.field}
-            />
-            <AppTextInput
-              label="Entidad emisora"
-              value={entidad}
-              onChangeText={setEntidad}
-              autoCorrect={false}
-              maxLength={80}
-              placeholder="Ej.: Gobierno de la Ciudad"
-              placeholderTextColor={colors.textSecondary}
-              containerStyle={styles.field}
-            />
-
-            <Text style={styles.photosLabel}>Fotos</Text>
-            <View style={styles.photos}>
-              {photos.map((photo) => (
-                <View key={photo.id} style={styles.photo}>
-                  <Image source={{ uri: photo.uri }} style={styles.photoImg} />
-                  <Pressable
-                    onPress={() => setPhotos((prev) => prev.filter((item) => item.id !== photo.id))}
-                    disabled={busy}
-                    accessibilityRole="button"
-                    accessibilityLabel="Quitar foto"
-                    style={styles.photoRemove}
-                  >
-                    <Ionicons name="close" size={14} color="#2C2416" />
-                  </Pressable>
-                </View>
-              ))}
-              {Array.from({ length: room }, (_, index) => (
-                <View key={`empty-${index}`} style={styles.photoEmpty}>
-                  <Ionicons name="image-outline" size={18} color="#C4B39A" />
-                </View>
-              ))}
-            </View>
-
-            <View style={styles.actions}>
-              <Pressable
-                onPress={() => void onCamera()}
-                disabled={busy}
-                accessibilityRole="button"
-                accessibilityLabel="Sacar foto de la matrícula"
-                style={({ pressed }) => [styles.secondary, (pressed || busy) && styles.pressed]}
-              >
-                <Ionicons name="camera-outline" size={18} color="#2C2416" />
-                <Text style={styles.secondaryText}>Cámara</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => void onGallery()}
-                disabled={busy}
-                accessibilityRole="button"
-                accessibilityLabel="Elegir fotos de la galería"
-                style={({ pressed }) => [styles.secondary, (pressed || busy) && styles.pressed]}
-              >
-                <Ionicons name="images-outline" size={18} color="#2C2416" />
-                <Text style={styles.secondaryText}>Galería</Text>
-              </Pressable>
-            </View>
-
+      {puedeCargar ? (
+        <>
+          <View style={styles.actions}>
             <Pressable
-              onPress={onSubmit}
+              onPress={() => void onCamera()}
               disabled={busy}
               accessibilityRole="button"
-              accessibilityLabel="Enviar matrícula a revisión"
-              style={({ pressed }) => [styles.primary, (pressed || busy) && styles.pressed]}
+              accessibilityLabel={`Sacar foto de la matrícula de ${catalog.titulo}`}
+              style={({ pressed }) => [styles.secondary, (pressed || busy) && styles.pressed]}
             >
-              <Text style={styles.primaryText}>{busy ? 'Subiendo…' : 'Enviar a revisión'}</Text>
+              <Ionicons name="camera-outline" size={18} color="#2C2416" />
+              <Text style={styles.secondaryText}>Cámara</Text>
             </Pressable>
-          </>
-        )}
-      </View>
+            <Pressable
+              onPress={() => void onGallery()}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel={`Elegir fotos de la matrícula de ${catalog.titulo}`}
+              style={({ pressed }) => [styles.secondary, (pressed || busy) && styles.pressed]}
+            >
+              <Ionicons name="images-outline" size={18} color="#2C2416" />
+              <Text style={styles.secondaryText}>Galería</Text>
+            </Pressable>
+          </View>
+          <Pressable
+            onPress={() => void send()}
+            disabled={busy}
+            accessibilityRole="button"
+            accessibilityLabel={`Enviar matrícula de ${catalog.titulo} a revisión`}
+            style={({ pressed }) => [styles.primary, (pressed || busy) && styles.pressed]}
+          >
+            <Text style={styles.primaryText}>{busy ? 'Subiendo…' : 'Enviar a revisión'}</Text>
+          </Pressable>
+        </>
+      ) : (
+        <Text style={styles.hint}>
+          Este oficio ya no está guardado en tu perfil. Podés borrar las fotos; no se pueden sumar otras.
+        </Text>
+      )}
     </View>
   );
 }
 
+export function MatriculaCardsLoading() {
+  return <ActivityIndicator color="#8C6A3D" style={styles.loader} />;
+}
+
 const styles = StyleSheet.create({
-  wrap: { marginTop: spacing.lg },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: colors.text,
-    marginBottom: spacing.sm,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
   card: {
     backgroundColor: '#FBF7F1',
     borderRadius: radii.card,
@@ -317,6 +391,7 @@ const styles = StyleSheet.create({
     borderColor: '#E7D9C6',
     padding: spacing.md,
     overflow: 'hidden',
+    marginBottom: spacing.md,
   },
   rule: {
     position: 'absolute',
@@ -327,16 +402,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#C4A574',
   },
   lead: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginTop: 4 },
-  seal: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F3E6D4',
-    borderWidth: 1,
-    borderColor: '#E4D3B8',
-  },
   leadCopy: { flex: 1 },
   kicker: {
     fontSize: 11,
@@ -344,18 +409,13 @@ const styles = StyleSheet.create({
     letterSpacing: 1.1,
     textTransform: 'uppercase',
     color: '#8C6A3D',
-    marginBottom: 4,
+    marginBottom: 2,
   },
-  copy: { fontSize: 14, lineHeight: 20, color: '#2C2416' },
-  hint: {
-    marginTop: spacing.sm,
-    fontSize: 13,
-    lineHeight: 18,
-    color: '#6F6256',
-  },
-  loader: { marginTop: spacing.md },
+  title: { fontSize: 16, fontWeight: '800', color: '#2C2416' },
+  copy: { marginTop: 2, fontSize: 14, lineHeight: 20, color: '#2C2416' },
+  hint: { marginTop: spacing.sm, fontSize: 13, lineHeight: 18, color: '#6F6256' },
+  loader: { marginVertical: spacing.md },
   statusBlock: { marginTop: spacing.md, alignItems: 'flex-start' },
-  statusOk: { marginTop: 6, fontSize: 13, fontWeight: '700', color: '#6B4E2E' },
   pending: {
     marginTop: spacing.md,
     alignSelf: 'flex-start',
@@ -388,15 +448,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#6F6256',
   },
-  photos: { flexDirection: 'row', gap: spacing.sm },
+  photos: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   photo: {
-    flex: 1,
-    aspectRatio: 1,
+    width: 96,
+    height: 96,
     borderRadius: 14,
     overflow: 'hidden',
     backgroundColor: '#F3E6D4',
   },
   photoImg: { width: '100%', height: '100%' },
+  photoFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   photoRemove: {
     position: 'absolute',
     top: 6,
@@ -408,9 +469,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(251, 247, 241, 0.92)',
   },
+  fotoChipWrap: { position: 'absolute', left: 6, bottom: 6, right: 28 },
+  fotoChip: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: 'rgba(248, 239, 227, 0.94)',
+  },
+  fotoChipOk: { backgroundColor: 'rgba(232, 244, 236, 0.94)' },
+  fotoChipNo: { backgroundColor: 'rgba(248, 241, 241, 0.94)' },
+  fotoChipText: { fontSize: 10, fontWeight: '800', color: '#8A5A2B' },
+  fotoChipTextOk: { color: '#1F6B45' },
+  fotoChipTextNo: { color: '#7A3E3E' },
   photoEmpty: {
-    flex: 1,
-    aspectRatio: 1,
+    width: 96,
+    height: 96,
     borderRadius: 14,
     borderWidth: 1,
     borderStyle: 'dashed',
@@ -419,12 +493,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(243, 230, 212, 0.35)',
   },
-  actions: {
-    marginTop: spacing.md,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
+  actions: { marginTop: spacing.md, flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   secondary: {
     flexDirection: 'row',
     alignItems: 'center',

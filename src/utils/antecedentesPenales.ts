@@ -35,6 +35,8 @@ export type MyAntecedentes = {
   asunto: string | null;
   mimeType: string;
   updatedAt: string;
+  /** Ruta propia para mostrar o borrar. Nunca se publica al cliente. */
+  storagePath: string | null;
 };
 
 export function antecedentesPdfRejected(bytes: number): string | null {
@@ -71,11 +73,13 @@ export function parseMyAntecedentes(raw: unknown): MyAntecedentes | null {
   const status = row.status;
   if (status !== 'pendiente' && status !== 'aprobado' && status !== 'rechazado') return null;
   const asuntoRaw = typeof row.asunto === 'string' ? row.asunto.trim() : '';
+  const storagePath = typeof row.storage_path === 'string' ? row.storage_path.trim() : '';
   return {
     status,
     asunto: asuntoRaw || null,
     mimeType: typeof row.mime_type === 'string' ? row.mime_type : '',
     updatedAt: typeof row.updated_at === 'string' ? row.updated_at : '',
+    storagePath: storagePath || null,
   };
 }
 

@@ -6,6 +6,7 @@ import { colors, radii, spacing, typography } from '../../constants/theme';
 import type { FeedPost } from '../../types/feed';
 import { formatPostDate } from '../../utils/formatDate';
 import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
+import { FeedPublicationMeta } from './FeedPublicationMeta';
 import { canShowWorkerReputation } from '../../utils/workerReputation';
 
 export type ChangaPostListRowProps = {
@@ -35,12 +36,6 @@ export function ChangaPostListRow({
   const jobsDone = post.workerTotalJobsDone;
   const showNuevo =
     showWorkerRating && jobsDone !== undefined && !canShowWorkerReputation(jobsDone);
-  const showRating =
-    showWorkerRating &&
-    !showNuevo &&
-    typeof rating === 'number' &&
-    !Number.isNaN(rating) &&
-    rating > 0;
 
   return (
     <View style={styles.wrap}>
@@ -60,21 +55,25 @@ export function ChangaPostListRow({
           </View>
 
           <View style={styles.body}>
-            <Text style={styles.title} numberOfLines={1}>
-              {professionalDisplayNameForClient(post.workerFirstName)}
-            </Text>
+            <View style={styles.titleRow}>
+              <Text style={styles.title} numberOfLines={1}>
+                {professionalDisplayNameForClient(post.workerFirstName)}
+              </Text>
+              {showNuevo ? (
+                <StarRating completedJobs={jobsDone} score={rating} inline size={12} textSize={12} />
+              ) : null}
+              <FeedPublicationMeta
+                score={rating}
+                jobs={jobsDone}
+                antecedentesAprobado={post.workerAntecedentesAprobado}
+                oficios={post.workerMatriculasVerificadas}
+                showScore={showWorkerRating && !showNuevo}
+              />
+            </View>
             <View style={styles.metaRow}>
               <Text style={styles.subtitle} numberOfLines={1}>
                 {post.trade}
               </Text>
-              {showNuevo ? (
-                <StarRating completedJobs={jobsDone} score={rating} inline size={12} textSize={12} />
-              ) : showRating ? (
-                <View style={styles.ratingBadge}>
-                  <Text style={styles.ratingNum}>{rating.toFixed(1)}</Text>
-                  <Ionicons name="star" size={12} color="#D97706" />
-                </View>
-              ) : null}
             </View>
             <Text style={styles.preview} numberOfLines={2}>
               {post.description}
@@ -130,9 +129,16 @@ const styles = StyleSheet.create({
     minWidth: 0,
     justifyContent: 'center',
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
   title: {
     ...typography.title,
     fontWeight: '700',
+    flexShrink: 1,
   },
   metaRow: {
     flexDirection: 'row',
@@ -146,20 +152,6 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: '600',
     flexShrink: 1,
-  },
-  ratingBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  ratingNum: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#92400E',
   },
   preview: {
     ...typography.body,

@@ -24,7 +24,15 @@ import {
   matriculaCardMode,
   profileOffersMatricula,
   tradeRequiresMatricula,
+  matriculaOficioCodigo,
+  matriculaOficiosFromTrades,
+  oficioVerificado,
+  quedaVerificadaAlBorrar,
+  fotosTrasAgregar,
+  excedeTopeMatricula,
+  parseMyMatriculas,
 } from './matriculaVerificada';
+import { feedPublicationLine, feedTrustIcons } from './feedTrust';
 
 const ROOT = resolve(__dirname, '../..');
 
@@ -231,9 +239,73 @@ describe('matrícula verificada', () => {
 
     const abm = read('src/screens/account/WorkerABMScreen.tsx');
     expect(abm).toContain('matriculaCardMode');
-    expect(abm).toContain('MATRICULA_SAVE_FIRST');
-    expect(abm).toContain('<MatriculaCard />');
+    expect(abm).toContain('MatriculasPorOficio');
     expect(abm).toContain('<AntecedentesPenalesCard />');
+    const section = read('src/components/profile/MatriculasPorOficio.tsx');
+    expect(section).toContain('MATRICULA_SAVE_FIRST');
+    const sql214 = read('supabase/card_77_214_matriculas_por_oficio.sql');
+    expect(sql214).toContain("SET oficio_codigo = 'sin_vincular'");
+    expect(sql214).not.toMatch(/UPDATE public\.matriculas[\s\S]{0,240}es_principal/);
+    expect(sql214).not.toMatch(/DELETE FROM public\.matriculas/i);
+    expect(sql214).not.toMatch(/DELETE FROM storage\.objects/i);
+    expect(sql214).not.toMatch(/eyJ/);
+    expect(sql214).not.toMatch(/invoke_vault_edge_webhook/);
+    expect(sql214).toContain('REVOKE ALL ON FUNCTION public.get_my_matriculas() FROM PUBLIC, anon');
+    expect(sql214).toContain('GRANT EXECUTE ON FUNCTION public.fetch_feed_posts(integer) TO anon, authenticated, service_role');
+    expect(sql214).toContain('worker_matriculas_verificadas text[]');
+    expect(sql214).toContain('worker_antecedentes_aprobado boolean');
+    expect(sql214).not.toMatch(/GRANT EXECUTE ON FUNCTION public\.get_my_matriculas\(\) TO anon/);
+    expect(sql214).not.toMatch(/GRANT EXECUTE ON FUNCTION public\._matricula_publica_verificada\(uuid\) TO anon/);
+  });
+
+  it('el tope es por oficio, borrar la última aprobada saca el tilde y el feed no inventa oficios', () => {
+    expect(matriculaOficioCodigo({ rubroSlug: 'gasista', name: 'Gas' })).toBe('gas');
+    expect(matriculaOficioCodigo({ name: 'Plomería' })).toBe('plomeria');
+    expect(
+      matriculaOficiosFromTrades([
+        { name: 'Gas', rubroSlug: 'gasista' },
+        { name: 'Gasista' },
+        { name: 'Electricidad', rubroSlug: 'electricidad' },
+      ]),
+    ).toEqual(['gas', 'electricidad']);
+    expect(excedeTopeMatricula(3, 1)).toBe(true);
+    expect(excedeTopeMatricula(2, 1)).toBe(false);
+    expect(excedeTopeMatricula(0, 3)).toBe(false);
+
+    const aprobadas = [
+      { id: 'a', status: 'aprobada' },
+      { id: 'b', status: 'aprobada' },
+    ];
+    expect(oficioVerificado({ status: 'aprobada', fotos: aprobadas })).toBe(true);
+    expect(quedaVerificadaAlBorrar({ status: 'aprobada', fotos: aprobadas }, 'a')).toBe(true);
+    expect(quedaVerificadaAlBorrar({ status: 'aprobada', fotos: [aprobadas[0]], }, 'a')).toBe(false);
+    expect(oficioVerificado({ status: 'rechazada', fotos: aprobadas })).toBe(false);
+    expect(oficioVerificado({ status: 'aprobada', fotos: [] })).toBe(false);
+
+    const trasAgregar = fotosTrasAgregar(aprobadas, 1);
+    expect(trasAgregar[0]).toMatchObject({ id: 'a', status: 'aprobada' });
+    expect(trasAgregar[1]).toMatchObject({ id: 'b', status: 'aprobada' });
+    expect(trasAgregar[2]).toMatchObject({ status: 'pendiente' });
+
+    expect(feedPublicationLine('Horacio T.', 4.3, 6)).toBe('Horacio ★ 4.3 (6)');
+    expect(feedPublicationLine('Ana María Á.', 5, 2)).toBe('Ana María ★ 5.0 (2)');
+    expect(feedTrustIcons(true, ['gas', 'sin_vincular', 'electricidad', 'pendiente'])).toEqual([
+      'antecedentes',
+      'gas',
+      'electricidad',
+    ]);
+    expect(feedTrustIcons(false, ['fumigacion'])).toEqual(['fumigacion']);
+    expect(
+      parseMyMatriculas({
+        oficios: [{ oficio: 'sin_vincular', status: 'aprobada', fotos: [{ id: '1', status: 'aprobada', storage_path: 'a/b.jpg' }] }],
+        legado: {
+          status: 'aprobada',
+          numero: '1',
+          entidad: 'Ente',
+          fotos: [{ id: '1', status: 'aprobada', storage_path: 'a/b.jpg' }],
+        },
+      }).oficios,
+    ).toEqual([]);
   });
 
   it('smoke: login, roles, búsqueda, perfil, chat, cotizar, materiales y antecedentes', () => {

@@ -8,11 +8,12 @@ import {
   MATRICULA_IMAGE_TARGET_BYTES,
   MATRICULA_JPEG_QUALITIES,
   MATRICULA_PHOTO_MAX_BYTES,
+  MATRICULA_SIGNED_URL_TTL_SEC,
   matriculaImageResize,
   matriculaObjectName,
-  parseMyMatricula,
-  previousMatriculaPaths,
-  type MyMatricula,
+  parseMyMatriculas,
+  type MatriculaOficioCodigo,
+  type MyMatriculasBundle,
 } from '../utils/matriculaVerificada';
 
 async function readUriBytes(uri: string): Promise<Uint8Array> {
@@ -103,18 +104,34 @@ async function removeQuiet(paths: string[]): Promise<void> {
   }
 }
 
-export async function fetchMyMatricula(): Promise<MyMatricula | null> {
+export async function signedMatriculaUrl(path: string): Promise<string | null> {
+  const name = path.trim();
+  if (!name) return null;
   const sb = getSupabaseClient();
-  const { data, error } = await sb.rpc('get_my_matricula');
-  if (error) throw new Error(error.message);
-  return parseMyMatricula(data);
+  const { data, error } = await sb.storage
+    .from(MATRICULA_BUCKET)
+    .createSignedUrl(name, MATRICULA_SIGNED_URL_TTL_SEC);
+  if (error || !data?.signedUrl) return null;
+  return data.signedUrl;
 }
 
-export async function uploadMyMatricula(input: {
+export async function fetchMyMatriculas(): Promise<MyMatriculasBundle> {
+  const sb = getSupabaseClient();
+  const { data, error } = await sb.rpc('get_my_matriculas');
+  if (error) throw new Error(error.message);
+  return parseMyMatriculas(data);
+}
+
+/**
+ * Suma fotos y datos de un oficio. No llama a `submit_my_matricula`:
+ * esa RPC vieja sigue reemplazando solo el legado, para la app ya publicada.
+ */
+export async function uploadMyMatriculaOficio(input: {
+  oficio: MatriculaOficioCodigo;
   numero: string;
   entidad: string;
   uris: string[];
-}): Promise<MyMatricula> {
+}): Promise<void> {
   const sb = getSupabaseClient();
   const {
     data: { user },
@@ -141,28 +158,26 @@ export async function uploadMyMatricula(input: {
       uploaded.push(path);
     }
 
-    const { data, error } = await sb.rpc('submit_my_matricula', {
+    const { error } = await sb.rpc('submit_my_matricula_oficio', {
+      p_oficio: input.oficio,
       p_numero: input.numero.trim(),
       p_entidad: input.entidad.trim(),
       p_storage_paths: uploaded,
     });
     if (error) throw new Error(error.message);
-
-    const previous = previousMatriculaPaths(data).filter((path) => !uploaded.includes(path));
-    if (previous.length) await removeQuiet(previous);
-
-    return (
-      parseMyMatricula(data) ?? {
-        status: 'pendiente',
-        numero: input.numero.trim(),
-        entidad: input.entidad.trim(),
-        motivo: null,
-        fotos: uploaded.length,
-        updatedAt: '',
-      }
-    );
   } catch (err) {
     await removeQuiet(uploaded);
     throw err;
   }
+}
+
+export async function deleteMyMatriculaFoto(fotoId: string): Promise<void> {
+  const sb = getSupabaseClient();
+  const { data, error } = await sb.rpc('delete_my_matricula_foto', { p_foto_id: fotoId });
+  if (error) throw new Error(error.message);
+  const path =
+    data && typeof data === 'object' && typeof (data as { storage_path?: unknown }).storage_path === 'string'
+      ? (data as { storage_path: string }).storage_path
+      : '';
+  if (path) await removeQuiet([path]);
 }

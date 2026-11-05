@@ -21,7 +21,7 @@ import { useAppToast } from '../../components/toast/toast';
 import { TradeSearchModal } from '../../components/search/TradeSearchModal';
 import { ImagePickerComponent } from '../../components/common/ImagePickerComponent';
 import { AntecedentesPenalesCard } from '../../components/profile/AntecedentesPenalesCard';
-import { MatriculaCard } from '../../components/profile/MatriculaCard';
+import { MatriculasPorOficio } from '../../components/profile/MatriculasPorOficio';
 import { IntroVideoEditor } from '../../components/profile/IntroVideoEditor';
 import { colors, radii, spacing } from '../../constants/theme';
 import { isSupabaseConfigured } from '../../config/supabase';
@@ -52,7 +52,7 @@ import {
   ATIENDE_URGENCIAS_TITLE,
   toggleAtiendeUrgencias,
 } from '../../utils/urgencias';
-import { MATRICULA_SAVE_FIRST, matriculaCardMode } from '../../utils/matriculaVerificada';
+import { matriculaCardMode } from '../../utils/matriculaVerificada';
 import type { AuthUser } from '../../services/auth';
 
 type Props = AccountStackScreenProps<'WorkerABM'>;
@@ -911,14 +911,8 @@ export function WorkerABMScreen({ navigation }: Props) {
               />
             </View>
 
-            {isSupabaseConfigured() && userId && matriculaMode === 'ready' ? (
-              <MatriculaCard />
-            ) : null}
-            {isSupabaseConfigured() && userId && matriculaMode === 'save-first' ? (
-              <View style={styles.matriculaHold}>
-                <Text style={styles.sectionTitle}>Matrícula</Text>
-                <Text style={styles.matriculaHoldText}>{MATRICULA_SAVE_FIRST}</Text>
-              </View>
+            {isSupabaseConfigured() && userId ? (
+              <MatriculasPorOficio savedTrades={savedMatriculaTrades} mode={matriculaMode} />
             ) : null}
 
             {isSupabaseConfigured() && userId ? <AntecedentesPenalesCard /> : null}
@@ -1001,20 +995,6 @@ const styles = StyleSheet.create({
   formActions: {
     paddingTop: spacing.xl,
     gap: spacing.sm,
-  },
-  matriculaHold: {
-    marginTop: spacing.lg,
-    backgroundColor: '#FBF7F1',
-    borderRadius: radii.card,
-    borderWidth: 1,
-    borderColor: '#E7D9C6',
-    padding: spacing.md,
-  },
-  matriculaHoldText: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: '#6F6256',
-    fontWeight: '600',
   },
   errorBox: {
     flexDirection: 'row',
