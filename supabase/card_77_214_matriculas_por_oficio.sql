@@ -87,11 +87,22 @@ ALTER TABLE public.matriculas DROP CONSTRAINT matriculas_pkey;
 ALTER TABLE public.matriculas
   ADD CONSTRAINT matriculas_pkey PRIMARY KEY (user_id, oficio_codigo);
 
+-- Versión explícita de la identidad (número + entidad). No usa now():
+-- dentro de una transacción el reloj no avanza y dos cambios quedarían iguales.
+ALTER TABLE public.matriculas ADD COLUMN identidad_version integer;
+UPDATE public.matriculas SET identidad_version = 1 WHERE identidad_version IS NULL;
+ALTER TABLE public.matriculas ALTER COLUMN identidad_version SET NOT NULL;
+ALTER TABLE public.matriculas
+  ADD CONSTRAINT matriculas_identidad_version_chk CHECK (identidad_version >= 1);
+COMMENT ON COLUMN public.matriculas.identidad_version IS
+  'Sube 1 al crear la matrícula y cada vez que cambian número o entidad. Las fotos guardan la versión con la que se cargaron.';
+
 CREATE TABLE public.matricula_fotos (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
   oficio_codigo text NOT NULL,
   storage_path text NOT NULL,
+  identidad_version integer NOT NULL,
   status text NOT NULL DEFAULT 'pendiente',
   rejection_reason text,
   reviewed_at timestamptz,
@@ -106,6 +117,7 @@ CREATE TABLE public.matricula_fotos (
   CONSTRAINT matricula_fotos_reviewed_by_fkey
     FOREIGN KEY (reviewed_by) REFERENCES public.profiles (id),
   CONSTRAINT matricula_fotos_path_key UNIQUE (storage_path),
+  CONSTRAINT matricula_fotos_version_chk CHECK (identidad_version >= 1),
   CONSTRAINT matricula_fotos_oficio_chk
     CHECK (oficio_codigo IN ('gas', 'electricidad', 'plomeria', 'fumigacion', 'sin_vincular')),
   CONSTRAINT matricula_fotos_status_chk
@@ -134,7 +146,7 @@ CREATE INDEX matricula_fotos_pendientes_idx
   WHERE status = 'pendiente';
 
 CREATE INDEX matricula_fotos_aprobadas_idx
-  ON public.matricula_fotos (user_id, oficio_codigo)
+  ON public.matricula_fotos (user_id, oficio_codigo, identidad_version)
   WHERE status = 'aprobada';
 
 CREATE INDEX matricula_fotos_reviewed_by_idx
@@ -148,18 +160,20 @@ CREATE POLICY matricula_fotos_select_own
   TO authenticated
   USING (user_id = (SELECT auth.uid()));
 
-REVOKE ALL ON TABLE public.matricula_fotos FROM PUBLIC, anon;
+-- Los defaults de Supabase dejan DML y TRUNCATE en authenticated. TRUNCATE no pasa por RLS.
+REVOKE ALL ON TABLE public.matricula_fotos FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON TABLE public.matricula_fotos TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.matricula_fotos TO service_role;
 
 -- Copia la evidencia y el estado del envío. No elige oficio.
 INSERT INTO public.matricula_fotos (
-  user_id, oficio_codigo, storage_path, status, rejection_reason, reviewed_at, reviewed_by, created_at
+  user_id, oficio_codigo, storage_path, identidad_version, status, rejection_reason, reviewed_at, reviewed_by, created_at
 )
 SELECT
   m.user_id,
   'sin_vincular',
   btrim(p.path),
+  m.identidad_version,
   m.status,
   CASE WHEN m.status = 'rechazada' THEN m.rejection_reason ELSE NULL END,
   m.reviewed_at,
@@ -292,6 +306,7 @@ AS $function$
         WHERE f.user_id = m.user_id
           AND f.oficio_codigo = m.oficio_codigo
           AND f.status = 'aprobada'
+          AND f.identidad_version = m.identidad_version
       )
   );
 $function$;
@@ -345,7 +360,8 @@ AS $function$
     'id', f.id,
     'status', f.status,
     'motivo', CASE WHEN f.status = 'rechazada' THEN f.rejection_reason ELSE NULL END,
-    'storage_path', f.storage_path
+    'storage_path', f.storage_path,
+    'identidad_version', f.identidad_version
   ) ORDER BY f.created_at, f.id), '[]'::jsonb)
   FROM public.matricula_fotos f
   WHERE f.user_id = p_user_id
@@ -417,6 +433,7 @@ BEGIN
       'numero', m.numero,
       'entidad', m.entidad,
       'motivo', CASE WHEN m.status = 'rechazada' THEN m.rejection_reason ELSE NULL END,
+      'identidad_version', m.identidad_version,
       'verificada', public._oficio_verificado(m.user_id, m.oficio_codigo),
       'fotos', public._matricula_fotos_json(m.user_id, m.oficio_codigo)
     ) AS item
@@ -431,6 +448,7 @@ BEGIN
     'numero', m.numero,
     'entidad', m.entidad,
     'motivo', CASE WHEN m.status = 'rechazada' THEN m.rejection_reason ELSE NULL END,
+    'identidad_version', m.identidad_version,
     'verificada', public._oficio_verificado(m.user_id, m.oficio_codigo),
     'fotos', public._matricula_fotos_json(m.user_id, m.oficio_codigo)
   )
@@ -455,6 +473,9 @@ DECLARE
   v_entidad text := btrim(coalesce(p_entidad, ''));
   v_paths text[];
   v_old text[];
+  v_old_numero text;
+  v_old_entidad text;
+  v_version integer;
   v_updated timestamptz;
   v_previous jsonb;
 BEGIN
@@ -497,22 +518,29 @@ BEGIN
     RAISE EXCEPTION 'Una foto no corresponde a esta matrícula.';
   END IF;
 
-  SELECT m.storage_paths
-    INTO v_old
+  SELECT m.storage_paths, m.numero, m.entidad, m.identidad_version
+    INTO v_old, v_old_numero, v_old_entidad, v_version
   FROM public.matriculas m
   WHERE m.user_id = v_uid
     AND m.oficio_codigo = 'sin_vincular'
   FOR UPDATE;
 
+  IF NOT FOUND THEN
+    v_version := 1;
+  ELSIF v_numero IS DISTINCT FROM v_old_numero OR v_entidad IS DISTINCT FROM v_old_entidad THEN
+    v_version := v_version + 1;
+  END IF;
+
   INSERT INTO public.matriculas (
-    user_id, oficio_codigo, status, numero, entidad, storage_paths, rejection_reason, reviewed_at, reviewed_by, updated_at
+    user_id, oficio_codigo, status, numero, entidad, identidad_version, storage_paths, rejection_reason, reviewed_at, reviewed_by, updated_at
   ) VALUES (
-    v_uid, 'sin_vincular', 'pendiente', v_numero, v_entidad, '{}'::text[], NULL, NULL, NULL, now()
+    v_uid, 'sin_vincular', 'pendiente', v_numero, v_entidad, v_version, '{}'::text[], NULL, NULL, NULL, now()
   )
   ON CONFLICT (user_id, oficio_codigo) DO UPDATE
   SET status = 'pendiente',
       numero = EXCLUDED.numero,
       entidad = EXCLUDED.entidad,
+      identidad_version = EXCLUDED.identidad_version,
       rejection_reason = NULL,
       reviewed_at = NULL,
       reviewed_by = NULL,
@@ -524,11 +552,12 @@ BEGIN
     AND f.oficio_codigo = 'sin_vincular'
     AND f.storage_path <> ALL (v_paths);
 
-  INSERT INTO public.matricula_fotos (user_id, oficio_codigo, storage_path, status)
-  SELECT v_uid, 'sin_vincular', p, 'pendiente'
+  INSERT INTO public.matricula_fotos (user_id, oficio_codigo, storage_path, identidad_version, status)
+  SELECT v_uid, 'sin_vincular', p, v_version, 'pendiente'
   FROM unnest(v_paths) AS p
   ON CONFLICT (storage_path) DO UPDATE
   SET status = 'pendiente',
+      identidad_version = EXCLUDED.identidad_version,
       rejection_reason = NULL,
       reviewed_at = NULL,
       reviewed_by = NULL,
@@ -575,6 +604,7 @@ DECLARE
   v_status text;
   v_old_numero text;
   v_old_entidad text;
+  v_version integer;
   v_count int;
   v_changed boolean;
 BEGIN
@@ -604,8 +634,8 @@ BEGIN
 
   v_paths := public._matricula_validar_paths(v_uid, p_storage_paths);
 
-  SELECT m.status, m.numero, m.entidad
-    INTO v_status, v_old_numero, v_old_entidad
+  SELECT m.status, m.numero, m.entidad, m.identidad_version
+    INTO v_status, v_old_numero, v_old_entidad, v_version
   FROM public.matriculas m
   WHERE m.user_id = v_uid
     AND m.oficio_codigo = v_oficio
@@ -615,15 +645,22 @@ BEGIN
     IF coalesce(cardinality(v_paths), 0) < 1 THEN
       RAISE EXCEPTION 'Sumá al menos una foto de la matrícula.';
     END IF;
-    INSERT INTO public.matriculas (
-      user_id, oficio_codigo, status, numero, entidad, storage_paths, rejection_reason, reviewed_at, reviewed_by, updated_at
-    ) VALUES (
-      v_uid, v_oficio, 'pendiente', v_numero, v_entidad, '{}'::text[], NULL, NULL, NULL, now()
-    );
-    v_status := 'pendiente';
+    v_version := 1;
     v_changed := false;
+    v_status := 'pendiente';
+    INSERT INTO public.matriculas (
+      user_id, oficio_codigo, status, numero, entidad, identidad_version, storage_paths, rejection_reason, reviewed_at, reviewed_by, updated_at
+    ) VALUES (
+      v_uid, v_oficio, 'pendiente', v_numero, v_entidad, v_version, '{}'::text[], NULL, NULL, NULL, now()
+    );
   ELSE
     v_changed := v_numero IS DISTINCT FROM v_old_numero OR v_entidad IS DISTINCT FROM v_old_entidad;
+    IF v_changed AND coalesce(cardinality(v_paths), 0) < 1 THEN
+      RAISE EXCEPTION 'Para cambiar el número o la entidad tenés que sumar una foto nueva.';
+    END IF;
+    IF v_changed THEN
+      v_version := v_version + 1;
+    END IF;
   END IF;
 
   SELECT count(*)::int
@@ -643,18 +680,18 @@ BEGIN
   END IF;
 
   IF coalesce(cardinality(v_paths), 0) > 0 THEN
-    INSERT INTO public.matricula_fotos (user_id, oficio_codigo, storage_path, status)
-    SELECT v_uid, v_oficio, p, 'pendiente'
+    INSERT INTO public.matricula_fotos (user_id, oficio_codigo, storage_path, identidad_version, status)
+    SELECT v_uid, v_oficio, p, v_version, 'pendiente'
     FROM unnest(v_paths) AS p;
   END IF;
 
-  -- Identidad distinta (número o entidad): no se borra ninguna foto ni se le cambia
-  -- el estado. El sello cae porque el status deja de ser 'aprobada' hasta una revisión.
-  -- No se tocan otros oficios: el UPDATE filtra por v_oficio.
-  IF v_status = 'rechazada' OR v_changed THEN
+  -- Identidad distinta: sube la versión y pasa a pendiente. No borra fotos ni les cambia
+  -- el estado ni la versión. No toca otros oficios.
+  IF v_changed OR v_status = 'rechazada' THEN
     UPDATE public.matriculas
     SET numero = v_numero,
         entidad = v_entidad,
+        identidad_version = v_version,
         status = 'pendiente',
         rejection_reason = NULL,
         reviewed_at = NULL,
@@ -872,6 +909,7 @@ BEGIN
       'numero', m.numero,
       'entidad', m.entidad,
       'status', m.status,
+      'identidad_version', m.identidad_version,
       'storage_bucket', 'matriculas',
       'storage_paths', to_jsonb(m.storage_paths),
       'fotos', public._matricula_fotos_json(m.user_id, m.oficio_codigo),
@@ -905,6 +943,7 @@ AS $function$
 DECLARE
   v_admin uuid;
   v_status text;
+  v_version integer;
   v_at timestamptz := now();
 BEGIN
   v_admin := public._admin_require();
@@ -915,8 +954,8 @@ BEGIN
     RAISE EXCEPTION 'Falta el usuario.';
   END IF;
 
-  SELECT m.status
-    INTO v_status
+  SELECT m.status, m.identidad_version
+    INTO v_status, v_version
   FROM public.matriculas m
   WHERE m.user_id = p_user_id
     AND m.oficio_codigo = 'sin_vincular'
@@ -927,6 +966,16 @@ BEGIN
   END IF;
   IF v_status IS DISTINCT FROM 'pendiente' THEN
     RAISE EXCEPTION 'No hay una matrícula pendiente para este usuario.';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.matricula_fotos f
+    WHERE f.user_id = p_user_id
+      AND f.oficio_codigo = 'sin_vincular'
+      AND f.status = 'pendiente'
+      AND f.identidad_version = v_version
+  ) THEN
+    RAISE EXCEPTION 'No hay una foto nueva de esta matrícula para revisar.';
   END IF;
 
   UPDATE public.matriculas
@@ -945,7 +994,8 @@ BEGIN
       reviewed_by = v_admin
   WHERE user_id = p_user_id
     AND oficio_codigo = 'sin_vincular'
-    AND status = 'pendiente';
+    AND status = 'pendiente'
+    AND identidad_version = v_version;
 
   RETURN jsonb_build_object('user_id', p_user_id, 'status', 'aprobada', 'reviewed_at', v_at, 'oficio_codigo', 'sin_vincular');
 END;
@@ -1007,7 +1057,14 @@ BEGIN
       reviewed_at = v_at,
       reviewed_by = v_admin
   WHERE user_id = p_user_id
-    AND oficio_codigo = 'sin_vincular';
+    AND oficio_codigo = 'sin_vincular'
+    AND status = 'pendiente'
+    AND identidad_version = (
+      SELECT m.identidad_version
+      FROM public.matriculas m
+      WHERE m.user_id = p_user_id
+        AND m.oficio_codigo = 'sin_vincular'
+    );
 
   v_event := 'matricula:' || p_user_id::text || ':' || floor(extract(epoch FROM v_at))::text;
   PERFORM public.notify_matricula_rechazo(p_user_id, v_motivo, v_event);
@@ -1033,7 +1090,9 @@ DECLARE
   v_user uuid;
   v_oficio text;
   v_status text;
+  v_foto_version integer;
   v_lic text;
+  v_version integer;
   v_at timestamptz := now();
 BEGIN
   v_admin := public._admin_require();
@@ -1044,16 +1103,16 @@ BEGIN
     RAISE EXCEPTION 'Falta la foto.';
   END IF;
 
-  SELECT f.user_id, f.oficio_codigo
-    INTO v_user, v_oficio
+  SELECT f.user_id, f.oficio_codigo, f.identidad_version
+    INTO v_user, v_oficio, v_foto_version
   FROM public.matricula_fotos f
   WHERE f.id = p_foto_id;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'No encontramos esa foto.';
   END IF;
 
-  SELECT m.status
-    INTO v_lic
+  SELECT m.status, m.identidad_version
+    INTO v_lic, v_version
   FROM public.matriculas m
   WHERE m.user_id = v_user
     AND m.oficio_codigo = v_oficio
@@ -1061,14 +1120,20 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'No hay una matrícula para esa foto.';
   END IF;
+  IF v_lic IS DISTINCT FROM 'aprobada' THEN
+    RAISE EXCEPTION 'Primero hay que aprobar la matrícula. Una foto no aprueba el número ni la entidad.';
+  END IF;
+  IF v_foto_version IS DISTINCT FROM v_version THEN
+    RAISE EXCEPTION 'Esa foto es de una matrícula anterior.';
+  END IF;
 
   SELECT f.status
     INTO v_status
   FROM public.matricula_fotos f
   WHERE f.id = p_foto_id
   FOR UPDATE;
-  IF v_status = 'aprobada' THEN
-    RAISE EXCEPTION 'Esa foto ya está aprobada.';
+  IF v_status IS DISTINCT FROM 'pendiente' THEN
+    RAISE EXCEPTION 'Esa foto no está pendiente.';
   END IF;
 
   UPDATE public.matricula_fotos
@@ -1077,17 +1142,6 @@ BEGIN
       reviewed_at = v_at,
       reviewed_by = v_admin
   WHERE id = p_foto_id;
-
-  IF v_lic IS DISTINCT FROM 'aprobada' THEN
-    UPDATE public.matriculas
-    SET status = 'aprobada',
-        rejection_reason = NULL,
-        reviewed_at = v_at,
-        reviewed_by = v_admin,
-        updated_at = v_at
-    WHERE user_id = v_user
-      AND oficio_codigo = v_oficio;
-  END IF;
 
   RETURN jsonb_build_object(
     'foto_id', p_foto_id,
@@ -1111,6 +1165,8 @@ DECLARE
   v_user uuid;
   v_oficio text;
   v_status text;
+  v_foto_version integer;
+  v_version integer;
   v_motivo text := btrim(coalesce(p_motivo, ''));
   v_at timestamptz := now();
   v_event text;
@@ -1129,19 +1185,26 @@ BEGIN
     RAISE EXCEPTION 'El motivo puede tener hasta 300 caracteres.';
   END IF;
 
-  SELECT f.user_id, f.oficio_codigo
-    INTO v_user, v_oficio
+  SELECT f.user_id, f.oficio_codigo, f.identidad_version
+    INTO v_user, v_oficio, v_foto_version
   FROM public.matricula_fotos f
   WHERE f.id = p_foto_id;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'No encontramos esa foto.';
   END IF;
 
-  PERFORM 1
+  SELECT m.identidad_version
+    INTO v_version
   FROM public.matriculas m
   WHERE m.user_id = v_user
     AND m.oficio_codigo = v_oficio
   FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'No hay una matrícula para esa foto.';
+  END IF;
+  IF v_foto_version IS DISTINCT FROM v_version THEN
+    RAISE EXCEPTION 'Esa foto es de una matrícula anterior.';
+  END IF;
 
   SELECT f.status
     INTO v_status
@@ -1186,6 +1249,7 @@ AS $function$
 DECLARE
   v_admin uuid;
   v_oficio text := lower(btrim(coalesce(p_oficio, '')));
+  v_version integer;
   v_at timestamptz := now();
 BEGIN
   v_admin := public._admin_require();
@@ -1199,13 +1263,24 @@ BEGIN
     RAISE EXCEPTION 'El oficio de la matrícula no es válido.';
   END IF;
 
-  PERFORM 1
+  SELECT m.identidad_version
+    INTO v_version
   FROM public.matriculas m
   WHERE m.user_id = p_user_id
     AND m.oficio_codigo = v_oficio
   FOR UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'No hay una matrícula para este usuario.';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.matricula_fotos f
+    WHERE f.user_id = p_user_id
+      AND f.oficio_codigo = v_oficio
+      AND f.status = 'pendiente'
+      AND f.identidad_version = v_version
+  ) THEN
+    RAISE EXCEPTION 'No hay una foto nueva de esta matrícula para revisar.';
   END IF;
 
   UPDATE public.matriculas
@@ -1223,7 +1298,9 @@ BEGIN
       reviewed_at = v_at,
       reviewed_by = v_admin
   WHERE user_id = p_user_id
-    AND oficio_codigo = v_oficio;
+    AND oficio_codigo = v_oficio
+    AND status = 'pendiente'
+    AND identidad_version = v_version;
 
   RETURN jsonb_build_object(
     'user_id', p_user_id,
@@ -1245,6 +1322,7 @@ DECLARE
   v_admin uuid;
   v_oficio text := lower(btrim(coalesce(p_oficio, '')));
   v_motivo text := btrim(coalesce(p_motivo, ''));
+  v_version integer;
   v_at timestamptz := now();
   v_event text;
 BEGIN
@@ -1265,7 +1343,8 @@ BEGIN
     RAISE EXCEPTION 'El motivo puede tener hasta 300 caracteres.';
   END IF;
 
-  PERFORM 1
+  SELECT m.identidad_version
+    INTO v_version
   FROM public.matriculas m
   WHERE m.user_id = p_user_id
     AND m.oficio_codigo = v_oficio
@@ -1283,14 +1362,17 @@ BEGIN
   WHERE user_id = p_user_id
     AND oficio_codigo = v_oficio;
 
-  -- El rechazo del envío deja sin foto aprobada a ESE oficio. No borra archivos ni toca otros oficios.
+  -- Solo las pendientes de esta identidad. Las aprobadas de antes quedan como estaban.
+  -- El sello cae porque el status deja de ser aprobada.
   UPDATE public.matricula_fotos
   SET status = 'rechazada',
       rejection_reason = v_motivo,
       reviewed_at = v_at,
       reviewed_by = v_admin
   WHERE user_id = p_user_id
-    AND oficio_codigo = v_oficio;
+    AND oficio_codigo = v_oficio
+    AND status = 'pendiente'
+    AND identidad_version = v_version;
 
   v_event := 'matricula:' || p_user_id::text || ':' || v_oficio || ':' || floor(extract(epoch FROM v_at))::text;
   PERFORM public.notify_matricula_rechazo(p_user_id, v_motivo, v_event);

@@ -95,6 +95,8 @@ export type MyMatriculaFoto = {
   status: MatriculaFotoStatus;
   motivo: string | null;
   storagePath: string;
+  /** Versión de número/entidad con la que se cargó. Null si el payload no la trae: no cuenta para el sello. */
+  identidadVersion: number | null;
 };
 
 export type MyMatriculaOficio = {
@@ -103,6 +105,7 @@ export type MyMatriculaOficio = {
   numero: string;
   entidad: string;
   motivo: string | null;
+  identidadVersion: number | null;
   verificada: boolean;
   fotos: MyMatriculaFoto[];
 };
@@ -113,6 +116,7 @@ export type MyMatriculaLegado = {
   numero: string;
   entidad: string;
   motivo: string | null;
+  identidadVersion: number | null;
   verificada: boolean;
   fotos: MyMatriculaFoto[];
 };
@@ -193,12 +197,25 @@ export function matriculaOficiosFromTrades(trades: MatriculaTradeRef[]): Matricu
  * Sello del oficio: el admin aprobó la identidad actual y queda al menos una foto aprobada.
  * Un envío pendiente, aunque conserve fotos aprobadas de la identidad anterior, no se muestra.
  */
+function versionEntera(value: unknown): number | null {
+  const version = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(version) || version < 1) return null;
+  return version;
+}
+
 export function oficioVerificado(input: {
   status: string | null | undefined;
-  fotos: { status: string }[];
+  identidadVersion?: number | null;
+  fotos: { status: string; identidadVersion?: number | null }[];
 }): boolean {
   if (input.status !== 'aprobada') return false;
-  return input.fotos.some((foto) => foto.status === 'aprobada');
+  const version = input.identidadVersion ?? null;
+  return input.fotos.some((foto) => {
+    if (foto.status !== 'aprobada') return false;
+    const fotoVersion = foto.identidadVersion ?? null;
+    if (version == null) return fotoVersion == null;
+    return fotoVersion === version;
+  });
 }
 
 export function identidadMatriculaDistinta(
@@ -215,13 +232,26 @@ export type OficioMatriculaState = {
   status: MatriculaStatus;
   numero: string;
   entidad: string;
-  fotos: { id: string; status: MatriculaFotoStatus }[];
+  identidadVersion: number;
+  fotos: { id: string; status: MatriculaFotoStatus; identidadVersion: number }[];
 };
 
+export function problemaEnvioMatriculaOficio(input: {
+  estado: { numero: string; entidad: string };
+  numero: string;
+  entidad: string;
+  fotosNuevas: number;
+}): string | null {
+  if (identidadMatriculaDistinta(input.estado, input) && input.fotosNuevas < 1) {
+    return 'Para cambiar el número o la entidad tenés que sumar una foto nueva.';
+  }
+  return null;
+}
+
 /**
- * Sumar fotos no cambia las ya guardadas ni el status aprobado.
- * Cambiar número o entidad deja el envío pendiente y conserva cada foto anterior.
- * El oficio de la fila no se mueve.
+ * Sumar fotos no cambia las ya guardadas ni su versión.
+ * Cambiar número o entidad exige una foto nueva, sube la versión y deja el envío pendiente.
+ * Las fotos viejas conservan versión y estado. El oficio de la fila no se mueve.
  */
 export function aplicarEnvioMatriculaOficio(input: {
   estado: OficioMatriculaState;
@@ -229,11 +259,16 @@ export function aplicarEnvioMatriculaOficio(input: {
   entidad: string;
   fotosNuevas: number;
 }): OficioMatriculaState {
+  const problema = problemaEnvioMatriculaOficio(input);
+  if (problema) throw new Error(problema);
   const cambio = identidadMatriculaDistinta(input.estado, input);
-  const fotos = fotosTrasAgregar(input.estado.fotos, input.fotosNuevas).map((foto) => ({
-    id: foto.id,
-    status: foto.status as MatriculaFotoStatus,
-  }));
+  const version = cambio ? input.estado.identidadVersion + 1 : input.estado.identidadVersion;
+  const previas = input.estado.fotos.map((foto) => ({ ...foto }));
+  const fotos = previas;
+  const added = Math.max(0, Math.floor(input.fotosNuevas));
+  for (let i = 0; i < added; i += 1) {
+    fotos.push({ id: `nueva-${i + 1}`, status: 'pendiente', identidadVersion: version });
+  }
   const status: MatriculaStatus =
     cambio || input.estado.status === 'rechazada' ? 'pendiente' : input.estado.status;
   return {
@@ -241,6 +276,7 @@ export function aplicarEnvioMatriculaOficio(input: {
     status,
     numero: input.numero.trim(),
     entidad: input.entidad.trim(),
+    identidadVersion: version,
     fotos,
   };
 }
@@ -358,6 +394,7 @@ function parseMatriculaFoto(raw: unknown): MyMatriculaFoto | null {
     status,
     storagePath,
     motivo: status === 'rechazada' && motivoRaw ? motivoRaw : null,
+    identidadVersion: versionEntera(row.identidad_version),
   };
 }
 
@@ -383,13 +420,15 @@ function parseOficioRow(raw: unknown): MyMatriculaOficio | null {
     ? row.fotos.map(parseMatriculaFoto).filter((foto): foto is MyMatriculaFoto => foto != null)
     : [];
   const motivoRaw = typeof row.motivo === 'string' ? row.motivo.trim() : '';
+  const identidadVersion = versionEntera(row.identidad_version);
   return {
     oficio,
     status,
     numero: typeof row.numero === 'string' ? row.numero.trim() : '',
     entidad: typeof row.entidad === 'string' ? row.entidad.trim() : '',
     motivo: status === 'rechazada' && motivoRaw ? motivoRaw : null,
-    verificada: oficioVerificado({ status, fotos }),
+    identidadVersion,
+    verificada: oficioVerificado({ status, identidadVersion, fotos }),
     fotos,
   };
 }
@@ -411,13 +450,15 @@ export function parseMyMatriculas(raw: unknown): MyMatriculasBundle {
         ? legacy.fotos.map(parseMatriculaFoto).filter((foto): foto is MyMatriculaFoto => foto != null)
         : [];
       const motivoRaw = typeof legacy.motivo === 'string' ? legacy.motivo.trim() : '';
+      const identidadVersion = versionEntera(legacy.identidad_version);
       legado = {
         vinculo: 'sin_evidencia',
         status,
         numero: typeof legacy.numero === 'string' ? legacy.numero.trim() : '',
         entidad: typeof legacy.entidad === 'string' ? legacy.entidad.trim() : '',
         motivo: status === 'rechazada' && motivoRaw ? motivoRaw : null,
-        verificada: oficioVerificado({ status, fotos }),
+        identidadVersion,
+        verificada: oficioVerificado({ status, identidadVersion, fotos }),
         fotos,
       };
     }

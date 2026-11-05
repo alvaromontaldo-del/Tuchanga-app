@@ -14,6 +14,7 @@ import {
   MATRICULA_OFICIO_CATALOG,
   matriculaDraftProblem,
   matriculaRoom,
+  problemaEnvioMatriculaOficio,
   matriculaUploadErrorMessage,
   type MatriculaOficioCodigo,
   type MyMatriculaFoto,
@@ -83,7 +84,7 @@ export function MatriculaPhotoTile({
       )}
       {status ? (
         <View style={styles.fotoChipWrap}>
-          <FotoEstado foto={{ id: 'x', status, motivo: null, storagePath: '' }} />
+          <FotoEstado foto={{ id: 'x', status, motivo: null, storagePath: '', identidadVersion: null }} />
         </View>
       ) : null}
       {onRemove ? (
@@ -195,6 +196,18 @@ export function MatriculaCard({ oficio, row, puedeCargar, onReload }: Props) {
     if (fieldProblem) {
       toast.error(fieldProblem, catalog.titulo);
       return;
+    }
+    if (row) {
+      const identidad = problemaEnvioMatriculaOficio({
+        estado: row,
+        numero,
+        entidad,
+        fotosNuevas: photos.length,
+      });
+      if (identidad) {
+        toast.error(identidad, catalog.titulo);
+        return;
+      }
     }
     if (row && photos.length === 0 && numero.trim() === row.numero && entidad.trim() === row.entidad) {
       toast.error('No hay fotos nuevas ni cambios para enviar.', catalog.titulo);
