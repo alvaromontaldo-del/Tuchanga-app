@@ -4,6 +4,8 @@ import type { MaterialRequestItem } from '../types/materials';
 import { isClientSelectableQuoteItem } from './pickBestQuote';
 import {
   buildStoreQuoteItemRows,
+  storeChosenReplacementLabel,
+  storeQuoteScreenTitle,
   storeReadonlyPriceCaption,
   storeReadonlyPriceOnTitle,
   storeReadonlyStockCaption,
@@ -152,6 +154,154 @@ describe('labels de solo lectura (#209)', () => {
     );
     expect(storeReadonlyPriceOnTitle({ inStock: true, variantCount: 2, label: '' })).toBe(false);
     expect(storeReadonlyPriceOnTitle({ inStock: false, variantCount: 1, label: '' })).toBe(false);
+  });
+});
+
+describe('ver cotización del comercio (#211 #215)', () => {
+  it('Ver cotización titula Volver y el alta sigue en Cotizar pedido', () => {
+    expect(storeQuoteScreenTitle(true)).toBe('Volver');
+    expect(storeQuoteScreenTitle(false)).toBe('Cotizar pedido');
+  });
+
+  it('una alternativa aceptada muestra su nombre y su precio', () => {
+    expect(
+      storeChosenReplacementLabel({
+        inStock: false,
+        clientDecision: 'accepted',
+        variants: [{ label: '  Cal en bolsa  ', priceText: '90' }],
+      }),
+    ).toEqual({ label: 'Cal en bolsa', priceText: '90' });
+    expect(
+      storeChosenReplacementLabel({
+        inStock: false,
+        clientDecision: 'pending',
+        variants: [{ label: 'Cal en bolsa', priceText: '90' }],
+      }),
+    ).toBeNull();
+    expect(
+      storeChosenReplacementLabel({
+        inStock: false,
+        clientDecision: 'rejected',
+        variants: [{ label: 'Cal en bolsa', priceText: '90' }],
+      }),
+    ).toBeNull();
+    expect(
+      storeChosenReplacementLabel({
+        inStock: false,
+        clientDecision: 'accepted',
+        variants: [{ label: '   ', priceText: '90' }],
+      }),
+    ).toBeNull();
+  });
+
+  it('con tres alternativas muestra la segunda aceptada y su precio', () => {
+    expect(
+      storeChosenReplacementLabel({
+        inStock: false,
+        clientDecision: 'accepted',
+        variants: [
+          { label: 'Marca A', priceText: '100' },
+          { label: 'Marca B', priceText: '250' },
+          { label: 'Marca C', priceText: '80' },
+        ],
+        variantDecisions: ['rejected', 'accepted', 'pending'],
+      }),
+    ).toEqual({ label: 'Marca B', priceText: '250' });
+  });
+
+  it('dos alternativas sin decisión individual no inventan elección aunque el ítem figure accepted', () => {
+    const variants = [
+      { label: 'Marca A', priceText: '100' },
+      { label: 'Marca B', priceText: '250' },
+    ];
+    expect(
+      storeChosenReplacementLabel({
+        inStock: false,
+        clientDecision: 'accepted',
+        variants,
+      }),
+    ).toBeNull();
+    expect(
+      storeChosenReplacementLabel({
+        inStock: false,
+        clientDecision: 'accepted',
+        variants,
+        variantDecisions: ['pending', 'pending'],
+      }),
+    ).toBeNull();
+  });
+
+  it('más de una alternativa aceptada vuelve a la vista completa', () => {
+    expect(
+      storeChosenReplacementLabel({
+        inStock: false,
+        clientDecision: 'accepted',
+        variants: [
+          { label: 'Marca A', priceText: '100' },
+          { label: 'Marca B', priceText: '250' },
+        ],
+        variantDecisions: ['accepted', 'accepted'],
+      }),
+    ).toBeNull();
+  });
+
+  it('un ítem con stock no muestra la tarjeta de reemplazo', () => {
+    expect(
+      storeChosenReplacementLabel({
+        inStock: true,
+        clientDecision: 'accepted',
+        variants: [{ label: 'Acme', priceText: '100' }],
+        variantDecisions: ['accepted'],
+      }),
+    ).toBeNull();
+    expect(
+      storeChosenReplacementLabel({
+        inStock: true,
+        clientDecision: 'accepted',
+        variants: [
+          { label: 'Acme', priceText: '100' },
+          { label: 'Otra', priceText: '80' },
+        ],
+        variantDecisions: ['rejected', 'accepted'],
+      }),
+    ).toBeNull();
+  });
+
+  it('la pantalla no explica la regla cuando ya hay reemplazo y mantiene marca junto al precio', () => {
+    const screen = readFileSync('src/screens/store/StoreQuoteRequestScreen.tsx', 'utf8');
+    const stack = readFileSync('src/navigation/CommerceStack.tsx', 'utf8');
+    const board = readFileSync('src/screens/store/StoreMaterialRequestsScreen.tsx', 'utf8');
+    expect(screen).toContain('storeChosenReplacementLabel(');
+    expect(screen).toContain('Reemplazo elegido por el cliente');
+    expect(screen).toContain("textDecorationLine: 'line-through'");
+    expect(screen).toContain('storeQuoteScreenTitle(viewingSentQuote)');
+    expect(screen).toContain('useQuoterLeaveGuard');
+    expect(screen).toContain('storeQuoteDraftIsDirty');
+    expect(screen).not.toContain('gestureEnabled');
+    expect(screen).toContain("flexWrap: 'nowrap'");
+    expect(screen).not.toContain("flexWrap: 'wrap'");
+    expect(screen).toContain('variantPriceField');
+    expect(screen).toContain('Precio unitario');
+    expect(screen).toContain('Agregar otra marca');
+    expect(stack).toContain('storeQuoteScreenTitle(route.params.viewing === true)');
+    expect(board).toContain("viewing: card.column !== 'nuevas'");
+    const chosenCall = screen.slice(
+      screen.indexOf('storeChosenReplacementLabel({'),
+      screen.indexOf('if (chosenReplacement)'),
+    );
+    expect(chosenCall).toContain('variantDecisions');
+    expect(chosenCall).not.toContain('.find(');
+    const chosenBranch = screen.slice(
+      screen.indexOf('if (chosenReplacement)'),
+      screen.indexOf('const decisionLabel ='),
+    );
+    expect(chosenBranch).toContain('chosenReplacement.priceText');
+    expect(chosenBranch).toContain('chosenReplacement.label');
+    expect(chosenBranch).toContain('formatDraftPrice(chosenPrice)');
+    expect(chosenBranch).not.toContain('.find(');
+    expect(chosenBranch).not.toContain('El cliente solo puede elegir el reemplazo');
+    expect(chosenBranch).not.toContain('Sin stock');
+    expect(screen).toContain('El cliente solo puede elegir el reemplazo, no el pedido original.');
   });
 });
 

@@ -10,6 +10,7 @@ import { StoreCloseOrderScreen } from '../screens/store/StoreCloseOrderScreen';
 import { CommerceAccountScreen } from '../screens/store/CommerceAccountScreen';
 import { StoreStatsScreen } from '../screens/store/StoreStatsScreen';
 import { FaqScreen } from '../screens/account/FaqScreen';
+import { storeQuoteScreenTitle } from '../utils/storeQuoteDraft';
 import type { CommerceStackParamList } from './mainTypes';
 import {
   mergeNativeStackScreenOptions,
@@ -65,7 +66,9 @@ export function CommerceStack() {
       <Stack.Screen
         name="StoreQuoteRequest"
         component={StoreQuoteRequestScreen}
-        options={{ title: 'Cotizar pedido' }}
+        options={({ route }) => ({
+          title: storeQuoteScreenTitle(route.params.viewing === true),
+        })}
       />
       <Stack.Screen
         name="StoreCloseOrder"
