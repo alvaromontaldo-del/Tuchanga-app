@@ -83,7 +83,11 @@ import {
   resultadoVerificacionPin,
 } from '../../utils/pinBloqueo';
 import { formatArs, formatMoneyCeilAr } from '../../utils/formatMoney';
-import { jobUsesWarrantyRevisitAgenda } from '../../utils/claimChatActions';
+import {
+  formatWarrantyRevisitConfirmed,
+  jobUsesWarrantyRevisitAgenda,
+  warrantyRevisitPhase,
+} from '../../utils/claimChatActions';
 import { recotizacionStatusForRow } from '../../utils/recotizarUi';
 import {
   AGENDA_DEFAULT_DURATION_MINUTES,
@@ -229,6 +233,8 @@ export function DetalleServicioScreen() {
   const [direccionLista, setDireccionLista] = useState(false);
   const [slots, setSlots] = useState<SlotDraft[]>(() => [newSlotDraft()]);
   const [opcionesAgenda, setOpcionesAgenda] = useState<DisponibilidadOpcion[]>([]);
+  const [agendaTodas, setAgendaTodas] = useState<DisponibilidadOpcion[]>([]);
+  const [reagendarAbierto, setReagendarAbierto] = useState(false);
   const [picker, setPicker] = useState<{
     slotId: string;
     field: PickerField;
@@ -320,7 +326,31 @@ export function DetalleServicioScreen() {
         claimStatus: row.claim_status,
       }),
   );
-  const showAgendaForm = row?.estado_trabajo === 'precio_aceptado' || warrantyRevisitAgenda;
+  const revisitPhase = useMemo(
+    () =>
+      warrantyRevisitPhase({
+        estadoTrabajo: row?.estado_trabajo,
+        isClaimOpen: row?.is_claim_open,
+        claimStatus: row?.claim_status,
+        claimOpenedAt: row?.claim_opened_at,
+        fechaTrabajo: row?.fecha_trabajo,
+        horaInicio: row?.hora_inicio,
+        horaFin: row?.hora_fin,
+        opciones: agendaTodas.map((option) => ({
+          id: option.id,
+          estado: option.estado,
+          fechaTrabajo: option.fecha_trabajo,
+          horaInicio: option.hora_inicio,
+          horaFin: option.hora_fin,
+          createdAt: option.created_at,
+        })),
+      }),
+    [agendaTodas, row],
+  );
+  const revisitConfirmada = warrantyRevisitAgenda && revisitPhase.phase === 'confirmada';
+  const showAgendaForm =
+    row?.estado_trabajo === 'precio_aceptado' ||
+    (warrantyRevisitAgenda && (!revisitConfirmada || reagendarAbierto));
 
   const showNotificarPagoOffline = useMemo(() => {
     if (!row || myRole !== 'cliente') return false;
@@ -342,13 +372,16 @@ export function DetalleServicioScreen() {
         claimStatus: data?.claim_status,
       });
       if (data && (data.estado_trabajo === 'precio_aceptado' || revisitAgenda)) {
-        const ops = await fetchDisponibilidadOpciones(contratacionId);
-        setOpcionesAgenda(ops);
+        const ops = await fetchDisponibilidadOpciones(contratacionId, !revisitAgenda);
+        const propuestas = revisitAgenda ? ops.filter((option) => option.estado === 'propuesta') : ops;
+        setAgendaTodas(revisitAgenda ? ops : []);
+        setOpcionesAgenda(propuestas);
         if (data.worker_id === user?.id && !preserveSlotsRef.current) {
-          setSlots(ops.length > 0 ? opcionesToSlotDrafts(ops) : [newSlotDraft()]);
+          setSlots(propuestas.length > 0 ? opcionesToSlotDrafts(propuestas) : [newSlotDraft()]);
         }
       } else {
         setOpcionesAgenda([]);
+        setAgendaTodas([]);
       }
       if (data?.worker_id && data.worker_id === user?.id) {
         try {
@@ -613,6 +646,22 @@ export function DetalleServicioScreen() {
             >
               <Text style={styles.btnPrimaryText}>Aceptar precio</Text>
             </Pressable>
+          </View>
+        ) : null}
+
+        {revisitConfirmada && revisitPhase.phase === 'confirmada' ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{formatWarrantyRevisitConfirmed(revisitPhase.slot)}</Text>
+            {myRole === 'trabajador' && !reagendarAbierto ? (
+              <Pressable
+                style={[styles.btnGhost, { marginTop: spacing.sm }]}
+                onPress={() => setReagendarAbierto(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Cambiar horario"
+              >
+                <Text style={styles.btnGhostText}>Cambiar horario</Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
 

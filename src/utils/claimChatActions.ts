@@ -12,9 +12,9 @@
  * conserva las suyas. Al cerrar el reclamo (`claim_status` cerrado y
  * `is_claim_open` falso) vuelven las acciones de siempre.
  *
- * `rechazar_disponibilidad` sigue exigiendo `precio_aceptado`. En la revisita el
- * cliente confirma (`aceptar_disponibilidad_opcion` ya tiene la rama de garantía)
- * y el profesional reenvía opciones. No se cambia esa RPC.
+ * La revisita confirmada no es la fecha del trabajo original. Hace falta una
+ * opción aceptada desde que se abrió el reclamo, igual a la fecha y hora que
+ * la contratación tiene ahora. Volver a proponer borra esa fecha y es explícito.
  */
 
 export type ClaimChatJob = {
@@ -96,4 +96,90 @@ export function claimChatActions(input: {
 export function conversationBlocksNewMaterials(jobs: ClaimChatJob[]): boolean {
   if (!jobs.some((job) => jobHasOpenWarrantyClaim(job))) return false;
   return !jobs.some((job) => jobKeepsQuoteAndMaterials(job));
+}
+
+export type WarrantyRevisitOption = {
+  id: string;
+  estado: string;
+  fechaTrabajo: string | null;
+  horaInicio: string | null;
+  horaFin: string | null;
+  createdAt: string | null;
+};
+
+export type WarrantyRevisitSlot = {
+  fecha: string;
+  horaInicio: string;
+  horaFin: string;
+};
+
+export type WarrantyRevisitPhase =
+  | { phase: 'propuestas' }
+  | { phase: 'confirmada'; slot: WarrantyRevisitSlot }
+  | { phase: 'sin_horario' };
+
+function dateKey(value: string | null | undefined): string {
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec((value ?? '').trim());
+  return match?.[1] ?? '';
+}
+
+function timeKey(value: string | null | undefined): string {
+  const match = /^(\d{2}:\d{2})/.exec((value ?? '').trim());
+  return match?.[1] ?? '';
+}
+
+/** Texto único del horario ya aceptado. No incluye la fecha del trabajo original. */
+export function formatWarrantyRevisitConfirmed(slot: WarrantyRevisitSlot): string {
+  const [year, month, day] = slot.fecha.split('-');
+  return `Revisión confirmada: ${day}/${month}/${year} · ${slot.horaInicio} – ${slot.horaFin}`;
+}
+
+/**
+ * Estado de la revisita en el chat y en el detalle.
+ * `confirmada` solo si la contratación conserva fecha y hora iguales a una
+ * opción aceptada posterior a `claim_opened_at`. Una fecha anterior, o una
+ * opción aceptada cuya hora ya se borró al reenviar, no cuentan.
+ * Con propuestas abiertas se elige entre esas, aunque quede una aceptación vieja.
+ */
+export function warrantyRevisitPhase(input: {
+  estadoTrabajo?: string | null;
+  isClaimOpen?: boolean | null;
+  claimStatus?: string | null;
+  claimOpenedAt?: string | null;
+  fechaTrabajo?: string | null;
+  horaInicio?: string | null;
+  horaFin?: string | null;
+  opciones: WarrantyRevisitOption[];
+}): WarrantyRevisitPhase {
+  if (!jobUsesWarrantyRevisitAgenda(input)) return { phase: 'sin_horario' };
+  if (input.opciones.some((option) => option.estado === 'propuesta')) {
+    return { phase: 'propuestas' };
+  }
+
+  const openedAt = Date.parse(input.claimOpenedAt ?? '');
+  const fecha = dateKey(input.fechaTrabajo);
+  const horaInicio = timeKey(input.horaInicio);
+  const horaFin = timeKey(input.horaFin);
+  if (!Number.isFinite(openedAt) || !fecha || !horaInicio || !horaFin) {
+    return { phase: 'sin_horario' };
+  }
+
+  const match = input.opciones
+    .filter((option) => option.estado === 'aceptada')
+    .filter((option) => {
+      const createdAt = Date.parse(option.createdAt ?? '');
+      return Number.isFinite(createdAt) && createdAt >= openedAt;
+    })
+    .filter(
+      (option) =>
+        dateKey(option.fechaTrabajo) === fecha &&
+        timeKey(option.horaInicio) === horaInicio &&
+        timeKey(option.horaFin) === horaFin,
+    )
+    .sort(
+      (a, b) => Date.parse(b.createdAt ?? '') - Date.parse(a.createdAt ?? ''),
+    )[0];
+
+  if (!match) return { phase: 'sin_horario' };
+  return { phase: 'confirmada', slot: { fecha, horaInicio, horaFin } };
 }

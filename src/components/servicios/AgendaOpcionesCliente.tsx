@@ -138,21 +138,19 @@ export function AgendaOpcionesCliente({
             <Text style={styles.btnPrimaryText}>{busy ? 'Confirmando…' : 'Confirmar horario'}</Text>
           </Pressable>
 
-          {onReject ? (
-            <Pressable
-              style={({ pressed }) => [
-                styles.btnGhost,
-                busy && styles.btnDisabled,
-                pressed && !busy && styles.pressed,
-              ]}
-              disabled={busy}
-              onPress={() => void onReject()}
-              accessibilityRole="button"
-              accessibilityLabel="Pedir otras fechas"
-            >
-              <Text style={styles.btnGhostText}>Prefiero otras fechas</Text>
-            </Pressable>
-          ) : null}
+          <Pressable
+            style={({ pressed }) => [
+              styles.btnGhost,
+              busy && styles.btnDisabled,
+              pressed && !busy && styles.pressed,
+            ]}
+            disabled={busy}
+            onPress={() => void onReject?.()}
+            accessibilityRole="button"
+            accessibilityLabel="Pedir otras fechas"
+          >
+            <Text style={styles.btnGhostText}>Prefiero otras fechas</Text>
+          </Pressable>
         </>
       )}
     </View>

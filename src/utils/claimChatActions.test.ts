@@ -3,10 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
   claimChatActions,
   conversationBlocksNewMaterials,
+  formatWarrantyRevisitConfirmed,
   jobHasOpenWarrantyClaim,
   jobUsesWarrantyRevisitAgenda,
   MATERIALS_CLAIM_BLOCKED_MESSAGE,
+  warrantyRevisitPhase,
   type ClaimChatJob,
+  type WarrantyRevisitOption,
 } from './claimChatActions';
 
 function job(partial: Partial<ClaimChatJob> & Pick<ClaimChatJob, 'id' | 'estadoTrabajo'>): ClaimChatJob {
@@ -145,16 +148,21 @@ describe('la UI usa el criterio por trabajo y no apaga el resto del chat', () =>
     expect(materials).toContain('conversationAllowsMaterialsList');
   });
 
-  it('ofrece Agenda de la revisita y no el rechazo que el servidor no acepta', () => {
+  it('ofrece Agenda de la revisita y el cliente puede rechazar las propuestas', () => {
     expect(chat).toContain('claimAgenda');
     expect(chat).toContain('coordinar la revisión de la garantía');
-    expect(chat).toContain('onReject={claimAgenda ? undefined : handleRejectAgenda}');
+    expect(chat).toContain('onReject={handleRejectAgenda}');
+    expect(chat).not.toContain('claimAgenda ? undefined');
+    expect(chat).toContain('rechazarDisponibilidad');
     expect(chat).toContain('jobUsesWarrantyRevisitAgenda');
     expect(detail).toContain('jobUsesWarrantyRevisitAgenda');
     expect(detail).toContain("estado_trabajo === 'precio_aceptado'");
     expect(detail).toContain('Proponer disponibilidad (hasta 5)');
-    expect(agenda).toContain('onReject ? (');
     expect(agenda).toContain('Prefiero otras fechas');
+    expect(agenda).not.toContain('onReject ? (');
+    expect(readFileSync('src/utils/claimChatActions.ts', 'utf8')).not.toContain(
+      'sigue exigiendo `precio_aceptado`',
+    );
   });
 
   it('deja el chat, la reparación, la conformidad, la disputa y el encabezado', () => {
@@ -171,5 +179,177 @@ describe('la UI usa el criterio por trabajo y no apaga el resto del chat', () =>
     const header = chat.slice(chat.indexOf('<View style={styles.header}>'), chat.indexOf('<KeyboardAvoidingView'));
     expect(header.indexOf('styles.headerTopRow')).toBeLessThan(header.indexOf('styles.headerDistanceRow'));
     expect(header.split('styles.headerTopRow').length - 1).toBe(1);
+  });
+});
+
+function option(partial: Partial<WarrantyRevisitOption> & Pick<WarrantyRevisitOption, 'id' | 'estado'>): WarrantyRevisitOption {
+  return {
+    fechaTrabajo: '2026-10-02',
+    horaInicio: '09:00:00',
+    horaFin: '11:00:00',
+    createdAt: '2026-10-01T12:00:00.000Z',
+    ...partial,
+  };
+}
+
+const claimBase = {
+  estadoTrabajo: 'finalizado',
+  isClaimOpen: true,
+  claimStatus: 'open',
+  claimOpenedAt: '2026-10-05T15:00:00.000Z',
+  fechaTrabajo: '2026-09-12',
+  horaInicio: '08:00:00',
+  horaFin: '10:00:00',
+};
+
+describe('revisita confirmada', () => {
+  it('muestra el horario si la opción aceptada después del reclamo coincide con la contratación', () => {
+    const phase = warrantyRevisitPhase({
+      ...claimBase,
+      fechaTrabajo: '2026-10-20',
+      horaInicio: '09:00:00',
+      horaFin: '11:00:00',
+      opciones: [
+        option({
+          id: 'visita',
+          estado: 'aceptada',
+          fechaTrabajo: '2026-09-12',
+          horaInicio: '08:00:00',
+          horaFin: '10:00:00',
+          createdAt: '2026-09-01T12:00:00.000Z',
+        }),
+        option({
+          id: 'revisita',
+          estado: 'aceptada',
+          fechaTrabajo: '2026-10-20',
+          horaInicio: '09:00',
+          horaFin: '11:00',
+          createdAt: '2026-10-06T18:00:00.000Z',
+        }),
+      ],
+    });
+    expect(phase).toEqual({
+      phase: 'confirmada',
+      slot: { fecha: '2026-10-20', horaInicio: '09:00', horaFin: '11:00' },
+    });
+    expect(formatWarrantyRevisitConfirmed(phase.phase === 'confirmada' ? phase.slot : { fecha: '', horaInicio: '', horaFin: '' })).toBe(
+      'Revisión confirmada: 20/10/2026 · 09:00 – 11:00',
+    );
+  });
+
+  it('un reclamo sin horario nuevo no usa la fecha del trabajo original', () => {
+    expect(
+      warrantyRevisitPhase({
+        ...claimBase,
+        opciones: [
+          option({
+            id: 'visita',
+            estado: 'aceptada',
+            fechaTrabajo: '2026-09-12',
+            horaInicio: '08:00:00',
+            horaFin: '10:00:00',
+            createdAt: '2026-09-01T12:00:00.000Z',
+          }),
+        ],
+      }),
+    ).toEqual({ phase: 'sin_horario' });
+    expect(
+      warrantyRevisitPhase({
+        ...claimBase,
+        fechaTrabajo: null,
+        horaInicio: null,
+        horaFin: null,
+        opciones: [
+          option({
+            id: 'vieja',
+            estado: 'aceptada',
+            createdAt: '2026-10-06T18:00:00.000Z',
+          }),
+        ],
+      }),
+    ).toEqual({ phase: 'sin_horario' });
+  });
+
+  it('con propuestas abiertas no da por confirmada la aceptación anterior', () => {
+    expect(
+      warrantyRevisitPhase({
+        ...claimBase,
+        fechaTrabajo: null,
+        horaInicio: null,
+        horaFin: null,
+        opciones: [
+          option({
+            id: 'revisita',
+            estado: 'aceptada',
+            createdAt: '2026-10-06T18:00:00.000Z',
+          }),
+          option({
+            id: 'nueva',
+            estado: 'propuesta',
+            fechaTrabajo: '2026-10-22',
+            createdAt: '2026-10-07T18:00:00.000Z',
+          }),
+        ],
+      }).phase,
+    ).toBe('propuestas');
+  });
+
+  it('otro trabajo no entra en la revisita', () => {
+    expect(
+      warrantyRevisitPhase({
+        estadoTrabajo: 'en_curso',
+        isClaimOpen: false,
+        claimStatus: 'none',
+        claimOpenedAt: null,
+        fechaTrabajo: '2026-10-20',
+        horaInicio: '09:00',
+        horaFin: '11:00',
+        opciones: [
+          option({
+            id: 'ok',
+            estado: 'aceptada',
+            createdAt: '2026-10-06T18:00:00.000Z',
+          }),
+        ],
+      }),
+    ).toEqual({ phase: 'sin_horario' });
+    expect(
+      warrantyRevisitPhase({
+        estadoTrabajo: 'precio_aceptado',
+        isClaimOpen: false,
+        claimStatus: 'none',
+        claimOpenedAt: null,
+        fechaTrabajo: '2026-10-20',
+        horaInicio: '09:00',
+        horaFin: '11:00',
+        opciones: [],
+      }).phase,
+    ).toBe('sin_horario');
+  });
+});
+
+describe('la confirmación se ve en el chat y en el detalle, y reagendar es explícito', () => {
+  const chat = readFileSync('src/screens/chat/ChatScreen.tsx', 'utf8');
+  const detail = readFileSync('src/screens/servicios/DetalleServicioScreen.tsx', 'utf8');
+
+  it('ambos roles ven el texto y el profesional cambia el horario a propósito', () => {
+    expect(chat).toContain('formatWarrantyRevisitConfirmed(revisitConfirmada)');
+    expect(chat).toContain('revisitConfirmadaVisible');
+    expect(chat).toContain('!revisitConfirmadaVisible');
+    expect(chat).toContain('accessibilityLabel="Cambiar horario"');
+    const confirmed = chat.indexOf('formatWarrantyRevisitConfirmed(revisitConfirmada)');
+    const workerOnly = chat.indexOf("participants?.myRole === 'trabajador'", confirmed);
+    expect(confirmed).toBeGreaterThan(-1);
+    expect(workerOnly).toBeGreaterThan(confirmed);
+
+    expect(detail).toContain('formatWarrantyRevisitConfirmed(revisitPhase.slot)');
+    expect(detail).toContain('setReagendarAbierto(true)');
+    expect(detail).toContain('!revisitConfirmada || reagendarAbierto');
+    const detailConfirmed = detail.indexOf('formatWarrantyRevisitConfirmed(revisitPhase.slot)');
+    const detailForm = detail.indexOf("myRole === 'trabajador' && showAgendaForm");
+    expect(detailConfirmed).toBeGreaterThan(-1);
+    expect(detailConfirmed).toBeLessThan(detailForm);
+    expect(detail).toContain('fetchDisponibilidadOpciones(contratacionId, !revisitAgenda)');
+    expect(chat).toContain('fetchDisponibilidadOpciones(snapshot.id, !revisit)');
   });
 });

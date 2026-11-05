@@ -28,6 +28,8 @@ export type ServiceJob = {
   estado_trabajo: ContratacionEstadoTrabajo;
   estado_pago: ContratacionEstadoPago;
   fecha_trabajo: string | null;
+  hora_inicio: string | null;
+  hora_fin: string | null;
   work_status: JobWorkStatus;
   payment_status: JobPaymentStatus;
   paid_at: string | null;
@@ -39,6 +41,7 @@ export type ServiceJob = {
   is_claim_open: boolean;
   /** none | open | pending_approval | closed */
   claim_status: string;
+  claim_opened_at: string | null;
   completed_by_worker_at: string | null;
   created_at: string;
   updated_at: string;
@@ -70,6 +73,8 @@ export function contratacionToServiceJob(c: Contratacion): ServiceJob {
     estado_trabajo: c.estado_trabajo,
     estado_pago: c.estado_pago,
     fecha_trabajo: c.fecha_trabajo,
+    hora_inicio: c.hora_inicio,
+    hora_fin: c.hora_fin,
     work_status,
     payment_status,
     paid_at: c.seña_pagada_at ?? c.paid_at,
@@ -79,6 +84,7 @@ export function contratacionToServiceJob(c: Contratacion): ServiceJob {
     disputa_motivo: c.disputa_motivo,
     is_claim_open: c.is_claim_open === true,
     claim_status: c.claim_status ?? 'none',
+    claim_opened_at: c.claim_opened_at,
     completed_by_worker_at: c.completed_by_worker_at ?? c.finalizado_at,
     created_at: c.created_at,
     updated_at: c.updated_at,

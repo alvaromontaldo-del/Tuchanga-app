@@ -136,8 +136,11 @@ import { computeSaldoPendiente } from '../../types/contrataciones';
 import { ESTADOS_PUEDEN_NOTIFICAR_SALDO } from '../../utils/contratacionStatus';
 import {
   claimChatActions,
+  formatWarrantyRevisitConfirmed,
   jobUsesWarrantyRevisitAgenda,
+  warrantyRevisitPhase,
   type ClaimChatJob,
+  type WarrantyRevisitSlot,
 } from '../../utils/claimChatActions';
 import {
   CHAT_CERRADO_POR_RECLAMO,
@@ -605,6 +608,7 @@ export function ChatScreen({
   const [chatBodyHeight, setChatBodyHeight] = useState(0);
   const [footerContentHeight, setFooterContentHeight] = useState(0);
   const [agendaOpciones, setAgendaOpciones] = useState<DisponibilidadOpcion[]>([]);
+  const [revisitConfirmada, setRevisitConfirmada] = useState<WarrantyRevisitSlot | null>(null);
   const [agendaBusy, setAgendaBusy] = useState(false);
   const [saldoBusy, setSaldoBusy] = useState(false);
   const [problemaOpen, setProblemaOpen] = useState(false);
@@ -665,9 +669,13 @@ export function ChatScreen({
   }, [conversationJobs, conversationJobsReady, job]);
   const claimLocksOwnActions = claimDecision.blockOwnQuoteAndMaterials;
   const claimAgenda = claimDecision.showAgenda;
+  const revisitConfirmadaVisible = Boolean(
+    claimAgenda && revisitConfirmada && agendaOpciones.length === 0,
+  );
   const showWorkerAvailabilityBar = Boolean(
     job &&
       participants?.myRole === 'trabajador' &&
+      !revisitConfirmadaVisible &&
       (job.estado_trabajo === 'precio_aceptado' || claimAgenda) &&
       agendaOpciones.length === 0,
   );
@@ -680,6 +688,7 @@ export function ChatScreen({
   const showClientWaitingAvailabilityBar = Boolean(
     job &&
       participants?.myRole === 'cliente' &&
+      !revisitConfirmadaVisible &&
       (job.estado_trabajo === 'precio_aceptado' || claimAgenda) &&
       agendaOpciones.length === 0,
   );
@@ -1403,12 +1412,41 @@ export function ChatScreen({
     });
   }, [materialQuotesByRequest, messages, participants?.myRole, review, reviewSubmitted]);
 
-  const refreshAgendaOpciones = useCallback(async (contratacionId: string) => {
+  const refreshAgendaOpciones = useCallback(async (snapshot: ServiceJob) => {
+    const revisit = jobUsesWarrantyRevisitAgenda({
+      estadoTrabajo: snapshot.estado_trabajo,
+      isClaimOpen: snapshot.is_claim_open,
+      claimStatus: snapshot.claim_status,
+    });
     try {
-      const ops = await fetchDisponibilidadOpciones(contratacionId);
-      setAgendaOpciones(ops);
+      const ops = await fetchDisponibilidadOpciones(snapshot.id, !revisit);
+      if (!revisit) {
+        setAgendaOpciones(ops);
+        setRevisitConfirmada(null);
+        return;
+      }
+      const phase = warrantyRevisitPhase({
+        estadoTrabajo: snapshot.estado_trabajo,
+        isClaimOpen: snapshot.is_claim_open,
+        claimStatus: snapshot.claim_status,
+        claimOpenedAt: snapshot.claim_opened_at,
+        fechaTrabajo: snapshot.fecha_trabajo,
+        horaInicio: snapshot.hora_inicio,
+        horaFin: snapshot.hora_fin,
+        opciones: ops.map((option) => ({
+          id: option.id,
+          estado: option.estado,
+          fechaTrabajo: option.fecha_trabajo,
+          horaInicio: option.hora_inicio,
+          horaFin: option.hora_fin,
+          createdAt: option.created_at,
+        })),
+      });
+      setAgendaOpciones(ops.filter((option) => option.estado === 'propuesta'));
+      setRevisitConfirmada(phase.phase === 'confirmada' ? phase.slot : null);
     } catch {
       setAgendaOpciones([]);
+      setRevisitConfirmada(null);
     }
   }, []);
 
@@ -1425,42 +1463,34 @@ export function ChatScreen({
       (role !== 'cliente' && role !== 'trabajador')
     ) {
       setAgendaOpciones([]);
+      setRevisitConfirmada(null);
       return;
     }
-    void refreshAgendaOpciones(job.id);
+    void refreshAgendaOpciones(job);
   }, [
-    job?.id,
-    job?.estado_trabajo,
-    job?.is_claim_open,
-    job?.claim_status,
+    job,
     participants?.myRole,
     refreshAgendaOpciones,
   ]);
 
   useFocusEffect(
     useCallback(() => {
+      const current = jobRef.current;
       const role = participants?.myRole;
       const revisit = jobUsesWarrantyRevisitAgenda({
-        estadoTrabajo: job?.estado_trabajo,
-        isClaimOpen: job?.is_claim_open,
-        claimStatus: job?.claim_status,
+        estadoTrabajo: current?.estado_trabajo,
+        isClaimOpen: current?.is_claim_open,
+        claimStatus: current?.claim_status,
       });
       if (
-        !job?.id ||
-        (job.estado_trabajo !== 'precio_aceptado' && !revisit) ||
+        !current?.id ||
+        (current.estado_trabajo !== 'precio_aceptado' && !revisit) ||
         (role !== 'cliente' && role !== 'trabajador')
       ) {
         return;
       }
-      void refreshAgendaOpciones(job.id);
-    }, [
-      job?.id,
-      job?.estado_trabajo,
-      job?.is_claim_open,
-      job?.claim_status,
-      participants?.myRole,
-      refreshAgendaOpciones,
-    ]),
+      void refreshAgendaOpciones(current);
+    }, [participants?.myRole, refreshAgendaOpciones]),
   );
 
   const handleConfirmAgenda = useCallback(
@@ -1470,9 +1500,11 @@ export function ChatScreen({
       void (async () => {
         try {
           await aceptarDisponibilidadOpcion(opcionId);
-          setAgendaOpciones([]);
           const j = await fetchLatestJobByConversation(conversationId);
-          setJob(j);
+          if (j) {
+            setJob(j);
+            await refreshAgendaOpciones(j);
+          }
           await refreshMessages();
           toast.success('Horario confirmado', 'Agenda');
         } catch (e) {
@@ -1482,7 +1514,7 @@ export function ChatScreen({
         }
       })();
     },
-    [agendaBusy, conversationId, refreshMessages, toast],
+    [agendaBusy, conversationId, refreshAgendaOpciones, refreshMessages, toast],
   );
 
   const handleRejectAgenda = useCallback(() => {
@@ -1709,7 +1741,7 @@ export function ChatScreen({
               (p?.myRole === 'cliente' || p?.myRole === 'trabajador') &&
               j?.id
             ) {
-              void refreshAgendaOpciones(j.id);
+              void refreshAgendaOpciones(j);
             }
             if (
               event === 'trabajo_finalizado' ||
@@ -1761,7 +1793,7 @@ export function ChatScreen({
               })) &&
             msg.sender_id !== myId
           ) {
-            void refreshAgendaOpciones(j.id);
+            void refreshAgendaOpciones(j);
           }
           if (msg.sender_id !== myId) {
             ingestInboxMessage({
@@ -2532,6 +2564,29 @@ export function ChatScreen({
   const chatActionBars = useMemo(
     () => (
       <>
+        {isSupabaseConfigured() && revisitConfirmadaVisible && revisitConfirmada && job ? (
+          <View style={styles.completeBar}>
+            <View style={styles.payBarText}>
+              <Text style={styles.paySubtitle}>{formatWarrantyRevisitConfirmed(revisitConfirmada)}</Text>
+            </View>
+            {participants?.myRole === 'trabajador' ? (
+              <Pressable
+                style={({ pressed }) => [styles.payBtn, pressed && styles.pressed]}
+                onPress={() =>
+                  navigation.navigate('DetalleServicio', {
+                    contratacionId: job.id,
+                    conversationId,
+                  })
+                }
+                accessibilityRole="button"
+                accessibilityLabel="Cambiar horario"
+              >
+                <Text style={styles.payBtnText}>Cambiar horario</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
         {isSupabaseConfigured() && showWorkerAvailabilityBar && job ? (
           <View style={styles.completeBar}>
             <View style={styles.payBarText}>
@@ -2592,7 +2647,7 @@ export function ChatScreen({
               busy={agendaBusy}
               embedded
               onConfirm={handleConfirmAgenda}
-              onReject={claimAgenda ? undefined : handleRejectAgenda}
+              onReject={handleRejectAgenda}
             />
           </View>
         ) : null}
@@ -3034,6 +3089,8 @@ export function ChatScreen({
       clientPin,
       conversationId,
       claimAgenda,
+      revisitConfirmada,
+      revisitConfirmadaVisible,
       handleConfirmAgenda,
       handleConfirmarSaldoTrabajador,
       handleMarcarTrabajoFinalizado,
