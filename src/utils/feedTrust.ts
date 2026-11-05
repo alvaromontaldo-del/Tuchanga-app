@@ -1,4 +1,5 @@
 import { professionalDisplayNameForClient } from './professionalDisplayName';
+import { canShowWorkerReputation } from './workerReputation';
 import { MATRICULA_OFICIO_CODIGOS, type MatriculaOficioCodigo } from './matriculaVerificada';
 
 export type FeedTrustIcon = 'antecedentes' | MatriculaOficioCodigo;
@@ -46,6 +47,14 @@ export function feedScoreLabel(score: number | null | undefined, jobs: number | 
   const scoreText = safeScore.toFixed(1);
   if (typeof jobs !== 'number' || !Number.isFinite(jobs)) return scoreText;
   return `${scoreText} (${Math.max(0, Math.floor(jobs))})`;
+}
+
+/**
+ * Inicio: con menos de 2 trabajos finalizados se muestra «Nuevo» y no el puntaje.
+ * Si el dato no vino (`undefined`), se mantiene el puntaje (payload viejo).
+ */
+export function feedHomeShowsNuevo(jobs: number | null | undefined): boolean {
+  return jobs !== undefined && !canShowWorkerReputation(jobs);
 }
 
 /** Línea del feed: solo nombre de pila, una estrella, puntaje y trabajos. */

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, radii, spacing } from '../../constants/theme';
@@ -16,6 +16,7 @@ import {
   antecedentesUploadErrorMessage,
   type MyAntecedentes,
 } from '../../utils/antecedentesPenales';
+import { resolveCertificatePreview, shouldShowCertificateThumbnail } from '../../utils/antecedentesPreview';
 import { ensureCameraPermission, ensureGalleryPermission } from '../../utils/mediaPermissions';
 import { useAppToast } from '../toast/toast';
 import { AntecedentesPenalesBadge } from './AntecedentesPenalesBadge';
@@ -44,28 +45,64 @@ export function AntecedentesPenalesCard() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
+  const mountedRef = useRef(true);
+  const previewTokenRef = useRef(0);
+  const changingRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const publishPreview = useCallback(async (certificate: MyAntecedentes | null, token: number) => {
+    if (!shouldShowCertificateThumbnail(certificate)) {
+      const cleared = resolveCertificatePreview({
+        token,
+        activeToken: previewTokenRef.current,
+        mounted: mountedRef.current,
+        certificate,
+        signedUrl: null,
+      });
+      if (cleared !== undefined) setPreviewUrl(cleared);
+      return;
+    }
+    const signedUrl = await signedAntecedentesUrl(certificate?.storagePath ?? '');
+    const next = resolveCertificatePreview({
+      token,
+      activeToken: previewTokenRef.current,
+      mounted: mountedRef.current,
+      certificate,
+      signedUrl,
+    });
+    if (next !== undefined) setPreviewUrl(next);
+  }, []);
 
   const reload = useCallback(async () => {
     if (!isSupabaseConfigured()) {
       setLoading(false);
       return;
     }
+    if (changingRef.current) {
+      setLoading(false);
+      return;
+    }
+    const token = ++previewTokenRef.current;
     try {
       const next = await fetchMyAntecedentesPenales();
+      if (!mountedRef.current || previewTokenRef.current !== token) return;
       setRow(next);
       setUnavailable(false);
-      if (next?.storagePath && next.mimeType !== 'application/pdf') {
-        setPreviewUrl(await signedAntecedentesUrl(next.storagePath));
-      } else {
-        setPreviewUrl(null);
-      }
+      await publishPreview(next, token);
     } catch (e) {
+      if (!mountedRef.current || previewTokenRef.current !== token) return;
       const message = antecedentesUploadErrorMessage(e);
       if (/no está habilitada/i.test(message)) setUnavailable(true);
     } finally {
-      setLoading(false);
+      if (mountedRef.current && previewTokenRef.current === token) setLoading(false);
     }
-  }, []);
+  }, [publishPreview]);
 
   useFocusEffect(
     useCallback(() => {
@@ -74,16 +111,23 @@ export function AntecedentesPenalesCard() {
   );
 
   async function send(kind: 'image' | 'pdf', uri: string) {
+    const token = ++previewTokenRef.current;
+    changingRef.current = true;
+    setPreviewUrl(null);
     setBusy(true);
     try {
       const next = await uploadMyAntecedentesPenales({ kind, uri });
+      if (!mountedRef.current || previewTokenRef.current !== token) return;
       setRow(next);
       setUnavailable(false);
+      await publishPreview(next, token);
       toast.success('Quedó en revisión. Te avisamos cuando lo veamos.', 'Certificado');
     } catch (e) {
+      if (!mountedRef.current || previewTokenRef.current !== token) return;
       toast.error(antecedentesUploadErrorMessage(e), 'No se pudo cargar', { durationMs: 4600 });
     } finally {
-      setBusy(false);
+      if (previewTokenRef.current === token) changingRef.current = false;
+      if (mountedRef.current && previewTokenRef.current === token) setBusy(false);
     }
   }
 
@@ -152,9 +196,11 @@ export function AntecedentesPenalesCard() {
       void (async () => {
         setBusy(true);
         try {
-          await deleteMyAntecedentesPenales();
-          setRow(null);
+          const token = ++previewTokenRef.current;
           setPreviewUrl(null);
+          await deleteMyAntecedentesPenales();
+          if (!mountedRef.current || previewTokenRef.current !== token) return;
+          setRow(null);
         } catch (e) {
           toast.error(antecedentesUploadErrorMessage(e), 'No se pudo borrar', { durationMs: 4600 });
         } finally {
