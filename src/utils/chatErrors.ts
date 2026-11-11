@@ -36,6 +36,9 @@ export function mapChatSendError(e: unknown): string {
   if (m.includes('rate_limit_exceeded')) {
     return 'Enviaste demasiados mensajes seguidos. Esperá un momento e intentá de nuevo.';
   }
+  if (m.includes('chat_bloqueado')) {
+    return 'Este chat está bloqueado. Solo se puede dejar la reseña.';
+  }
   if (m.includes('chat_cerrado_por_reclamo')) {
     return 'Chat cerrado por reclamo. El reclamo ya se inició y las dos partes dieron conformidad.';
   }

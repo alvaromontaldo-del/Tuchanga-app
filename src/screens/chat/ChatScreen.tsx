@@ -37,9 +37,17 @@ import { useUnreadMessages } from '../../context/UnreadMessagesContext';
 import { fetchConversationReads } from '../../services/conversationReadsSupabase';
 import {
   fetchApproxChatDistanceKm,
+  fetchChatLockContext,
   sendMessageSupabase,
   subscribeConversationDistanceTick,
 } from '../../services/chatSupabase';
+import {
+  CHAT_LOCK_NOTICE_CLIENT,
+  CHAT_LOCK_NOTICE_WORKER,
+  CHAT_LOCK_PLACEHOLDER,
+  isChatWriteLocked,
+  type ChatLockJob,
+} from '../../utils/chatWriteLock';
 import { JobAddressBanner } from '../../components/chat/JobAddressBanner';
 import {
   IMAGE_BODY_PREVIEW,
@@ -595,6 +603,9 @@ export function ChatScreen({
   const [job, setJob] = useState<ServiceJob | null>(null);
   const [conversationJobs, setConversationJobs] = useState<ClaimChatJob[]>([]);
   const [conversationJobsReady, setConversationJobsReady] = useState(false);
+  const [lockJobs, setLockJobs] = useState<ChatLockJob[]>([]);
+  const [lockJobsReady, setLockJobsReady] = useState(false);
+  const [claimThreadId, setClaimThreadId] = useState<string | null>(null);
   const [quoteStreet, setQuoteStreet] = useState<string | null>(null);
   const [recotizaciones, setRecotizaciones] = useState<RecotizacionHistorial[]>([]);
   const [clientPin, setClientPin] = useState<string | null>(null);
@@ -667,6 +678,12 @@ export function ChatScreen({
     }
     return decision;
   }, [conversationJobs, conversationJobsReady, job]);
+  const chatWriteLocked = isChatWriteLocked({
+    jobsLoaded: lockJobsReady,
+    conversationId,
+    claimContratacionId: claimThreadId,
+    jobs: lockJobs,
+  });
   const claimLocksQuote = claimDecision.blockOwnQuote;
   const claimAgenda = claimDecision.showAgenda;
   const revisitConfirmadaVisible = Boolean(
@@ -1160,7 +1177,37 @@ export function ChatScreen({
   useEffect(() => {
     setConversationJobs([]);
     setConversationJobsReady(false);
+    setLockJobs([]);
+    setLockJobsReady(false);
+    setClaimThreadId(null);
   }, [conversationId]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !conversationId) return;
+    let cancelled = false;
+    void fetchChatLockContext(conversationId)
+      .then((ctx) => {
+        if (cancelled) return;
+        setClaimThreadId(ctx?.claimContratacionId ?? null);
+        setLockJobs(ctx?.jobs ?? []);
+        setLockJobsReady(ctx != null);
+      })
+      .catch(() => {
+        if (!cancelled) setLockJobsReady(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    conversationId,
+    job?.updated_at,
+    job?.estado_trabajo,
+    job?.estado_pago,
+    job?.conformidad_aceptada,
+    job?.is_claim_open,
+    job?.claim_status,
+    job?.completed_by_worker_at,
+  ]);
 
   useEffect(() => {
     if (!isSupabaseConfigured() || !conversationId) return;
@@ -1853,7 +1900,7 @@ export function ChatScreen({
   function send() {
     const text = offplatformSubmitText(input);
     if (!text || !myId) return;
-    if (chatBlocked || chatClosedByClaim) return;
+    if (chatBlocked || chatClosedByClaim || chatWriteLocked) return;
 
     if (isSupabaseConfigured()) {
       const clientMessageId = newRandomUserId();
@@ -1940,7 +1987,7 @@ export function ChatScreen({
   const sendImageFromUri = useCallback(
     async (localUri: string) => {
       if (!myId || !isSupabaseConfigured()) return;
-      if (chatBlocked || chatClosedByClaim) return;
+      if (chatBlocked || chatClosedByClaim || chatWriteLocked) return;
       if (participants?.myRole !== 'cliente') {
         toast.warning('Solo el cliente puede enviar imágenes.', 'Imágenes');
         return;
@@ -1996,6 +2043,7 @@ export function ChatScreen({
     [
       chatBlocked,
       chatClosedByClaim,
+      chatWriteLocked,
       conversationId,
       myId,
       participants?.myRole,
@@ -2007,7 +2055,7 @@ export function ChatScreen({
 
   const pickChatImage = useCallback(
     async (source: 'camera' | 'gallery') => {
-      if (attachingImage || sending || chatBlocked || chatClosedByClaim) return;
+      if (attachingImage || sending || chatBlocked || chatClosedByClaim || chatWriteLocked) return;
       try {
         if (source === 'gallery') {
           const okGallery = await ensureGalleryPermission();
@@ -2052,18 +2100,18 @@ export function ChatScreen({
         );
       }
     },
-    [attachingImage, chatBlocked, chatClosedByClaim, sendImageFromUri, sending, toast],
+    [attachingImage, chatBlocked, chatClosedByClaim, chatWriteLocked, sendImageFromUri, sending, toast],
   );
 
   const openAttachImageMenu = useCallback(() => {
-    if (attachingImage || sending || chatBlocked || chatClosedByClaim) return;
+    if (attachingImage || sending || chatBlocked || chatClosedByClaim || chatWriteLocked) return;
     if (participants?.myRole !== 'cliente') return;
     Alert.alert('Enviar imagen', 'Elegí el origen de la foto', [
       { text: 'Cámara', onPress: () => void pickChatImage('camera') },
       { text: 'Galería', onPress: () => void pickChatImage('gallery') },
       { text: 'Cancelar', style: 'cancel' },
     ]);
-  }, [attachingImage, chatBlocked, chatClosedByClaim, participants?.myRole, pickChatImage, sending]);
+  }, [attachingImage, chatBlocked, chatClosedByClaim, chatWriteLocked, participants?.myRole, pickChatImage, sending]);
 
   const renderItem = useCallback(
     ({ item }: { item: UiMessage }) => {
@@ -2569,7 +2617,14 @@ export function ChatScreen({
   const chatActionBars = useMemo(
     () => (
       <>
-        {isSupabaseConfigured() && revisitConfirmadaVisible && revisitConfirmada && job ? (
+        {chatWriteLocked ? (
+          <View style={styles.lockBanner}>
+            <Text style={styles.lockBannerText}>
+              {participants?.myRole === 'cliente' ? CHAT_LOCK_NOTICE_CLIENT : CHAT_LOCK_NOTICE_WORKER}
+            </Text>
+          </View>
+        ) : null}
+        {isSupabaseConfigured() && !chatWriteLocked && revisitConfirmadaVisible && revisitConfirmada && job ? (
           <View style={styles.completeBar}>
             <View style={styles.payBarText}>
               <Text style={styles.paySubtitle}>{formatWarrantyRevisitConfirmed(revisitConfirmada)}</Text>
@@ -3091,6 +3146,7 @@ export function ChatScreen({
     [
       agendaBusy,
       agendaOpciones,
+      chatWriteLocked,
       clientPin,
       conversationId,
       claimAgenda,
@@ -3140,10 +3196,12 @@ export function ChatScreen({
   );
 
   const inputContainer = useMemo(() => {
-    const composerDisabled = chatBlocked || blockStatusLoading;
-    const placeholder = composerDisabled
-      ? 'No podés responder a esta conversación'
-      : 'Mensaje…';
+    const composerDisabled = chatBlocked || chatWriteLocked || blockStatusLoading;
+    const placeholder = chatWriteLocked
+      ? CHAT_LOCK_PLACEHOLDER
+      : composerDisabled
+        ? 'No podés responder a esta conversación'
+        : 'Mensaje…';
     const showClientAttach =
       !composerDisabled &&
       isSupabaseConfigured() &&
@@ -3230,6 +3288,7 @@ export function ChatScreen({
     blockStatus.iBlockedThem,
     blockStatusLoading,
     chatBlocked,
+    chatWriteLocked,
     connected,
     handleUnblockUser,
     input,
@@ -3855,7 +3914,7 @@ export function ChatScreen({
                   </Text>
                 ) : null}
               </View>
-              {isSupabaseConfigured() && participants?.myRole === 'trabajador' && !chatBlocked ? (
+              {isSupabaseConfigured() && participants?.myRole === 'trabajador' && !chatBlocked && !chatWriteLocked ? (
                 <View style={styles.headerChipsInline}>
                   <Pressable
                     onPress={() => {
@@ -4215,6 +4274,22 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
+  },
+  lockBanner: {
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.card,
+    backgroundColor: '#F8F1E7',
+    borderWidth: 1,
+    borderColor: '#E6D3B8',
+  },
+  lockBannerText: {
+    color: '#6B4E2E',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
   },
   listContent: {
     paddingHorizontal: spacing.md,

@@ -152,23 +152,28 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
       const drafts: Record<string, QuoteItemDraftState> = {};
       for (const line of quote.items) {
         const prev = drafts[line.requestItemId];
+        const priceText =
+          Number.isFinite(line.unitPrice) && line.unitPrice >= 0
+            ? amountToArsInput(line.unitPrice)
+            : '';
+        const isBase =
+          line.inStock && (line.variantIndex === 0 || !(line.variantLabel ?? '').trim());
         const variant = {
           label: line.variantLabel ?? line.alternativeDescription ?? '',
-          priceText:
-            Number.isFinite(line.unitPrice) && line.unitPrice >= 0
-              ? amountToArsInput(line.unitPrice)
-              : '',
+          priceText,
         };
         if (!prev) {
           drafts[line.requestItemId] = {
             inStock: line.inStock,
-            variants: [variant],
+            itemPriceText: isBase ? priceText : '',
+            variants: isBase ? [] : [variant],
             itemNote: line.itemNote ?? '',
           };
         } else {
-          prev.variants.push(variant);
           if (line.itemNote?.trim()) prev.itemNote = line.itemNote;
           if (!line.inStock) prev.inStock = false;
+          if (isBase) prev.itemPriceText = priceText;
+          else prev.variants.push(variant);
         }
       }
       itemDraftsRef.current = drafts;
@@ -211,7 +216,7 @@ export function StoreQuoteRequestScreen({ navigation, route }: Props) {
 
   const patchItemDraft = useCallback(
     (itemId: string, patch: Partial<QuoteItemDraftState>) => {
-      const prev = itemDraftsRef.current[itemId] ?? { ...EMPTY_DRAFT, variants: [{ label: '', priceText: '' }] };
+      const prev = itemDraftsRef.current[itemId] ?? { ...EMPTY_DRAFT, variants: [] };
       itemDraftsRef.current[itemId] = { ...prev, ...patch };
       setDraftTick((n) => n + 1);
     },
@@ -424,13 +429,14 @@ const QuoteItemRow = memo(function QuoteItemRow({
   variantDecisions?: ExistingStoreQuoteItem['clientDecision'][];
   onPatch: (patch: Partial<QuoteItemDraftState>) => void;
 }) {
-  const variants = draft.variants.length > 0 ? draft.variants : [{ label: '', priceText: '' }];
+  const variants = draft.variants;
   const inStock = draft.inStock;
   const stockCaption = storeReadonlyStockCaption(inStock);
   const itemNote = draft.itemNote.trim();
 
   const updateVariant = (index: number, patch: Partial<{ label: string; priceText: string }>) => {
-    const next = variants.map((v, i) => (i === index ? { ...v, ...patch } : v));
+    const base = variants.length > 0 ? variants : [{ label: '', priceText: '' }];
+    const next = base.map((v, i) => (i === index ? { ...v, ...patch } : v));
     onPatch({ variants: next });
   };
 
@@ -440,7 +446,6 @@ const QuoteItemRow = memo(function QuoteItemRow({
   };
 
   const removeVariant = (index: number) => {
-    if (variants.length <= 1) return;
     onPatch({ variants: variants.filter((_, i) => i !== index) });
   };
 
@@ -491,7 +496,10 @@ const QuoteItemRow = memo(function QuoteItemRow({
       variantCount: variants.length,
       label: titleVariant?.label ?? '',
     });
-    const titlePrice = priceOnTitle ? formatDraftPrice(titleVariant?.priceText ?? '') : null;
+    const itemPriceOnTitle =
+      inStock && draft.itemPriceText.trim() ? formatDraftPrice(draft.itemPriceText) : null;
+    const titlePrice =
+      itemPriceOnTitle || (priceOnTitle ? formatDraftPrice(titleVariant?.priceText ?? '') : null);
     const visibleVariants = priceOnTitle
       ? []
       : inStock
@@ -568,8 +576,10 @@ const QuoteItemRow = memo(function QuoteItemRow({
                 variantCount: variants.length,
                 index: i,
               });
+              const brandName = inStock ? v.label.trim() : '';
               return (
-              <View key={`ro-v-${i}`} style={caption ? styles.roMetaBlock : styles.roMetaRow}>
+              <View key={`ro-v-${i}`} style={caption || brandName ? styles.roMetaBlock : styles.roMetaRow}>
+                {brandName ? <Text style={styles.brandChip}>Marca</Text> : null}
                 {caption ? <Text style={styles.roMetaLabel}>{caption}</Text> : null}
                 {!inStock && v.label.trim() ? (
                   <Text style={styles.roAltText}>{v.label.trim()}</Text>
@@ -608,10 +618,27 @@ const QuoteItemRow = memo(function QuoteItemRow({
 
   return (
     <View style={[styles.itemCard, !inStock && styles.itemCardAlt]}>
-      <View style={styles.itemHeader}>
-        <Text style={styles.itemDesc} numberOfLines={4}>
+      <View style={styles.itemTitleRow}>
+        <Text style={[styles.itemDesc, styles.itemTitleCol]} numberOfLines={4}>
           {item.description}
         </Text>
+        {inStock ? (
+          <View style={styles.itemPriceCol}>
+            <Text style={styles.fieldLabel}>Precio $</Text>
+            <TextInput
+              value={draft.itemPriceText}
+              editable={editable}
+              onChangeText={(raw) => onPatch({ itemPriceText: sanitizePriceText(raw) })}
+              keyboardType="number-pad"
+              inputMode="numeric"
+              placeholder="0"
+              placeholderTextColor={colors.textSecondary}
+              style={styles.priceInput}
+              maxLength={11}
+              accessibilityLabel="Precio del ítem"
+            />
+          </View>
+        ) : null}
       </View>
 
       <Pressable
@@ -619,7 +646,7 @@ const QuoteItemRow = memo(function QuoteItemRow({
           onPatch({
             inStock: !inStock,
             // Al marcar sin stock se vacía la marca: el reemplazo hay que escribirlo a propósito.
-            variants: inStock ? [{ label: '', priceText: '' }] : variants,
+            variants: inStock ? [{ label: '', priceText: '' }] : [],
           })
         }
         disabled={!editable}
@@ -720,17 +747,15 @@ const QuoteItemRow = memo(function QuoteItemRow({
                 />
               </View>
             </View>
-            {variants.length > 1 ? (
-              <Pressable
-                onPress={() => removeVariant(index)}
-                hitSlop={8}
-                style={styles.variantRemoveBtn}
-                accessibilityRole="button"
-                accessibilityLabel="Quitar marca"
-              >
-                <Text style={styles.variantRemove}>✕</Text>
-              </Pressable>
-            ) : null}
+            <Pressable
+              onPress={() => removeVariant(index)}
+              hitSlop={8}
+              style={styles.variantRemoveBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Quitar marca"
+            >
+              <Text style={styles.variantRemove}>✕</Text>
+            </Pressable>
           </View>
         );
       })
@@ -741,9 +766,11 @@ const QuoteItemRow = memo(function QuoteItemRow({
           onPress={addVariant}
           style={styles.addVariantBtn}
           accessibilityRole="button"
-          accessibilityLabel="Agregar otra marca"
+          accessibilityLabel={variants.length === 0 ? 'Agregar opciones de marca' : 'Agregar otra marca'}
         >
-          <Text style={styles.addVariantText}>+ Agregar otra marca</Text>
+          <Text style={styles.addVariantText}>
+            {variants.length === 0 ? '+ Agregar opciones de marca' : '+ Agregar otra marca'}
+          </Text>
         </Pressable>
       ) : null}
 
@@ -1019,6 +1046,27 @@ const styles = StyleSheet.create({
   itemInfo: { flex: 1, gap: 4 },
   itemHeader: {
     gap: 2,
+  },
+  itemTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  itemPriceCol: {
+    width: 108,
+    flexShrink: 0,
+  },
+  brandChip: {
+    alignSelf: 'flex-start',
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: '#F6E8E8',
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   itemTitleCol: {
     flex: 1,

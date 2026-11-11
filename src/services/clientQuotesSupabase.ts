@@ -745,7 +745,7 @@ export async function fetchClientQuotesForRequest(
             ? qi.variant_label.trim()
             : null) ??
           alternativeDescription,
-        variantIndex: Number(qi.variant_index) > 0 ? Number(qi.variant_index) : 1,
+        variantIndex: Number.isFinite(Number(qi.variant_index)) ? Number(qi.variant_index) : 1,
         quantity: qty,
         unit: ri.unit || 'u',
         unitPrice,
