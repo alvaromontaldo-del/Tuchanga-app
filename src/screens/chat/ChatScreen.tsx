@@ -876,9 +876,10 @@ export function ChatScreen({
       estadoTrabajo: job?.estado_trabajo ?? null,
       hasActiveJob,
     });
+    if (chatWriteLocked) return { ...chip, disabled: true };
     if (!claimLocksQuote) return chip;
     return { ...chip, disabled: true };
-  }, [claimLocksQuote, hasActiveJob, job?.estado_trabajo, participants?.myRole]);
+  }, [chatWriteLocked, claimLocksQuote, hasActiveJob, job?.estado_trabajo, participants?.myRole]);
   const latestRejected = useMemo(() => {
     const rejected = quotes.filter((q) => q.status === 'rejected');
     return rejected.length ? rejected[rejected.length - 1] : null;
@@ -2376,19 +2377,20 @@ export function ChatScreen({
                     />
                   ) : null}
 
-                  {participants?.myRole === 'trabajador' && q.status === 'pending' ? (
+                  {participants?.myRole === 'trabajador' && q.status === 'pending' && !chatWriteLocked ? (
                     <Pressable
-                      disabled={claimLocksQuote}
+                      disabled={claimLocksQuote || chatWriteLocked}
                       style={({ pressed }) => [
                         styles.quoteBtn,
                         styles.quoteBtnSolo,
                         styles.quoteBtnPrimary,
-                        claimLocksQuote && styles.quoteBtnDisabled,
-                        pressed && !claimLocksQuote && styles.pressed,
+                        (claimLocksQuote || chatWriteLocked) && styles.quoteBtnDisabled,
+                        pressed && !claimLocksQuote && !chatWriteLocked && styles.pressed,
                       ]}
                       accessibilityRole="button"
                       accessibilityLabel="Editar presupuesto"
                       onPress={() => {
+                        if (chatWriteLocked) return;
                         if (claimLocksQuote) return;
                         const amount = Math.max(0, Math.floor(Number(q.net_amount) || 0));
                         const amountText = amountToArsInput(amount);
@@ -2507,17 +2509,19 @@ export function ChatScreen({
                   q.status === 'rejected' &&
                   !hasActiveQuote &&
                   latestRejected?.id === q.id &&
-                  latestQuoteAny?.id === q.id ? (
+                  latestQuoteAny?.id === q.id &&
+                  !chatWriteLocked ? (
                     <Pressable
-                      disabled={claimLocksQuote}
+                      disabled={claimLocksQuote || chatWriteLocked}
                       style={({ pressed }) => [
                         styles.quoteBtn,
                         styles.quoteBtnSolo,
                         styles.quoteBtnPrimary,
-                        claimLocksQuote && styles.quoteBtnDisabled,
-                        pressed && !claimLocksQuote && styles.pressed,
+                        (claimLocksQuote || chatWriteLocked) && styles.quoteBtnDisabled,
+                        pressed && !claimLocksQuote && !chatWriteLocked && styles.pressed,
                       ]}
                       onPress={() => {
+                        if (chatWriteLocked) return;
                         if (claimLocksQuote) return;
                         const amount = Math.max(0, Math.floor(Number(q.net_amount) || 0));
                         const amountText = amountToArsInput(amount);
@@ -2587,6 +2591,7 @@ export function ChatScreen({
     },
     [
       claimLocksQuote,
+      chatWriteLocked,
       conversationId,
       hasActiveQuote,
       job?.estado_pago,
@@ -2647,7 +2652,7 @@ export function ChatScreen({
           </View>
         ) : null}
 
-        {isSupabaseConfigured() && showWorkerAvailabilityBar && job ? (
+        {isSupabaseConfigured() && showWorkerAvailabilityBar && job && !chatWriteLocked ? (
           <View style={styles.completeBar}>
             <View style={styles.payBarText}>
               <Text style={styles.paySubtitle}>
@@ -2672,7 +2677,7 @@ export function ChatScreen({
           </View>
         ) : null}
 
-        {isSupabaseConfigured() && showWorkerAgendaSentBar && job ? (
+        {isSupabaseConfigured() && showWorkerAgendaSentBar && job && !chatWriteLocked ? (
           <View style={styles.completeBarStackedWrapper}>
             <AgendaOpcionesCliente
               mode="readonly"
@@ -3738,9 +3743,7 @@ export function ChatScreen({
                               toast.success('Recotización enviada.', 'Recotizar');
                             } catch (e) {
                               toast.error(
-                                textoVisibleSinSena(
-                                  e instanceof Error ? e.message : 'No se pudo recotizar',
-                                ),
+                                textoVisibleSinSena(mapChatSendError(e)),
                                 'Recotizar',
                               );
                             } finally {

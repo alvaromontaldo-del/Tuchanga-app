@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { mapChatSendError } from './chatErrors';
 import {
   claimThreadShouldLock,
   generalChatShouldLock,
@@ -192,9 +193,60 @@ describe('SQL del bloqueo y del precio de ítem', () => {
     }
   });
 
-  it('reprograma el cron de 7 días como postgres', () => {
+  it('reprograma el cron de 7 días sin tocar cron.job', () => {
     expect(sql).toContain("cron.unschedule('chat_bloqueado_sin_resena_7d')");
-    expect(sql).toContain("username = 'postgres'");
+    expect(sql).toContain('cron.schedule');
     expect(sql).toContain('chat_bloqueado_sin_resena_7d');
+    expect(sql).not.toContain('UPDATE cron.job');
+  });
+
+  it('las funciones vivas rechazan un chat bloqueado y el helper no se otorga', () => {
+    for (const name of [
+      'crear_cotizacion',
+      'editar_cotizacion',
+      'recotizar_en_curso',
+      'proponer_disponibilidad_opciones',
+      'proponer_reagendar_visita',
+    ]) {
+      const start = sql.indexOf(`FUNCTION public.${name}`);
+      expect(start).toBeGreaterThan(-1);
+      const body = sql.slice(start, sql.indexOf('$function$;', start));
+      expect(body.indexOf('assert_chat_not_write_locked')).toBeLessThan(
+        body.indexOf('RAISE EXCEPTION'),
+      );
+    }
+    expect(sql).toContain('write_locked_at IS NOT NULL');
+    expect(sql).toContain('REVOKE EXECUTE ON FUNCTION public.assert_chat_not_write_locked(uuid) FROM anon');
+    expect(sql).toContain(
+      'REVOKE EXECUTE ON FUNCTION public.assert_chat_not_write_locked(uuid) FROM authenticated',
+    );
+    expect(sql).not.toContain('GRANT EXECUTE ON FUNCTION public.assert_chat_not_write_locked');
+  });
+});
+
+describe('chat bloqueado en la UI', () => {
+  const chat = readFileSync('src/screens/chat/ChatScreen.tsx', 'utf8');
+  const detail = readFileSync('src/screens/servicios/DetalleServicioScreen.tsx', 'utf8');
+
+  it('oculta editar, recotizar y la agenda del trabajador sin mirar solo finalizado', () => {
+    expect(chat).toContain('if (chatWriteLocked) return { ...chip, disabled: true };');
+    expect(chat).toContain("q.status === 'pending' && !chatWriteLocked");
+    expect(chat).toContain('latestQuoteAny?.id === q.id &&');
+    expect(chat).toContain('!chatWriteLocked');
+    expect(chat).toContain('showWorkerAvailabilityBar && job && !chatWriteLocked');
+    expect(chat).toContain('showWorkerAgendaSentBar && job && !chatWriteLocked');
+    expect(chat).toContain('if (chatWriteLocked) return;');
+    expect(detail).toContain('showAgendaForm && !chatWriteLocked');
+    expect(detail).toContain('!reagendarAbierto && !chatWriteLocked');
+    expect(detail).toContain('isChatWriteLocked(');
+    expect(detail).not.toContain("chatWriteLocked && row.estado_trabajo === 'finalizado'");
+  });
+
+  it('traduce chat_bloqueado a un aviso', () => {
+    expect(mapChatSendError(new Error('chat_bloqueado'))).toBe(
+      'Este chat está bloqueado. Solo se puede dejar la reseña.',
+    );
+    expect(mapChatSendError({ message: 'ERROR: chat_bloqueado' })).toMatch(/bloqueado/);
+    expect(mapChatSendError(new Error('chat_bloqueado'))).not.toBe('chat_bloqueado');
   });
 });
