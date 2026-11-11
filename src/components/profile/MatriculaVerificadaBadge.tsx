@@ -1,24 +1,43 @@
 import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, View } from 'react-native';
 import { spacing } from '../../constants/theme';
+import type { MatriculaOficioCodigo } from '../../utils/matriculaVerificada';
+import { oficioMatriculaSeal } from '../../utils/oficioMatriculaSeals';
+import { OficioMatriculaIcon } from './OficioMatriculaIcon';
 
 /** Insignia pública. No muestra el número, la entidad ni las fotos. */
 export function MatriculaVerificadaBadge({
   compact = false,
   label = 'Matrícula verificada',
+  code = null,
 }: {
   compact?: boolean;
   /** En el perfil público es «Matrícula de [oficio] verificada». */
   label?: string;
+  /** Oficio del sello. Sin oficio queda el tilde genérico. */
+  code?: MatriculaOficioCodigo | null;
 }) {
+  const seal = code ? oficioMatriculaSeal(code) : null;
   return (
     <View
-      style={[styles.badge, compact ? styles.compact : styles.regular]}
+      style={[
+        styles.badge,
+        compact ? styles.compact : styles.regular,
+        seal
+          ? { backgroundColor: seal.wash, borderColor: seal.line }
+          : null,
+      ]}
       accessibilityRole="text"
       accessibilityLabel={label}
     >
-      <Ionicons name="ribbon" size={compact ? 13 : 15} color="#8C6A3D" />
-      <Text style={[styles.text, compact && styles.textCompact]}>{label}</Text>
+      {seal && code ? (
+        <OficioMatriculaIcon code={code} size={compact ? 16 : 18} />
+      ) : (
+        <Ionicons name="ribbon" size={compact ? 13 : 15} color="#8C6A3D" />
+      )}
+      <Text style={[styles.text, compact && styles.textCompact, seal ? { color: seal.ink } : null]}>
+        {label}
+      </Text>
     </View>
   );
 }

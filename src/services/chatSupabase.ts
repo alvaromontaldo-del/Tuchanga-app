@@ -394,6 +394,53 @@ type RemovalJobRow = {
   claim_resolved_at?: string | null;
 };
 
+export type ChatLockContext = {
+  claimContratacionId: string | null;
+  jobs: Array<
+    ConversationJobSnapshot & {
+      id: string;
+      conversationId: string | null;
+    }
+  >;
+};
+
+/** Trabajos del par, para saber si el chat quedó bloqueado para escribir. */
+export async function fetchChatLockContext(conversationId: string): Promise<ChatLockContext | null> {
+  const id = conversationId.trim();
+  if (!id) return null;
+  const sb = getSupabaseClient();
+  const { data: conv, error: convErr } = await sb
+    .from('conversations')
+    .select('cliente_id, trabajador_id, contratacion_id')
+    .eq('id', id)
+    .maybeSingle();
+  if (convErr || !conv) return null;
+  const row = conv as {
+    cliente_id?: string | null;
+    trabajador_id?: string | null;
+    contratacion_id?: string | null;
+  };
+  const clienteId = row.cliente_id?.trim() ?? '';
+  const trabajadorId = row.trabajador_id?.trim() ?? '';
+  if (!clienteId || !trabajadorId) return null;
+
+  const { data, error } = await sb
+    .from('contrataciones')
+    .select(`${REMOVAL_JOB_COLUMNS},conversation_id`)
+    .eq('client_id', clienteId)
+    .eq('worker_id', trabajadorId);
+  if (error || !data) return null;
+
+  return {
+    claimContratacionId: row.contratacion_id?.trim() || null,
+    jobs: (data as Array<RemovalJobRow & { conversation_id?: string | null }>).map((job) => ({
+      ...mapRemovalJob(job),
+      id: String(job.id ?? ''),
+      conversationId: job.conversation_id?.trim() || null,
+    })),
+  };
+}
+
 function mapRemovalJob(row: RemovalJobRow): ConversationJobSnapshot {
   return {
     estado_trabajo: row.estado_trabajo ?? null,

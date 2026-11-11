@@ -50,6 +50,7 @@ export function materialRequestIsDirty(input: {
 export type StoreQuoteDirtyItem = {
   inStock: boolean;
   itemNote: string;
+  itemPriceText?: string;
   variants: Array<{ label: string; priceText: string }>;
 };
 
@@ -67,6 +68,7 @@ export function storeQuoteDraftIsDirty(input: {
   return input.items.some((item) => {
     if (!item.inStock) return true;
     if (item.itemNote.trim()) return true;
+    if ((item.itemPriceText ?? '').trim()) return true;
     if (item.variants.length > 1) return true;
     return item.variants.some((variant) => variant.label.trim() || variant.priceText.trim());
   });

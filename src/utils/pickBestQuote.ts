@@ -223,6 +223,44 @@ export function clientQuoteRowLabel(
   return label || materialLine.trim();
 }
 
+export type QuoteDetailParts<T> = {
+  /** Precio del ítem, si hay una sola base (variante 0 o un precio sin marca). */
+  headerBase: T | null;
+  /** Precios sin marca que no entran en el encabezado. */
+  extraBases: T[];
+  /** Marcas con nombre, debajo del ítem. */
+  brands: T[];
+  unavailable: T[];
+};
+
+/**
+ * Separa el precio del ítem de las marcas.
+ * Variante 0, o la única fila con stock y sin marca, es el precio del ítem.
+ * Una fila con stock y nombre es una marca. Sin stock no es marca.
+ */
+export function partitionQuoteDetail<
+  T extends {
+    quoteItemId: string;
+    inStock: boolean;
+    variantLabel?: string | null;
+    variantIndex?: number;
+  },
+>(variants: T[]): QuoteDetailParts<T> {
+  const unavailable = variants.filter((it) => !it.inStock);
+  const bases = variants.filter(
+    (it) => it.inStock && (it.variantIndex === 0 || !(it.variantLabel ?? '').trim()),
+  );
+  const brands = variants.filter(
+    (it) => it.inStock && (it.variantLabel ?? '').trim().length > 0 && it.variantIndex !== 0,
+  );
+  const headerBase =
+    bases.find((it) => it.variantIndex === 0) ?? (bases.length === 1 ? bases[0] : null);
+  const extraBases = headerBase
+    ? bases.filter((it) => it.quoteItemId !== headerBase.quoteItemId)
+    : bases;
+  return { headerBase: headerBase ?? null, extraBases, brands, unavailable };
+}
+
 /** Varias opciones: radio. Una sola (aunque tenga marca): checkbox. */
 export function variantSelectionControl(variantCount: number): 'radio' | 'checkbox' {
   return variantCount > 1 ? 'radio' : 'checkbox';

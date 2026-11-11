@@ -48,6 +48,7 @@ import {
   clientQuoteRowLabel,
   isClientSelectableQuoteItem,
   materialGroupHeader,
+  partitionQuoteDetail,
   selectedMaterialsAmount,
   pendingFeePayLabel,
   pendingServiceFeeGroups,
@@ -921,27 +922,83 @@ const QuoteCard = memo(function QuoteCard({
             const selectedHere = variants.some((it) => selectedItemIds.has(it.quoteItemId));
             const header = materialGroupHeader(group);
             const singleLine = clientQuoteGroupIsSingleLine(group);
+            const parts = partitionQuoteDetail(variants);
+            const detailLines = singleLine
+              ? variants
+              : [...parts.extraBases, ...parts.brands, ...parts.unavailable];
             return (
               <View key={group.requestItemId} style={styles.detailGroup}>
                 {singleLine ? null : (
-                  <Text style={styles.detailDesc} numberOfLines={3}>
-                    {header}
-                  </Text>
+                  <Pressable
+                    onPress={() => {
+                      const base = parts.headerBase;
+                      if (!base) return;
+                      const itemSelectable = canSelectItems && isClientSelectableQuoteItem(base);
+                      if (itemSelectable) onToggleItem(base.quoteItemId, base.requestItemId);
+                    }}
+                    disabled={
+                      !parts.headerBase ||
+                      !(canSelectItems && isClientSelectableQuoteItem(parts.headerBase))
+                    }
+                    style={styles.detailItemHead}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      parts.headerBase
+                        ? clientQuoteRowLabel(parts.headerBase, header)
+                        : header
+                    }
+                  >
+                    {canSelectItems && parts.headerBase ? (
+                      <Ionicons
+                        name={
+                          !isClientSelectableQuoteItem(parts.headerBase)
+                            ? 'close-circle-outline'
+                            : control === 'radio'
+                              ? selectedItemIds.has(parts.headerBase.quoteItemId)
+                                ? 'radio-button-on'
+                                : 'radio-button-off'
+                              : selectedItemIds.has(parts.headerBase.quoteItemId)
+                                ? 'checkbox'
+                                : 'square-outline'
+                        }
+                        size={22}
+                        color={
+                          selectedItemIds.has(parts.headerBase.quoteItemId)
+                            ? colors.primary
+                            : colors.textSecondary
+                        }
+                      />
+                    ) : null}
+                    <View style={styles.detailItemTitleCol}>
+                      <Text style={styles.detailItemTitle} numberOfLines={3}>
+                        {header}
+                      </Text>
+                      {parts.headerBase?.itemNote ? (
+                        <Text style={styles.detailItemNote} numberOfLines={2}>
+                          {parts.headerBase.itemNote}
+                        </Text>
+                      ) : null}
+                      {variants.every((it) => !it.inStock) ? (
+                        <Text style={styles.stockPill}>Sin stock</Text>
+                      ) : null}
+                    </View>
+                    {parts.headerBase ? (
+                      <Text style={styles.detailItemPrice}>
+                        {formatMoneyAr(parts.headerBase.lineTotal)}
+                      </Text>
+                    ) : null}
+                  </Pressable>
                 )}
-                {!singleLine && variants.every((it) => !it.inStock) ? (
-                  <Text style={styles.detailAlt}>
-                    Sin stock — no se puede pedir este ítem
-                  </Text>
-                ) : null}
                 {!singleLine && selectedHere && duplicatedRequestItemIds.has(group.requestItemId) ? (
                   <Text style={styles.duplicateHint}>También seleccionado en otro comercio</Text>
                 ) : null}
-                {variants.map((it) => {
+                {detailLines.map((it) => {
                   const selected = selectedItemIds.has(it.quoteItemId);
                   const decided =
                     it.clientDecision === 'accepted' || it.clientDecision === 'rejected';
                   const itemSelectable = canSelectItems && isClientSelectableQuoteItem(it);
                   const label = clientQuoteRowLabel(it, header);
+                  const isBrand = parts.brands.some((brand) => brand.quoteItemId === it.quoteItemId);
                   const compactRow =
                     singleLine &&
                     !it.itemNote &&
@@ -955,6 +1012,7 @@ const QuoteCard = memo(function QuoteCard({
                       }}
                       style={[
                         styles.detailRow,
+                        isBrand && styles.detailBrandRow,
                         compactRow && styles.detailRowSingle,
                         canSelectItems && !itemSelectable && styles.detailRowDisabled,
                       ]}
@@ -998,6 +1056,7 @@ const QuoteCard = memo(function QuoteCard({
                         />
                       ) : null}
                       <View style={styles.detailLeft}>
+                        {isBrand ? <Text style={styles.brandChip}>Marca</Text> : null}
                         <Text style={styles.detailDesc} numberOfLines={3}>
                           {label}
                         </Text>
@@ -1408,7 +1467,59 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     gap: 10,
   },
-  detailGroup: { gap: 8 },
+  detailGroup: {
+    gap: 8,
+    paddingBottom: 12,
+    marginBottom: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  detailItemHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  detailItemTitleCol: { flex: 1, gap: 4 },
+  detailItemTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  detailItemPrice: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.text,
+    fontVariant: ['tabular-nums'],
+  },
+  stockPill: {
+    alignSelf: 'flex-start',
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: '#FDECEC',
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  brandChip: {
+    alignSelf: 'flex-start',
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: '#F4F4F5',
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  detailBrandRow: {
+    marginLeft: 16,
+    paddingLeft: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: '#E4E4E7',
+  },
   detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

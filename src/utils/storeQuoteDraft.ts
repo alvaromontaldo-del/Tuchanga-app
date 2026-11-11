@@ -8,7 +8,9 @@ export type QuoteVariantDraft = {
 
 export type QuoteItemDraftState = {
   inStock: boolean;
-  /** Con stock: hasta 3 marcas. Sin stock: solo la primera es el producto alternativo. */
+  /** Precio del ítem, en la misma fila del nombre. Vacío si todavía no se cargó. */
+  itemPriceText: string;
+  /** Con stock: hasta 3 marcas opcionales. Sin stock: solo la primera es el reemplazo. */
   variants: QuoteVariantDraft[];
   itemNote: string;
 };
@@ -114,7 +116,8 @@ export function storeReadonlyPriceCaption(input: {
 export function emptyQuoteItemDraft(): QuoteItemDraftState {
   return {
     inStock: true,
-    variants: [{ label: '', priceText: '' }],
+    itemPriceText: '',
+    variants: [],
     itemNote: '',
   };
 }
@@ -178,35 +181,47 @@ export function buildStoreQuoteItemRows(
       continue;
     }
 
-    let variantIndex = 0;
-    for (const variant of variants) {
-      const label = variant.label.trim();
-      const price = parseDraftPrice(variant.priceText);
-      if (price == null || (label && price <= 0)) {
-        const msg = label
-          ? `Completá el precio de “${label}” (${item.description}).`
-          : `Completá el precio de “${item.description}”.`;
-        throw new Error(msg);
-      }
-      if (price < 0) {
-        throw new Error(`Completá el precio de “${item.description}”.`);
-      }
-      variantIndex += 1;
-      if (variantIndex > 3) break;
-      quoteItems.push({
-        requestItemId: item.id,
-        unitPrice: price,
-        inStock: true,
-        alternativeDescription: null,
-        itemNote: variantIndex === 1 ? note : null,
-        variantIndex,
-        variantLabel: label || null,
-      });
+    const itemPrice = parseDraftPrice(draft.itemPriceText ?? '');
+    if (itemPrice == null || itemPrice <= 0) {
+      throw new Error(`Completá el precio de “${item.description}”.`);
     }
 
-    if (variantIndex === 0) {
-      throw new Error(`Completá al menos una opción con precio para “${item.description}”.`);
+    const brands: Array<{ label: string; price: number }> = [];
+    for (const variant of draft.variants.slice(0, 3)) {
+      const label = variant.label.trim();
+      const price = parseDraftPrice(variant.priceText);
+      // Sin precio la marca no se cargó: se ignora, aunque tenga nombre.
+      if (price == null || price <= 0) continue;
+      if (!label) {
+        throw new Error(
+          `Si cargás un precio de marca en “${item.description}”, el nombre de la marca es obligatorio.`,
+        );
+      }
+      brands.push({ label, price });
     }
+
+    // Sin marcas el precio queda en la variante 1, como las cotizaciones de un solo precio.
+    // Con marcas, el precio del ítem es la variante 0 y cada marca ocupa 1..3.
+    quoteItems.push({
+      requestItemId: item.id,
+      unitPrice: itemPrice,
+      inStock: true,
+      alternativeDescription: null,
+      itemNote: note,
+      variantIndex: brands.length > 0 ? 0 : 1,
+      variantLabel: null,
+    });
+    brands.forEach((brand, index) => {
+      quoteItems.push({
+        requestItemId: item.id,
+        unitPrice: brand.price,
+        inStock: true,
+        alternativeDescription: null,
+        itemNote: null,
+        variantIndex: index + 1,
+        variantLabel: brand.label,
+      });
+    });
   }
 
   return quoteItems;

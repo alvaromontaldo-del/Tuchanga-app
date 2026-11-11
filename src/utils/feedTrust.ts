@@ -54,14 +54,35 @@ export const MATRICULA_VERIFICADA_LABEL = 'Matrícula verificada';
  * Sin oficios (visitante, error o lista vacía) y con el boolean de
  * `get_public_worker_profile`, el tilde genérico de antes.
  */
+export type ProfileMatriculaEntry = {
+  label: string;
+  /** null = tilde genérico, sin oficio. */
+  code: MatriculaOficioCodigo | null;
+};
+
+/**
+ * Leyendas de matrícula del perfil, con el oficio del sello.
+ * Sin oficios y con el boolean público, el tilde genérico (code null).
+ */
+export function profileMatriculaEntries(input: {
+  matriculaVerificada?: boolean | null;
+  oficios?: readonly unknown[] | null;
+}): ProfileMatriculaEntry[] {
+  const specific = feedTrustIcons(false, input.oficios ?? []).filter(
+    (icon): icon is MatriculaOficioCodigo => icon !== 'antecedentes',
+  );
+  if (specific.length > 0) {
+    return specific.map((code) => ({ code, label: OFICIO_LEGEND[code] }));
+  }
+  if (input.matriculaVerificada === true) return [{ code: null, label: MATRICULA_VERIFICADA_LABEL }];
+  return [];
+}
+
 export function profileMatriculaLabels(input: {
   matriculaVerificada?: boolean | null;
   oficios?: readonly unknown[] | null;
 }): string[] {
-  const specific = profileTrustLegends(false, input.oficios ?? []);
-  if (specific.length > 0) return specific;
-  if (input.matriculaVerificada === true) return [MATRICULA_VERIFICADA_LABEL];
-  return [];
+  return profileMatriculaEntries(input).map((entry) => entry.label);
 }
 
 export function parseFeedOficioCodes(raw: unknown): MatriculaOficioCodigo[] {

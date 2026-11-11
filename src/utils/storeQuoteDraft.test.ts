@@ -19,6 +19,7 @@ function requestItem(id: string, description: string): MaterialRequestItem {
 function draft(partial: Partial<QuoteItemDraftState>): QuoteItemDraftState {
   return {
     inStock: true,
+    itemPriceText: '',
     variants: [{ label: '', priceText: '' }],
     itemNote: '',
     ...partial,
@@ -28,19 +29,64 @@ function draft(partial: Partial<QuoteItemDraftState>): QuoteItemDraftState {
 describe('presupuesto del comercio', () => {
   const cemento = requestItem('cemento', 'Cemento');
 
-  it('con stock manda marcas y no un alternativo', () => {
+  it('con stock manda el precio del ítem y las marcas, sin un alternativo', () => {
     const rows = buildStoreQuoteItemRows([cemento], {
       cemento: draft({
         inStock: true,
+        itemPriceText: '120',
         variants: [
           { label: 'Acme', priceText: '100' },
           { label: 'Otra', priceText: '80' },
         ],
       }),
     });
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(rows.every((row) => row.inStock && row.alternativeDescription == null)).toBe(true);
-    expect(rows.map((row) => row.variantLabel)).toEqual(['Acme', 'Otra']);
+    expect(rows.map((row) => row.variantLabel)).toEqual([null, 'Acme', 'Otra']);
+    expect(rows.map((row) => row.variantIndex)).toEqual([0, 1, 2]);
+    expect(rows[0]?.unitPrice).toBe(120);
+  });
+
+  it('sin marcas el precio del ítem queda en la variante 1', () => {
+    const rows = buildStoreQuoteItemRows([cemento], {
+      cemento: draft({ inStock: true, itemPriceText: '50', variants: [] }),
+    });
+    expect(rows).toEqual([
+      expect.objectContaining({
+        unitPrice: 50,
+        variantIndex: 1,
+        variantLabel: null,
+        inStock: true,
+      }),
+    ]);
+  });
+
+  it('una marca con precio y sin nombre no se envía', () => {
+    expect(() =>
+      buildStoreQuoteItemRows([cemento], {
+        cemento: draft({
+          inStock: true,
+          itemPriceText: '50',
+          variants: [{ label: '  ', priceText: '80' }],
+        }),
+      }),
+    ).toThrow(/nombre de la marca es obligatorio/);
+  });
+
+  it('una marca sin precio se ignora aunque tenga nombre', () => {
+    const rows = buildStoreQuoteItemRows([cemento], {
+      cemento: draft({
+        inStock: true,
+        itemPriceText: '50',
+        variants: [
+          { label: 'Acme', priceText: '' },
+          { label: 'Otra', priceText: '0' },
+          { label: 'Tigre', priceText: '70' },
+        ],
+      }),
+    });
+    expect(rows.map((row) => row.variantLabel)).toEqual([null, 'Tigre']);
+    expect(rows.map((row) => row.unitPrice)).toEqual([50, 70]);
   });
 
   it('sin stock manda un solo reemplazo y descarta las otras marcas', () => {
@@ -93,7 +139,8 @@ describe('presupuesto del comercio', () => {
     const rows = buildStoreQuoteItemRows([cemento], {
       cemento: draft({
         inStock: true,
-        variants: [{ label: 'Acme', priceText: '300.000' }],
+        itemPriceText: '300.000',
+        variants: [],
       }),
     });
     expect(rows[0]?.unitPrice).toBe(300000);

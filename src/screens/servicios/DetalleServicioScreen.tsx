@@ -40,6 +40,9 @@ import { colors, radii, spacing, typography } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useAppToast } from '../../components/toast/toast';
 import { isSupabaseConfigured } from '../../config/supabase';
+import { fetchChatLockContext } from '../../services/chatSupabase';
+import { isChatWriteLocked } from '../../utils/chatWriteLock';
+import { mapChatSendError } from '../../utils/chatErrors';
 import { useLeaveRemovedConversation } from '../../hooks/useLeaveRemovedConversation';
 import {
   aceptarDisponibilidadOpcion,
@@ -246,6 +249,7 @@ export function DetalleServicioScreen() {
   );
   const [clientReviewed, setClientReviewed] = useState(false);
   const [busySlots, setBusySlots] = useState<BusyAgendaSlot[]>([]);
+  const [chatWriteLocked, setChatWriteLocked] = useState(false);
   const [agendaFocusSlotId, setAgendaFocusSlotId] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const contentRef = useRef<View>(null);
@@ -317,6 +321,42 @@ export function DetalleServicioScreen() {
     if (row.worker_id === user.id) return 'trabajador' as const;
     return null;
   }, [row, user?.id]);
+
+  const lockConversationId = conversationId ?? row?.conversation_id ?? null;
+  useEffect(() => {
+    if (!lockConversationId || !isSupabaseConfigured()) {
+      setChatWriteLocked(false);
+      return;
+    }
+    let cancelled = false;
+    void fetchChatLockContext(lockConversationId)
+      .then((ctx) => {
+        if (cancelled) return;
+        setChatWriteLocked(
+          isChatWriteLocked({
+            jobsLoaded: ctx != null,
+            conversationId: lockConversationId,
+            claimContratacionId: ctx?.claimContratacionId ?? null,
+            jobs: ctx?.jobs ?? [],
+          }),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setChatWriteLocked(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    lockConversationId,
+    row?.estado_trabajo,
+    row?.estado_pago,
+    row?.updated_at,
+    row?.conformidad_aceptada,
+    row?.is_claim_open,
+    row?.claim_status,
+    row?.completed_by_worker_at,
+  ]);
 
   const warrantyRevisitAgenda = Boolean(
     row &&
@@ -652,7 +692,7 @@ export function DetalleServicioScreen() {
         {revisitConfirmada && revisitPhase.phase === 'confirmada' ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{formatWarrantyRevisitConfirmed(revisitPhase.slot)}</Text>
-            {myRole === 'trabajador' && !reagendarAbierto ? (
+            {myRole === 'trabajador' && !reagendarAbierto && !chatWriteLocked ? (
               <Pressable
                 style={[styles.btnGhost, { marginTop: spacing.sm }]}
                 onPress={() => setReagendarAbierto(true)}
@@ -665,7 +705,7 @@ export function DetalleServicioScreen() {
           </View>
         ) : null}
 
-        {myRole === 'trabajador' && showAgendaForm ? (
+        {myRole === 'trabajador' && showAgendaForm && !chatWriteLocked ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>
               {warrantyRevisitAgenda
@@ -815,7 +855,7 @@ export function DetalleServicioScreen() {
                       }
                       return;
                     }
-                    toast.error(e instanceof Error ? e.message : 'No se pudo enviar', 'Agenda');
+                    toast.error(mapChatSendError(e), 'Agenda');
                   } finally {
                     setBusy(false);
                   }

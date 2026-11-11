@@ -945,7 +945,9 @@ export async function fetchStoreRequestDetail(params: {
     const quoteItems = [...(quoteRow.quote_items ?? [])].sort((a, b) => {
       const byItem = String(a.request_item_id).localeCompare(String(b.request_item_id));
       if (byItem !== 0) return byItem;
-      return (Number(a.variant_index) || 1) - (Number(b.variant_index) || 1);
+      const left = Number(a.variant_index);
+      const right = Number(b.variant_index);
+      return (Number.isFinite(left) ? left : 1) - (Number.isFinite(right) ? right : 1);
     });
     existingQuote = {
       quoteId: quoteRow.id,
@@ -969,7 +971,7 @@ export async function fetchStoreRequestDetail(params: {
           inStock: qi.in_stock !== false,
           alternativeDescription: qi.alternative_description?.trim() || null,
           itemNote: qi.item_note?.trim() || null,
-          variantIndex: Number(qi.variant_index) > 0 ? Number(qi.variant_index) : 1,
+          variantIndex: Number.isFinite(Number(qi.variant_index)) ? Number(qi.variant_index) : 1,
           variantLabel: qi.variant_label?.trim() || null,
           clientDecision,
         };
@@ -1042,8 +1044,8 @@ export async function submitStoreQuote(
       }
     }
     const idx = item.variantIndex ?? 1;
-    if (idx < 1 || idx > 3) {
-      throw new Error('Solo se permiten hasta 3 opciones por ítem.');
+    if (idx < 0 || idx > 3) {
+      throw new Error('Solo se permiten hasta 3 marcas por ítem.');
     }
   }
 

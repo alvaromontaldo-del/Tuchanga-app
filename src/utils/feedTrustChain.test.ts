@@ -98,10 +98,10 @@ describe('cadena dato → ícono (#214)', () => {
 
     const profile = readFileSync('src/screens/home/WorkerProfileScreen.tsx', 'utf8');
     expect(profile).toContain('<AntecedentesPenalesBadge />');
-    expect(profile).toContain('profileMatriculaLabels({');
+    expect(profile).toContain('profileMatriculaEntries({');
     expect(profile).toContain('matriculaVerificada: worker.matriculaVerificada');
     expect(profile).toContain('oficios: worker.matriculasVerificadas');
-    expect(profile).toContain('<MatriculaVerificadaBadge key={label} label={label} />');
+    expect(profile).toContain('<MatriculaVerificadaBadge key={entry.label} label={entry.label} code={entry.code} />');
 
     const sql = readFileSync('supabase/20261111_card_214_trust_seals.sql', 'utf8');
     expect(sql).toContain('worker_public_trust');
