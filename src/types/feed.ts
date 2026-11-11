@@ -83,6 +83,8 @@ export type WorkerPublicProfile = {
   antecedentesPenales?: boolean;
   /** Matrícula aprobada. No incluye el número, la entidad ni las fotos. */
   matriculaVerificada?: boolean;
+  /** Oficios con matrícula verificada. El legado sin vínculo no entra. */
+  matriculasVerificadas?: string[];
 };
 
 export const MAX_WORKER_TRADES = 5;

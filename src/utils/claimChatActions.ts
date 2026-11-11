@@ -6,11 +6,11 @@
  * propio (`conversations.contratacion_id`) y deja el otro trabajo en el hilo general.
  * Por eso el bloqueo mira los trabajos de ESTE hilo, no todos los del par.
  *
- * Con el reclamo abierto, las acciones propias de ese trabajo quedan en Agenda
- * (la revisita que ya acepta `proponer_disponibilidad_opciones`). Materiales y una
- * cotización nueva de ese trabajo se ocultan. Otro trabajo vivo del mismo hilo
- * conserva las suyas. Al cerrar el reclamo (`claim_status` cerrado y
- * `is_claim_open` falso) vuelven las acciones de siempre.
+ * Con el reclamo abierto, Cotizar, recotizar y editar presupuesto de ese trabajo
+ * quedan deshabilitados. Materiales sigue igual que en un chat normal: el botón
+ * se ve y el alta no se rechaza. Otro trabajo vivo del mismo hilo conserva
+ * Cotizar. Agenda de la revisita no cambia. Al cerrar el reclamo (`claim_status`
+ * cerrado e `is_claim_open` falso) vuelve a habilitarse la cotización.
  *
  * La revisita confirmada no es la fecha del trabajo original. Hace falta una
  * opción aceptada desde que se abrió el reclamo, igual a la fecha y hora que
@@ -53,7 +53,7 @@ export function jobUsesWarrantyRevisitAgenda(job: {
   return job.estadoTrabajo === 'finalizado' && jobHasOpenWarrantyClaim(job);
 }
 
-/** Otro trabajo del mismo hilo que todavía puede cotizar o pedir materiales. */
+/** Otro trabajo del mismo hilo que todavía puede cotizar. Materiales no miran el reclamo. */
 export function jobKeepsQuoteAndMaterials(job: ClaimChatJob): boolean {
   if (jobHasOpenWarrantyClaim(job)) return false;
   return !TERMINAL_JOB.has(job.estadoTrabajo);
@@ -64,8 +64,10 @@ export type ClaimChatActionDecision = {
   focusClaimOpen: boolean;
   /** En este hilo hay otro trabajo, sin reclamo, que sigue en curso o cotizando. */
   otherLiveJobKeepsActions: boolean;
-  /** Ocultar Materiales y una cotización nueva del trabajo reclamado. */
-  blockOwnQuoteAndMaterials: boolean;
+  /** Deshabilitar Cotizar, recotizar y editar presupuesto del trabajo reclamado. */
+  blockOwnQuote: boolean;
+  /** Un reclamo de garantía no oculta ni rechaza Materiales. */
+  blockOwnMaterials: boolean;
   /** Mostrar Agenda para coordinar la revisión de ese trabajo. */
   showAgenda: boolean;
 };
@@ -81,21 +83,22 @@ export function claimChatActions(input: {
   const otherLiveJobKeepsActions = input.jobs.some(
     (job) => job.id !== focus?.id && jobKeepsQuoteAndMaterials(job),
   );
+  const blockOwnQuote = focusClaimOpen && !otherLiveJobKeepsActions;
   return {
     focusClaimOpen,
     otherLiveJobKeepsActions,
-    blockOwnQuoteAndMaterials: focusClaimOpen && !otherLiveJobKeepsActions,
+    blockOwnQuote,
+    blockOwnMaterials: false,
     showAgenda: Boolean(focus && jobUsesWarrantyRevisitAgenda(focus)),
   };
 }
 
 /**
- * Alta de materiales de este hilo. Se rechaza solo si hay un reclamo abierto
- * y ningún otro trabajo del mismo hilo sigue pudiendo pedirlos.
+ * Alta de materiales de este hilo. El reclamo de garantía no la bloquea:
+ * Materiales queda habilitado aunque Cotizar no.
  */
-export function conversationBlocksNewMaterials(jobs: ClaimChatJob[]): boolean {
-  if (!jobs.some((job) => jobHasOpenWarrantyClaim(job))) return false;
-  return !jobs.some((job) => jobKeepsQuoteAndMaterials(job));
+export function conversationBlocksNewMaterials(_jobs: ClaimChatJob[]): boolean {
+  return false;
 }
 
 export type WarrantyRevisitOption = {

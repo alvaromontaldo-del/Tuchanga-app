@@ -37,8 +37,15 @@ function mergeWithFeedLikes(remote: FeedPost[], feed: FeedPost[]): FeedPost[] {
   const feedById = new Map(feed.map((p) => [p.id, p]));
   return remote.map((p) => {
     const hit = feedById.get(p.id);
-    if (hit) return hit;
-    return { ...p, likeCount: p.likeCount ?? 0, likedByMe: p.likedByMe ?? false };
+    if (!hit) return { ...p, likeCount: p.likeCount ?? 0, likedByMe: p.likedByMe ?? false };
+    return {
+      ...hit,
+      ...p,
+      likeCount: hit.likeCount,
+      likedByMe: hit.likedByMe,
+      workerAntecedentesAprobado: p.workerAntecedentesAprobado ?? hit.workerAntecedentesAprobado,
+      workerMatriculasVerificadas: p.workerMatriculasVerificadas ?? hit.workerMatriculasVerificadas,
+    };
   });
 }
 

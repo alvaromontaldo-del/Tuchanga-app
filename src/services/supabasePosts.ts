@@ -1,7 +1,8 @@
 import { File as ExpoFsFile } from 'expo-file-system';
 import { getSupabaseClient } from '../lib/supabase';
+import type { FeedPost } from '../types/feed';
 import { mapContentModerationError } from '../utils/contentModerationErrors';
-import { parseFeedOficioCodes } from '../utils/feedTrust';
+import { feedPostTrustFromRpc } from '../utils/feedTrust';
 import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
 import { completedJobsFromPayload } from '../utils/workerReputation';
 import { fetchCompletedJobsByProfileIds } from './workerCompletedJobs';
@@ -145,7 +146,7 @@ type PostFeedRow = {
   worker_matriculas_verificadas?: unknown;
 };
 
-function mapPostFeedRow(x: PostFeedRow) {
+function mapPostFeedRow(x: PostFeedRow): FeedPost {
   const firstName = professionalDisplayNameForClient(x.worker_nombre);
   const urls = Array.isArray(x.image_urls) ? x.image_urls : [];
   return {
@@ -170,8 +171,7 @@ function mapPostFeedRow(x: PostFeedRow) {
     createdAt: x.created_at,
     likeCount: Math.max(0, Number(x.like_count ?? 0) || 0),
     likedByMe: Boolean(x.liked_by_me),
-    workerAntecedentesAprobado: x.worker_antecedentes_aprobado === true,
-    workerMatriculasVerificadas: parseFeedOficioCodes(x.worker_matriculas_verificadas),
+    ...feedPostTrustFromRpc(x),
   };
 }
 
@@ -207,23 +207,7 @@ export async function togglePostLikeInSupabase(
 
 export async function fetchFeedPostsFromSupabase(params?: {
   limit?: number;
-}): Promise<
-  Array<{
-    id: string;
-    workerId: string;
-    workerFirstName: string;
-    workerAvatarUrl: string;
-    workerRatingAverage?: number;
-    workerReviewCount?: number;
-    workerTotalJobsDone?: number;
-    trade: string;
-    workImageUrls: string[];
-    description: string;
-    createdAt: string;
-    likeCount: number;
-    likedByMe: boolean;
-  }>
-> {
+}): Promise<FeedPost[]> {
   const supabase = getSupabaseClient();
   const limit = Math.max(1, Math.min(params?.limit ?? 50, 100));
 
@@ -271,23 +255,7 @@ export async function fetchFeedPostsFromSupabase(params?: {
 export async function fetchPostsByWorkerIdFromSupabase(
   workerId: string,
   params?: { limit?: number },
-): Promise<
-  Array<{
-    id: string;
-    workerId: string;
-    workerFirstName: string;
-    workerAvatarUrl: string;
-    workerRatingAverage?: number;
-    workerReviewCount?: number;
-    workerTotalJobsDone?: number;
-    trade: string;
-    workImageUrls: string[];
-    description: string;
-    createdAt: string;
-    likeCount: number;
-    likedByMe: boolean;
-  }>
-> {
+): Promise<FeedPost[]> {
   const supabase = getSupabaseClient();
   const limit = Math.max(1, Math.min(params?.limit ?? 40, 100));
 
@@ -371,21 +339,7 @@ export async function hidePostInSupabase(postId: string): Promise<void> {
 }
 
 /** Una publicación por id (detalle). Devuelve null si no existe u ocultada para el viewer. */
-export async function fetchPostByIdFromSupabase(postId: string): Promise<{
-  id: string;
-  workerId: string;
-  workerFirstName: string;
-  workerAvatarUrl: string;
-  workerRatingAverage?: number;
-  workerReviewCount?: number;
-  workerTotalJobsDone?: number;
-  trade: string;
-  workImageUrls: string[];
-  description: string;
-  createdAt: string;
-  likeCount: number;
-  likedByMe: boolean;
-} | null> {
+export async function fetchPostByIdFromSupabase(postId: string): Promise<FeedPost | null> {
   const supabase = getSupabaseClient();
   const id = (postId ?? '').trim();
   if (!id) return null;
@@ -403,6 +357,15 @@ export async function fetchPostByIdFromSupabase(postId: string): Promise<{
       .maybeSingle();
     if (hidden) return null;
   }
+
+  const rpc = await supabase.rpc('get_public_post', { p_post_id: id });
+  if (!rpc.error) {
+    const row = (Array.isArray(rpc.data) ? rpc.data[0] : rpc.data) as PostFeedRow | null | undefined;
+    if (!row?.id) return null;
+    return mapPostFeedRow({ ...row, like_count: row.like_count ?? 0, liked_by_me: row.liked_by_me ?? false });
+  }
+  const rpcMsg = (rpc.error.message ?? '').toLowerCase();
+  if (!rpcMsg.includes('get_public_post')) throw rpc.error;
 
   const { data, error } = await supabase
     .from('posts')

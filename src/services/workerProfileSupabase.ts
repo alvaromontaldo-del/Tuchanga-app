@@ -1,11 +1,13 @@
 import { getSupabaseClient } from '../lib/supabase';
 import type { WorkerPublicProfile, WorkerTradeEntry } from '../types/feed';
 import { MAX_WORKER_TRADES } from '../types/feed';
+import { feedPostTrustFromRpc } from '../utils/feedTrust';
 import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
 import { completedJobsFromPayload } from '../utils/workerReputation';
 import { fetchIntroVideoPath, playbackUrlForPath } from './introVideoSupabase';
 import { fetchMyProfilePrivate } from './supabaseUser';
 import { fetchWorkerAtiendeUrgencias } from './urgenciasSupabase';
+import { fetchWorkerPublicTrust } from './workerPublicTrust';
 
 const DEFAULT_AVATAR = 'https://i.pravatar.cc/150?u=profile';
 
@@ -147,6 +149,9 @@ export function mapPublicWorkerRpcPayload(raw: unknown): WorkerPublicProfile | n
     trades,
     antecedentesPenales: profile.antecedentes_penales === true,
     matriculaVerificada: profile.matricula_verificada === true,
+    matriculasVerificadas: feedPostTrustFromRpc({
+      worker_matriculas_verificadas: profile.matriculas_verificadas,
+    }).workerMatriculasVerificadas,
   };
 }
 
@@ -201,11 +206,13 @@ export async function fetchWorkerPublicProfileFromSupabase(
   if (!mapped) return null;
 
   // Canales aparte: un fallo acá no puede anular el perfil ya armado.
-  const [introPath, atiendeUrgencias, photoRows] = await Promise.all([
+  const [introPath, atiendeUrgencias, photoRows, trust] = await Promise.all([
     settle(() => fetchIntroVideoPath(id), null),
     settle(() => fetchWorkerAtiendeUrgencias(id), false),
     fetchTradePhotoRows(id),
+    settle(() => fetchWorkerPublicTrust([id]), new Map()),
   ]);
+  const seal = trust.get(id);
 
   let birthDate = '';
   let introVideoUrl: string | null = null;
@@ -232,5 +239,8 @@ export async function fetchWorkerPublicProfileFromSupabase(
     introVideoUrl,
     birthDate: birthDate || undefined,
     atiendeUrgencias,
+    ...(seal
+      ? { antecedentesPenales: seal.antecedentes, matriculasVerificadas: seal.oficios }
+      : {}),
   };
 }

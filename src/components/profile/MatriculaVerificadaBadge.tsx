@@ -3,15 +3,22 @@ import { StyleSheet, Text, View } from 'react-native';
 import { spacing } from '../../constants/theme';
 
 /** Insignia pública. No muestra el número, la entidad ni las fotos. */
-export function MatriculaVerificadaBadge({ compact = false }: { compact?: boolean }) {
+export function MatriculaVerificadaBadge({
+  compact = false,
+  label = 'Matrícula verificada',
+}: {
+  compact?: boolean;
+  /** En el perfil público es «Matrícula de [oficio] verificada». */
+  label?: string;
+}) {
   return (
     <View
       style={[styles.badge, compact ? styles.compact : styles.regular]}
       accessibilityRole="text"
-      accessibilityLabel="Matrícula verificada"
+      accessibilityLabel={label}
     >
       <Ionicons name="ribbon" size={compact ? 13 : 15} color="#8C6A3D" />
-      <Text style={[styles.text, compact && styles.textCompact]}>Matrícula verificada</Text>
+      <Text style={[styles.text, compact && styles.textCompact]}>{label}</Text>
     </View>
   );
 }

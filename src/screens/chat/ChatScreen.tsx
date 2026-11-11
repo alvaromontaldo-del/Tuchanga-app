@@ -663,11 +663,11 @@ export function ChatScreen({
         : focusSeed;
     const decision = claimChatActions({ focusJobId: job?.id ?? null, jobs });
     if (!conversationJobsReady) {
-      return { ...decision, blockOwnQuoteAndMaterials: false };
+      return { ...decision, blockOwnQuote: false };
     }
     return decision;
   }, [conversationJobs, conversationJobsReady, job]);
-  const claimLocksOwnActions = claimDecision.blockOwnQuoteAndMaterials;
+  const claimLocksQuote = claimDecision.blockOwnQuote;
   const claimAgenda = claimDecision.showAgenda;
   const revisitConfirmadaVisible = Boolean(
     claimAgenda && revisitConfirmada && agendaOpciones.length === 0,
@@ -853,15 +853,15 @@ export function ChatScreen({
 
   const hasActiveQuote = useMemo(() => quotes.some((q) => q.status === 'pending'), [quotes]);
   const hasActiveJob = useMemo(() => Boolean(job && job.work_status === 'PENDING'), [job]);
-  const quoteChip = useMemo(
-    () =>
-      quoteChipForJob({
-        role: participants?.myRole ?? null,
-        estadoTrabajo: job?.estado_trabajo ?? null,
-        hasActiveJob,
-      }),
-    [hasActiveJob, job?.estado_trabajo, participants?.myRole],
-  );
+  const quoteChip = useMemo(() => {
+    const chip = quoteChipForJob({
+      role: participants?.myRole ?? null,
+      estadoTrabajo: job?.estado_trabajo ?? null,
+      hasActiveJob,
+    });
+    if (!claimLocksQuote) return chip;
+    return { ...chip, disabled: true };
+  }, [claimLocksQuote, hasActiveJob, job?.estado_trabajo, participants?.myRole]);
   const latestRejected = useMemo(() => {
     const rejected = quotes.filter((q) => q.status === 'rejected');
     return rejected.length ? rejected[rejected.length - 1] : null;
@@ -2328,17 +2328,20 @@ export function ChatScreen({
                     />
                   ) : null}
 
-                  {participants?.myRole === 'trabajador' && !claimLocksOwnActions && q.status === 'pending' ? (
+                  {participants?.myRole === 'trabajador' && q.status === 'pending' ? (
                     <Pressable
+                      disabled={claimLocksQuote}
                       style={({ pressed }) => [
                         styles.quoteBtn,
                         styles.quoteBtnSolo,
                         styles.quoteBtnPrimary,
-                        pressed && styles.pressed,
+                        claimLocksQuote && styles.quoteBtnDisabled,
+                        pressed && !claimLocksQuote && styles.pressed,
                       ]}
                       accessibilityRole="button"
                       accessibilityLabel="Editar presupuesto"
                       onPress={() => {
+                        if (claimLocksQuote) return;
                         const amount = Math.max(0, Math.floor(Number(q.net_amount) || 0));
                         const amountText = amountToArsInput(amount);
                         const warrantyOn =
@@ -2453,19 +2456,21 @@ export function ChatScreen({
                   ) : null}
 
                   {participants?.myRole === 'trabajador' &&
-                  !claimLocksOwnActions &&
                   q.status === 'rejected' &&
                   !hasActiveQuote &&
                   latestRejected?.id === q.id &&
                   latestQuoteAny?.id === q.id ? (
                     <Pressable
+                      disabled={claimLocksQuote}
                       style={({ pressed }) => [
                         styles.quoteBtn,
                         styles.quoteBtnSolo,
                         styles.quoteBtnPrimary,
-                        pressed && styles.pressed,
+                        claimLocksQuote && styles.quoteBtnDisabled,
+                        pressed && !claimLocksQuote && styles.pressed,
                       ]}
                       onPress={() => {
+                        if (claimLocksQuote) return;
                         const amount = Math.max(0, Math.floor(Number(q.net_amount) || 0));
                         const amountText = amountToArsInput(amount);
                         const warrantyOn =
@@ -2533,7 +2538,7 @@ export function ChatScreen({
       );
     },
     [
-      claimLocksOwnActions,
+      claimLocksQuote,
       conversationId,
       hasActiveQuote,
       job?.estado_pago,
@@ -3850,7 +3855,7 @@ export function ChatScreen({
                   </Text>
                 ) : null}
               </View>
-              {isSupabaseConfigured() && participants?.myRole === 'trabajador' && !chatBlocked && !claimLocksOwnActions ? (
+              {isSupabaseConfigured() && participants?.myRole === 'trabajador' && !chatBlocked ? (
                 <View style={styles.headerChipsInline}>
                   <Pressable
                     onPress={() => {

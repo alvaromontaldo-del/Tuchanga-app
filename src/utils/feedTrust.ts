@@ -6,6 +6,14 @@ export type FeedTrustIcon = 'antecedentes' | MatriculaOficioCodigo;
 
 const OFICIO_SET = new Set<string>(MATRICULA_OFICIO_CODIGOS);
 
+/** Leyenda del perfil. El feed y la búsqueda no la muestran. */
+const OFICIO_LEGEND: Record<MatriculaOficioCodigo, string> = {
+  gas: 'Matrícula de gas verificada',
+  electricidad: 'Matrícula de electricidad verificada',
+  plomeria: 'Matrícula de plomería verificada',
+  fumigacion: 'Matrícula de fumigación verificada',
+};
+
 /**
  * Íconos del feed, sin texto: antecedentes solo si está aprobado,
  * y después cada oficio con matrícula verificada. El legado sin vínculo no entra.
@@ -23,13 +31,34 @@ export function feedTrustIcons(
   return icons;
 }
 
+/**
+ * Leyendas del perfil público, en orden: antecedentes y después cada oficio.
+ * No incluye número, entidad ni el legado sin vínculo.
+ */
+export function profileTrustLegends(antecedentes: boolean, oficios: readonly unknown[]): string[] {
+  const lines: string[] = [];
+  if (antecedentes) lines.push('Antecedentes penales');
+  for (const icon of feedTrustIcons(false, oficios)) {
+    if (icon === 'antecedentes') continue;
+    lines.push(OFICIO_LEGEND[icon]);
+  }
+  return lines;
+}
+
 export function parseFeedOficioCodes(raw: unknown): MatriculaOficioCodigo[] {
   let items: unknown[] = [];
   if (Array.isArray(raw)) {
     items = raw;
   } else if (typeof raw === 'string') {
     const trimmed = raw.trim();
-    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed) as unknown;
+        if (Array.isArray(parsed)) items = parsed;
+      } catch {
+        items = [];
+      }
+    } else if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
       items = trimmed
         .slice(1, -1)
         .split(',')
@@ -38,6 +67,44 @@ export function parseFeedOficioCodes(raw: unknown): MatriculaOficioCodigo[] {
     }
   }
   return feedTrustIcons(false, items).filter((icon): icon is MatriculaOficioCodigo => icon !== 'antecedentes');
+}
+
+export type WorkerPublicTrustSeal = {
+  antecedentes: boolean;
+  oficios: MatriculaOficioCodigo[];
+};
+
+function asTrustRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/** Filas de `worker_public_trust`. Ignora el legado y cualquier código que no sea un oficio. */
+export function parseWorkerPublicTrustRows(raw: unknown): Map<string, WorkerPublicTrustSeal> {
+  const out = new Map<string, WorkerPublicTrustSeal>();
+  if (!Array.isArray(raw)) return out;
+  for (const item of raw) {
+    const row = asTrustRecord(item);
+    if (!row) continue;
+    const id = String(row.profile_id ?? '').trim();
+    if (!id) continue;
+    out.set(id, {
+      antecedentes: row.antecedentes_penales === true,
+      oficios: parseFeedOficioCodes(row.matriculas_verificadas),
+    });
+  }
+  return out;
+}
+
+/** Campos de sello que `fetch_feed_posts` agrega a cada fila. */
+export function feedPostTrustFromRpc(row: {
+  worker_antecedentes_aprobado?: unknown;
+  worker_matriculas_verificadas?: unknown;
+}): { workerAntecedentesAprobado: boolean; workerMatriculasVerificadas: MatriculaOficioCodigo[] } {
+  return {
+    workerAntecedentesAprobado: row.worker_antecedentes_aprobado === true,
+    workerMatriculasVerificadas: parseFeedOficioCodes(row.worker_matriculas_verificadas),
+  };
 }
 
 /** Una estrella, el puntaje y la cantidad de trabajos. El nombre ya viene recortado. */

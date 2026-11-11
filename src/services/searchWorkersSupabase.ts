@@ -5,6 +5,7 @@ import { coarseCoord } from '../utils/publicWorkerSearch';
 import { completedJobsFromPayload } from '../utils/workerReputation';
 import { readAtiendeUrgencias } from '../utils/urgencias';
 import { fetchCompletedJobsByProfileIds } from './workerCompletedJobs';
+import { fetchWorkerPublicTrust } from './workerPublicTrust';
 
 type RpcRow = {
   profile_id: string;
@@ -83,6 +84,7 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
       atiendeUrgencias: readAtiendeUrgencias(r.atiende_urgencias),
       antecedentesPenales: r.antecedentes_penales === true,
       matriculaVerificada: r.matricula_verificada === true,
+      matriculasVerificadas: [],
     };
 
     return {
@@ -92,15 +94,24 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
   });
 
   const missing = hits.filter((h) => h.worker.totalJobsDone == null).map((h) => h.worker.id);
-  if (missing.length === 0) return hits;
-
-  const byId = await fetchCompletedJobsByProfileIds(missing);
-  if (!byId) return hits;
+  const [byId, seals] = await Promise.all([
+    missing.length === 0 ? Promise.resolve(null) : fetchCompletedJobsByProfileIds(missing),
+    fetchWorkerPublicTrust(hits.map((h) => h.worker.id)).catch(() => null),
+  ]);
 
   return hits.map((h) => {
-    if (h.worker.totalJobsDone != null) return h;
-    const n = byId.get(h.worker.id);
-    if (n == null) return h;
-    return { ...h, worker: { ...h.worker, totalJobsDone: n } };
+    const seal = seals?.get(h.worker.id);
+    const totalJobsDone =
+      h.worker.totalJobsDone != null ? h.worker.totalJobsDone : byId?.get(h.worker.id);
+    return {
+      ...h,
+      worker: {
+        ...h.worker,
+        ...(totalJobsDone == null ? {} : { totalJobsDone }),
+        ...(seal
+          ? { antecedentesPenales: seal.antecedentes, matriculasVerificadas: seal.oficios }
+          : {}),
+      },
+    };
   });
 }
