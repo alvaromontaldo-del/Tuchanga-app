@@ -54,6 +54,8 @@ export function FeedProvider({ children }: { children: ReactNode }) {
           createdAt: r.createdAt,
           likeCount: r.likeCount,
           likedByMe: r.likedByMe,
+          workerAntecedentesAprobado: r.workerAntecedentesAprobado,
+          workerMatriculasVerificadas: r.workerMatriculasVerificadas,
         })),
       );
     } catch (e) {

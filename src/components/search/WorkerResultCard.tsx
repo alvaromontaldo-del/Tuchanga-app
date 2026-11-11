@@ -4,9 +4,9 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 import { ChangaCard } from '../feed/ChangaCard';
 import { StarRating } from '../profile/StarRating';
 import { colors, radii, spacing, typography } from '../../constants/theme';
-import { AntecedentesPenalesBadge } from '../profile/AntecedentesPenalesBadge';
-import { MatriculaVerificadaBadge } from '../profile/MatriculaVerificadaBadge';
+import { OficioMatriculaIcon } from '../profile/OficioMatriculaIcon';
 import { UrgenciasBadge } from './UrgenciasBadge';
+import { feedTrustIcons } from '../../utils/feedTrust';
 import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { asText, isRenderableUri } from '../../utils/safeAsync';
 import { urgenciasBadgeView } from '../../utils/urgencias';
@@ -23,6 +23,8 @@ export type WorkerResultCardModel = {
   atiendeUrgencias?: boolean;
   antecedentesPenales?: boolean;
   matriculaVerificada?: boolean;
+  /** Oficios verificados. Solo íconos, sin la leyenda del perfil. */
+  matriculasVerificadas?: readonly string[];
 };
 
 function escapeRegExp(s: string) {
@@ -59,6 +61,10 @@ export function WorkerResultCard({
   const summaryParts = highlightParts(asText(worker?.summary, ''), highlightQuery ?? '');
   const rawAvatar = worker?.avatarUrl;
   const avatarUrl = isRenderableUri(rawAvatar) ? rawAvatar.trim() : '';
+  const trustIcons = feedTrustIcons(
+    worker.antecedentesPenales === true,
+    worker.matriculasVerificadas ?? [],
+  );
 
   return (
     <ChangaCard onPress={onPress} style={styles.cardMargin}>
@@ -69,20 +75,23 @@ export function WorkerResultCard({
       </View>
 
       <View style={styles.resultBody}>
-        <Text style={styles.resultName} numberOfLines={1}>
-          {nameParts.map((p, i) =>
-            p.h ? (
-              <Text key={`n-${i}`} style={styles.hl}>
-                {p.t}
-              </Text>
-            ) : (
-              p.t
-            ),
-          )}
-        </Text>
+        <View style={styles.nameRow}>
+          <Text style={styles.resultName} numberOfLines={1}>
+            {nameParts.map((p, i) =>
+              p.h ? (
+                <Text key={`n-${i}`} style={styles.hl}>
+                  {p.t}
+                </Text>
+              ) : (
+                p.t
+              ),
+            )}
+          </Text>
+          {trustIcons.map((code) => (
+            <OficioMatriculaIcon key={code} code={code} size={18} />
+          ))}
+        </View>
         {urgenciasBadgeView(worker.atiendeUrgencias) ? <UrgenciasBadge /> : null}
-        {worker.antecedentesPenales ? <AntecedentesPenalesBadge compact /> : null}
-        {worker.matriculaVerificada ? <MatriculaVerificadaBadge compact /> : null}
         <Text style={styles.resultSummary} numberOfLines={1}>
           {summaryParts.map((p, i) =>
             p.h ? (
@@ -141,9 +150,16 @@ const styles = StyleSheet.create({
     marginRight: spacing.sm,
     minWidth: 0,
   },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
   resultName: {
     ...typography.title,
     fontWeight: '700',
+    flexShrink: 1,
   },
   resultSummary: {
     ...typography.body,

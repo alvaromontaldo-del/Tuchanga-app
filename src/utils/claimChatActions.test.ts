@@ -51,23 +51,25 @@ describe('acciones del chat por trabajo reclamado', () => {
     expect(claimChatActions({ focusJobId: 'a', jobs: [plain] })).toEqual({
       focusClaimOpen: false,
       otherLiveJobKeepsActions: false,
-      blockOwnQuoteAndMaterials: false,
+      blockOwnQuote: false,
+      blockOwnMaterials: false,
       showAgenda: false,
     });
     expect(conversationBlocksNewMaterials([plain])).toBe(false);
     expect(conversationBlocksNewMaterials([])).toBe(false);
   });
 
-  it('un reclamo abierto o pendiente deja solo Agenda en ese trabajo', () => {
+  it('un reclamo abierto o pendiente deshabilita Cotizar y deja Materiales', () => {
     for (const row of [claimOpen, claimPending]) {
       expect(jobUsesWarrantyRevisitAgenda(row)).toBe(true);
       expect(claimChatActions({ focusJobId: row.id, jobs: [row] })).toEqual({
         focusClaimOpen: true,
         otherLiveJobKeepsActions: false,
-        blockOwnQuoteAndMaterials: true,
+        blockOwnQuote: true,
+        blockOwnMaterials: false,
         showAgenda: true,
       });
-      expect(conversationBlocksNewMaterials([row])).toBe(true);
+      expect(conversationBlocksNewMaterials([row])).toBe(false);
     }
     expect(
       jobHasOpenWarrantyClaim({ isClaimOpen: false, claimStatus: 'open' }),
@@ -86,7 +88,8 @@ describe('acciones del chat por trabajo reclamado', () => {
       focusJobId: 'a',
       jobs: [claimOpen, live, quoting],
     });
-    expect(decision.blockOwnQuoteAndMaterials).toBe(false);
+    expect(decision.blockOwnQuote).toBe(false);
+    expect(decision.blockOwnMaterials).toBe(false);
     expect(decision.otherLiveJobKeepsActions).toBe(true);
     expect(decision.showAgenda).toBe(true);
     expect(conversationBlocksNewMaterials([claimOpen, live])).toBe(false);
@@ -99,7 +102,8 @@ describe('acciones del chat por trabajo reclamado', () => {
     expect(focusedOnLive).toEqual({
       focusClaimOpen: false,
       otherLiveJobKeepsActions: false,
-      blockOwnQuoteAndMaterials: false,
+      blockOwnQuote: false,
+      blockOwnMaterials: false,
       showAgenda: false,
     });
     expect(conversationBlocksNewMaterials([claimOpen, live])).toBe(false);
@@ -111,7 +115,8 @@ describe('acciones del chat por trabajo reclamado', () => {
     expect(claimChatActions({ focusJobId: 'a', jobs: [claimClosed] })).toEqual({
       focusClaimOpen: false,
       otherLiveJobKeepsActions: false,
-      blockOwnQuoteAndMaterials: false,
+      blockOwnQuote: false,
+      blockOwnMaterials: false,
       showAgenda: false,
     });
     expect(conversationBlocksNewMaterials([claimClosed, live])).toBe(false);
@@ -120,11 +125,10 @@ describe('acciones del chat por trabajo reclamado', () => {
 
   it('una disputa no se trata como reclamo de garantía', () => {
     const disputa = job({ id: 'd', estadoTrabajo: 'disputa' });
-    expect(claimChatActions({ focusJobId: 'd', jobs: [disputa] }).blockOwnQuoteAndMaterials).toBe(
-      false,
-    );
+    expect(claimChatActions({ focusJobId: 'd', jobs: [disputa] }).blockOwnQuote).toBe(false);
+    expect(claimChatActions({ focusJobId: 'd', jobs: [disputa] }).blockOwnMaterials).toBe(false);
     expect(conversationBlocksNewMaterials([disputa])).toBe(false);
-    expect(conversationBlocksNewMaterials([claimOpen, disputa])).toBe(true);
+    expect(conversationBlocksNewMaterials([claimOpen, disputa])).toBe(false);
   });
 });
 
@@ -134,18 +138,26 @@ describe('la UI usa el criterio por trabajo y no apaga el resto del chat', () =>
   const materials = readFileSync('src/services/materialRequestsSupabase.ts', 'utf8');
   const agenda = readFileSync('src/components/servicios/AgendaOpcionesCliente.tsx', 'utf8');
 
-  it('oculta Materiales y la cotización nueva solo con el bloqueo de ese trabajo', () => {
+  it('deshabilita Cotizar del trabajo reclamado y deja Materiales', () => {
     expect(chat).toContain('claimChatActions(');
     expect(chat).toContain('conversationJobsReady');
-    expect(chat).toContain(
-      "participants?.myRole === 'trabajador' && !chatBlocked && !claimLocksOwnActions",
-    );
-    expect(chat).toContain('!claimLocksOwnActions && q.status === \'pending\'');
-    expect(chat).toContain('claimLocksOwnActions');
-    expect(materials).toContain('conversationBlocksNewMaterials');
-    expect(materials).toContain('MATERIALS_CLAIM_BLOCKED_MESSAGE');
+    expect(chat).toContain("participants?.myRole === 'trabajador' && !chatBlocked");
+    expect(chat).not.toContain('claimLocksOwnActions');
+    expect(chat).toContain('if (!claimLocksQuote) return chip;');
+    expect(chat).toContain('return { ...chip, disabled: true };');
+    expect(chat).toContain('disabled={quoteChip.disabled}');
+    expect(chat).toContain('if (claimLocksQuote) return;');
+    expect(chat).toContain('accessibilityLabel="Editar presupuesto"');
+    const chips = chat.slice(chat.indexOf('styles.headerChipsInline'), chat.indexOf('styles.headerIconCluster'));
+    expect(chips.indexOf('{quoteChip.label}')).toBeLessThan(chips.indexOf('>Materiales<'));
+    const materialesStart = chips.indexOf('accessibilityLabel="Cotizaciones de materiales"');
+    expect(materialesStart).toBeGreaterThan(-1);
+    expect(chips.slice(materialesStart)).not.toContain('claimLocksQuote');
+    expect(materials).not.toContain('conversationBlocksNewMaterials');
+    expect(materials).not.toContain('MATERIALS_CLAIM_BLOCKED_MESSAGE');
     expect(MATERIALS_CLAIM_BLOCKED_MESSAGE).toMatch(/Agenda/);
     expect(materials).toContain('conversationAllowsMaterialsList');
+    expect(conversationBlocksNewMaterials([claimOpen])).toBe(false);
   });
 
   it('ofrece Agenda de la revisita y el cliente puede rechazar las propuestas', () => {

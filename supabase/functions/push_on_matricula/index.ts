@@ -2,6 +2,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendExpoPush } from "../_shared/expoPush.ts";
+import { matriculaRechazoPushBody } from "../_shared/matriculaRechazoPush.ts";
 import { requireFunctionSecret } from "../_shared/functionSecretGuard.ts";
 import {
   claimPushDelivery,
@@ -12,6 +13,7 @@ type RecordBody = {
   user_id?: string;
   motivo?: string;
   event_key?: string;
+  kind?: string;
 };
 
 type WebhookBody = {
@@ -29,8 +31,8 @@ function json(status: number, body: unknown) {
 }
 
 /**
- * #77. Push al profesional cuando el admin rechaza la matrícula.
- * El cuerpo es el motivo. No manda las fotos, el número ni un apellido.
+ * #77. Push al profesional cuando el admin rechaza una foto o la matrícula.
+ * El cuerpo dice qué se rechazó y el motivo. No manda las fotos, el número ni un apellido.
  * Autentica con x-function-secret (Vault), igual que los otros push.
  */
 Deno.serve(async (req) => {
@@ -62,6 +64,11 @@ Deno.serve(async (req) => {
   const userId = String(record.user_id ?? "").trim();
   const motivo = String(record.motivo ?? "").replace(/\s+/g, " ").trim();
   const eventKey = String(record.event_key ?? `matricula:${userId}`).trim().slice(0, 240);
+  const pushBody = matriculaRechazoPushBody({
+    motivo,
+    eventKey,
+    kind: record.kind,
+  });
 
   if (!userId || !motivo) {
     return json(400, { error: "missing_fields" });
@@ -90,7 +97,7 @@ Deno.serve(async (req) => {
     await sendExpoPush({
       to: tokens,
       title: "YaChanga",
-      body: motivo,
+      body: pushBody,
       data: { type: "matricula_verificada" },
     });
   } catch (e) {

@@ -52,6 +52,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
+    flexShrink: 0,
     gap: 4,
   },
   scoreRow: {

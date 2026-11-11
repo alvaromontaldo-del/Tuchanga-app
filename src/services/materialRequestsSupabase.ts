@@ -1,8 +1,3 @@
-import {
-  conversationBlocksNewMaterials,
-  MATERIALS_CLAIM_BLOCKED_MESSAGE,
-  type ClaimChatJob,
-} from '../utils/claimChatActions';
 import { offplatformSubmitText } from '../utils/offplatformContact';
 import { edgeFunctionSecretHeaders } from './edgeFunctionSecret';
 import {
@@ -225,28 +220,7 @@ export async function createMaterialRequestWithTargets(
     throw new Error(MATERIALS_LIST_BLOCKED_MESSAGE);
   }
 
-  const claimJobs = await sb
-    .from('contrataciones')
-    .select('id, estado_trabajo, is_claim_open, claim_status')
-    .eq('conversation_id', conversationId);
-  if (!claimJobs.error && claimJobs.data) {
-    const jobs: ClaimChatJob[] = (
-      claimJobs.data as Array<{
-        id?: string | null;
-        estado_trabajo?: string | null;
-        is_claim_open?: boolean | null;
-        claim_status?: string | null;
-      }>
-    ).map((row) => ({
-      id: String(row.id ?? ''),
-      estadoTrabajo: String(row.estado_trabajo ?? ''),
-      isClaimOpen: row.is_claim_open === true,
-      claimStatus: row.claim_status ?? null,
-    }));
-    if (conversationBlocksNewMaterials(jobs)) {
-      throw new Error(MATERIALS_CLAIM_BLOCKED_MESSAGE);
-    }
-  }
+  // Un reclamo de garantía no rechaza el alta. Cotizar es lo que queda deshabilitado.
 
   // El profesional no pide la calle ni el punto. El trigger copia el domicilio
   // del trabajo (temporal o perfil) para el comercio. Antes del pago no quedan

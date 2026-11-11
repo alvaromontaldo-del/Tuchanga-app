@@ -345,6 +345,7 @@ export function SearchWorkerScreen({ route, navigation }: FeedStackScreenProps<'
               atiendeUrgencias: item.worker.atiendeUrgencias,
               antecedentesPenales: item.worker.antecedentesPenales,
               matriculaVerificada: item.worker.matriculaVerificada,
+              matriculasVerificadas: item.worker.matriculasVerificadas,
             }}
             highlightQuery={query}
             onPress={() =>

@@ -34,6 +34,8 @@ export type SearchableWorker = {
   antecedentesPenales?: boolean;
   /** Matrícula aprobada. Ausente = no. No incluye el número ni las fotos. */
   matriculaVerificada?: boolean;
+  /** Oficios con matrícula verificada. El legado sin vínculo no entra. */
+  matriculasVerificadas?: string[];
 };
 
 export type SearchWorkerHit = {
