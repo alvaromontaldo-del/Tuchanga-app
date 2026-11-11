@@ -2,7 +2,7 @@
 -- El feed ya los trae en fetch_feed_posts (card_77_214). Esta función lista
 -- los mismos helpers por ids, sin reescribir search_workers_for_client.
 -- No devuelve número, entidad, fotos ni el legado sin_vincular.
--- anon puede ejecutarla: el perfil público y la búsqueda ya muestran estos sellos.
+-- EXECUTE solo para authenticated y service_role.
 
 CREATE OR REPLACE FUNCTION public.worker_public_trust(p_user_ids uuid[])
 RETURNS TABLE(profile_id uuid, antecedentes_penales boolean, matriculas_verificadas text[])
@@ -23,8 +23,8 @@ AS $function$
   ) ids;
 $function$;
 
-REVOKE ALL ON FUNCTION public.worker_public_trust(uuid[]) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.worker_public_trust(uuid[]) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.worker_public_trust(uuid[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.worker_public_trust(uuid[]) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.worker_public_trust(uuid[]) IS
   '#214. Antecedentes aprobados y oficios con matrícula verificada. Sin número, entidad, fotos ni legado sin_vincular.';

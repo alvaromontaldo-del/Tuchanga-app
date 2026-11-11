@@ -31,7 +31,7 @@ import { AntecedentesPenalesBadge } from '../../components/profile/AntecedentesP
 import { MatriculaVerificadaBadge } from '../../components/profile/MatriculaVerificadaBadge';
 import { UrgenciasBadge } from '../../components/search/UrgenciasBadge';
 import { StarRating } from '../../components/profile/StarRating';
-import { profileTrustLegends } from '../../utils/feedTrust';
+import { profileMatriculaLabels } from '../../utils/feedTrust';
 import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 import { urgenciasBadgeView } from '../../utils/urgencias';
 import { canShowWorkerReputation } from '../../utils/workerReputation';
@@ -401,7 +401,10 @@ export function WorkerProfileScreen({ route, navigation }: Props) {
           </View>
         ) : null}
         {worker.antecedentesPenales ? <AntecedentesPenalesBadge /> : null}
-        {profileTrustLegends(false, worker.matriculasVerificadas ?? []).map((label) => (
+        {profileMatriculaLabels({
+          matriculaVerificada: worker.matriculaVerificada,
+          oficios: worker.matriculasVerificadas,
+        }).map((label) => (
           <MatriculaVerificadaBadge key={label} label={label} />
         ))}
         {worker.introVideoUrl ? <IntroVideoPlayer uri={worker.introVideoUrl} /> : null}

@@ -4,6 +4,7 @@ import {
   feedPostTrustFromRpc,
   feedTrustIcons,
   parseWorkerPublicTrustRows,
+  profileMatriculaLabels,
   profileTrustLegends,
 } from './feedTrust';
 
@@ -97,9 +98,10 @@ describe('cadena dato → ícono (#214)', () => {
 
     const profile = readFileSync('src/screens/home/WorkerProfileScreen.tsx', 'utf8');
     expect(profile).toContain('<AntecedentesPenalesBadge />');
-    expect(profile).toContain('profileTrustLegends(false, worker.matriculasVerificadas ?? [])');
+    expect(profile).toContain('profileMatriculaLabels({');
+    expect(profile).toContain('matriculaVerificada: worker.matriculaVerificada');
+    expect(profile).toContain('oficios: worker.matriculasVerificadas');
     expect(profile).toContain('<MatriculaVerificadaBadge key={label} label={label} />');
-    expect(profile).not.toContain('worker.matriculaVerificada ? <MatriculaVerificadaBadge />');
 
     const sql = readFileSync('supabase/20261111_card_214_trust_seals.sql', 'utf8');
     expect(sql).toContain('worker_public_trust');
@@ -108,7 +110,36 @@ describe('cadena dato → ícono (#214)', () => {
     expect(sql).not.toMatch(/\bnumero\b/);
     expect(sql).not.toMatch(/storage_path/);
     expect(sql).toContain(
-      'GRANT EXECUTE ON FUNCTION public.worker_public_trust(uuid[]) TO anon, authenticated, service_role',
+      'REVOKE ALL ON FUNCTION public.worker_public_trust(uuid[]) FROM PUBLIC, anon, authenticated',
     );
+    expect(sql).toContain(
+      'GRANT EXECUTE ON FUNCTION public.worker_public_trust(uuid[]) TO authenticated, service_role',
+    );
+    expect(sql).not.toMatch(/worker_public_trust\(uuid\[\]\)\s+TO\s+anon/);
+    expect(sql).not.toMatch(/anon puede ejecutar/i);
+  });
+
+  it('sin oficios y con el boolean público muestra el tilde genérico', () => {
+    expect(
+      profileMatriculaLabels({ matriculaVerificada: true, oficios: [] }),
+    ).toEqual(['Matrícula verificada']);
+    expect(
+      profileMatriculaLabels({ matriculaVerificada: true, oficios: null }),
+    ).toEqual(['Matrícula verificada']);
+    expect(
+      profileMatriculaLabels({ matriculaVerificada: true, oficios: undefined }),
+    ).toEqual(['Matrícula verificada']);
+    expect(
+      profileMatriculaLabels({ matriculaVerificada: true, oficios: ['sin_vincular'] }),
+    ).toEqual(['Matrícula verificada']);
+    expect(
+      profileMatriculaLabels({ matriculaVerificada: true, oficios: ['gas', 'sin_vincular'] }),
+    ).toEqual(['Matrícula de gas verificada']);
+    expect(
+      profileMatriculaLabels({ matriculaVerificada: false, oficios: [] }),
+    ).toEqual([]);
+    expect(profileMatriculaLabels({ matriculaVerificada: false, oficios: ['plomeria'] })).toEqual([
+      'Matrícula de plomería verificada',
+    ]);
   });
 });

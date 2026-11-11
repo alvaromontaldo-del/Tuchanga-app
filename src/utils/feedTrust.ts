@@ -45,6 +45,25 @@ export function profileTrustLegends(antecedentes: boolean, oficios: readonly unk
   return lines;
 }
 
+/** Tilde genérico cuando el perfil público dice matrícula y no hay oficios. */
+export const MATRICULA_VERIFICADA_LABEL = 'Matrícula verificada';
+
+/**
+ * Leyendas de matrícula del perfil.
+ * Con oficios de `worker_public_trust`, una por oficio.
+ * Sin oficios (visitante, error o lista vacía) y con el boolean de
+ * `get_public_worker_profile`, el tilde genérico de antes.
+ */
+export function profileMatriculaLabels(input: {
+  matriculaVerificada?: boolean | null;
+  oficios?: readonly unknown[] | null;
+}): string[] {
+  const specific = profileTrustLegends(false, input.oficios ?? []);
+  if (specific.length > 0) return specific;
+  if (input.matriculaVerificada === true) return [MATRICULA_VERIFICADA_LABEL];
+  return [];
+}
+
 export function parseFeedOficioCodes(raw: unknown): MatriculaOficioCodigo[] {
   let items: unknown[] = [];
   if (Array.isArray(raw)) {
