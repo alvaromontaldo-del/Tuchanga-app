@@ -102,17 +102,21 @@ describe('mapPublicWorkerRpcPayload', () => {
     expect(JSON.stringify(profile)).not.toContain('apellido');
   });
 
-  it('el tilde es solo un booleano y no copia el archivo ni el dni', () => {
+  it('el sello sale de los oficios y no copia el archivo ni el dni', () => {
     const raw = rpcPayload();
     (raw.profile as { antecedentes_penales?: boolean }).antecedentes_penales = true;
     (raw.profile as { matricula_verificada?: boolean }).matricula_verificada = true;
+    (raw.profile as { matriculas_verificadas?: string[] }).matriculas_verificadas = [
+      'sin_vincular',
+    ];
     (raw.profile as { storage_path?: string }).storage_path = 'secreto/certificado.pdf';
     (raw.profile as { numero?: string }).numero = 'MAT-9981';
     (raw.profile as { entidad?: string }).entidad = 'Ente secreto';
     (raw.profile as { dni?: string }).dni = '30111222';
     const profile = mapPublicWorkerRpcPayload(raw);
     expect(profile?.antecedentesPenales).toBe(true);
-    expect(profile?.matriculaVerificada).toBe(true);
+    expect(profile?.matriculaVerificada).toBe(false);
+    expect(profile?.matriculasVerificadas).toEqual([]);
     expect(profile?.firstName).toBe('Alvaro');
     const dumped = JSON.stringify(profile);
     expect(dumped).not.toContain('secreto/certificado.pdf');
@@ -120,6 +124,23 @@ describe('mapPublicWorkerRpcPayload', () => {
     expect(dumped).not.toContain('Ente secreto');
     expect(dumped).not.toContain('30111222');
     expect(dumped).not.toContain('NoDebeVerse');
+  });
+
+  it('un booleano true sin oficios no es matrícula verificada', () => {
+    const raw = rpcPayload();
+    (raw.profile as { matricula_verificada?: boolean }).matricula_verificada = true;
+    const profile = mapPublicWorkerRpcPayload(raw);
+    expect(profile?.matriculaVerificada).toBe(false);
+    expect(profile?.matriculasVerificadas).toEqual([]);
+  });
+
+  it('guarda gas y fumigación y descarta el legado', () => {
+    const raw = rpcPayload();
+    (raw.profile as { matriculas_verificadas?: string }).matriculas_verificadas =
+      '{fumigacion,sin_vincular,gas}';
+    const profile = mapPublicWorkerRpcPayload(raw);
+    expect(profile?.matriculasVerificadas).toEqual(['gas', 'fumigacion']);
+    expect(profile?.matriculaVerificada).toBe(true);
   });
 
   it('acepta el JSON en string y descarta una inicial de apellido colgada', () => {
@@ -214,6 +235,55 @@ describe('fetchWorkerPublicProfileFromSupabase', () => {
     expect(profile?.introVideoUrl).toBeNull();
     expect(profile?.atiendeUrgencias).toBe(false);
     expect(profile?.trades.every((t) => !t.photoUrls)).toBe(true);
+  });
+
+  it('sin la función de confianza usa los oficios del perfil público', async () => {
+    side.rpc.mockImplementation(async (name: string) => {
+      if (name === 'get_public_worker_profile') {
+        const raw = rpcPayload();
+        (raw.profile as { matricula_verificada?: boolean }).matricula_verificada = true;
+        (raw.profile as { matriculas_verificadas?: string }).matriculas_verificadas =
+          '{gas,fumigacion,sin_vincular}';
+        return { data: raw, error: null };
+      }
+      if (name === 'worker_public_trust') {
+        return { data: null, error: { message: 'permission denied for function worker_public_trust' } };
+      }
+      return { data: [], error: null };
+    });
+
+    const profile = await fetchWorkerPublicProfileFromSupabase(WORKER_ID);
+    expect(profile?.matriculasVerificadas).toEqual(['gas', 'fumigacion']);
+    expect(profile?.matriculaVerificada).toBe(true);
+  });
+
+  it('la confianza autenticada no deja el tilde del legado', async () => {
+    side.rpc.mockImplementation(async (name: string) => {
+      if (name === 'get_public_worker_profile') {
+        const raw = rpcPayload();
+        (raw.profile as { matricula_verificada?: boolean }).matricula_verificada = true;
+        (raw.profile as { antecedentes_penales?: boolean }).antecedentes_penales = false;
+        return { data: raw, error: null };
+      }
+      if (name === 'worker_public_trust') {
+        return {
+          data: [
+            {
+              profile_id: WORKER_ID,
+              antecedentes_penales: true,
+              matriculas_verificadas: ['sin_vincular'],
+            },
+          ],
+          error: null,
+        };
+      }
+      return { data: [], error: null };
+    });
+
+    const profile = await fetchWorkerPublicProfileFromSupabase(WORKER_ID);
+    expect(profile?.antecedentesPenales).toBe(true);
+    expect(profile?.matriculasVerificadas).toEqual([]);
+    expect(profile?.matriculaVerificada).toBe(false);
   });
 
   it('la fecha propia que falla no borra el perfil', async () => {

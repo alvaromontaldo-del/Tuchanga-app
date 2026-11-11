@@ -234,7 +234,8 @@ describe('matrícula verificada', () => {
     expect(badge).toContain('Matrícula verificada');
 
     const profile = read('src/screens/home/WorkerProfileScreen.tsx');
-    expect(profile).toContain('MatriculaVerificadaBadge');
+    expect(profile).toContain('OficioMatriculaBadge');
+    expect(profile).not.toContain('MatriculaVerificadaBadge');
     expect(profile).not.toMatch(/apellido/);
 
     const search = read('src/services/searchWorkersSupabase.ts');

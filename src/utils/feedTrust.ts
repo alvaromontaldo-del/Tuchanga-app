@@ -45,40 +45,34 @@ export function profileTrustLegends(antecedentes: boolean, oficios: readonly unk
   return lines;
 }
 
-/** Tilde genérico cuando el perfil público dice matrícula y no hay oficios. */
-export const MATRICULA_VERIFICADA_LABEL = 'Matrícula verificada';
-
 /**
- * Leyendas de matrícula del perfil.
- * Con oficios de `worker_public_trust`, una por oficio.
- * Sin oficios (visitante, error o lista vacía) y con el boolean de
- * `get_public_worker_profile`, el tilde genérico de antes.
+ * Leyendas de matrícula del perfil, una por oficio con sello.
+ * El booleano viejo no alcanza: un legado `sin_vincular` no es un sello,
+ * aunque `matricula_verificada` venga en true.
  */
 export type ProfileMatriculaEntry = {
   label: string;
-  /** null = tilde genérico, sin oficio. */
+  /** Oficio del sello. Ya no hay tilde genérico. */
   code: MatriculaOficioCodigo | null;
 };
 
 /**
  * Leyendas de matrícula del perfil, con el oficio del sello.
- * Sin oficios y con el boolean público, el tilde genérico (code null).
+ * El booleano se ignora: un legado sin oficio no es un sello.
  */
 export function profileMatriculaEntries(input: {
   matriculaVerificada?: boolean | null;
   oficios?: readonly unknown[] | null;
 }): ProfileMatriculaEntry[] {
+  void input.matriculaVerificada;
   const specific = feedTrustIcons(false, input.oficios ?? []).filter(
     (icon): icon is MatriculaOficioCodigo => icon !== 'antecedentes',
   );
-  if (specific.length > 0) {
-    return specific.map((code) => ({ code, label: OFICIO_LEGEND[code] }));
-  }
-  if (input.matriculaVerificada === true) return [{ code: null, label: MATRICULA_VERIFICADA_LABEL }];
-  return [];
+  return specific.map((code) => ({ code, label: OFICIO_LEGEND[code] }));
 }
 
 export function profileMatriculaLabels(input: {
+  /** Ignorado a propósito. No afirma una matrícula sin oficio. */
   matriculaVerificada?: boolean | null;
   oficios?: readonly unknown[] | null;
 }): string[] {

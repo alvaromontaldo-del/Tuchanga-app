@@ -83,7 +83,8 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
       coverageKm: Math.max(1, Math.floor(Number(r.coverage_km) || 1)),
       atiendeUrgencias: readAtiendeUrgencias(r.atiende_urgencias),
       antecedentesPenales: r.antecedentes_penales === true,
-      matriculaVerificada: r.matricula_verificada === true,
+      // El booleano de la RPC también cuenta el legado sin_vincular. El sello no.
+      matriculaVerificada: false,
       matriculasVerificadas: [],
     };
 
@@ -109,7 +110,11 @@ export async function fetchSearchWorkerHitsFromSupabase(params: {
         ...h.worker,
         ...(totalJobsDone == null ? {} : { totalJobsDone }),
         ...(seal
-          ? { antecedentesPenales: seal.antecedentes, matriculasVerificadas: seal.oficios }
+          ? {
+              antecedentesPenales: seal.antecedentes,
+              matriculasVerificadas: seal.oficios,
+              matriculaVerificada: seal.oficios.length > 0,
+            }
           : {}),
       },
     };

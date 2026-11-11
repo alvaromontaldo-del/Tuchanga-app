@@ -133,6 +133,9 @@ export function mapPublicWorkerRpcPayload(raw: unknown): WorkerPublicProfile | n
   const professionalDesc = String(profile.descripcion ?? '').trim();
   const firstName = professionalDisplayNameForClient(String(profile.nombre ?? ''));
   const avatar = String(profile.avatar ?? '').trim();
+  const matriculasVerificadas = feedPostTrustFromRpc({
+    worker_matriculas_verificadas: profile.matriculas_verificadas,
+  }).workerMatriculasVerificadas;
 
   return {
     id,
@@ -148,10 +151,8 @@ export function mapPublicWorkerRpcPayload(raw: unknown): WorkerPublicProfile | n
     totalJobsDone: completedJobsFromPayload(profile, 'total_jobs_done') ?? 0,
     trades,
     antecedentesPenales: profile.antecedentes_penales === true,
-    matriculaVerificada: profile.matricula_verificada === true,
-    matriculasVerificadas: feedPostTrustFromRpc({
-      worker_matriculas_verificadas: profile.matriculas_verificadas,
-    }).workerMatriculasVerificadas,
+    matriculaVerificada: matriculasVerificadas.length > 0,
+    matriculasVerificadas,
   };
 }
 
@@ -240,7 +241,11 @@ export async function fetchWorkerPublicProfileFromSupabase(
     birthDate: birthDate || undefined,
     atiendeUrgencias,
     ...(seal
-      ? { antecedentesPenales: seal.antecedentes, matriculasVerificadas: seal.oficios }
+      ? {
+          antecedentesPenales: seal.antecedentes,
+          matriculasVerificadas: seal.oficios,
+          matriculaVerificada: seal.oficios.length > 0,
+        }
       : {}),
   };
 }

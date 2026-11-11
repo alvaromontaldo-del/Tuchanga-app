@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   feedPostTrustFromRpc,
   feedTrustIcons,
+  parseFeedOficioCodes,
   parseWorkerPublicTrustRows,
   profileMatriculaLabels,
   profileTrustLegends,
@@ -98,10 +99,11 @@ describe('cadena dato → ícono (#214)', () => {
 
     const profile = readFileSync('src/screens/home/WorkerProfileScreen.tsx', 'utf8');
     expect(profile).toContain('<AntecedentesPenalesBadge />');
-    expect(profile).toContain('profileMatriculaEntries({');
-    expect(profile).toContain('matriculaVerificada: worker.matriculaVerificada');
-    expect(profile).toContain('oficios: worker.matriculasVerificadas');
-    expect(profile).toContain('<MatriculaVerificadaBadge key={entry.label} label={entry.label} code={entry.code} />');
+    expect(profile).toContain('parseFeedOficioCodes(worker.matriculasVerificadas)');
+    expect(profile).toContain('<OficioMatriculaBadge');
+    expect(profile).not.toContain('MatriculaVerificadaBadge');
+    expect(profile).not.toContain('matriculaVerificada: worker.matriculaVerificada');
+    expect(profile).not.toContain('name="ribbon"');
 
     const sql = readFileSync('supabase/20261111_card_214_trust_seals.sql', 'utf8');
     expect(sql).toContain('worker_public_trust');
@@ -119,27 +121,69 @@ describe('cadena dato → ícono (#214)', () => {
     expect(sql).not.toMatch(/anon puede ejecutar/i);
   });
 
-  it('sin oficios y con el boolean público muestra el tilde genérico', () => {
-    expect(
-      profileMatriculaLabels({ matriculaVerificada: true, oficios: [] }),
-    ).toEqual(['Matrícula verificada']);
-    expect(
-      profileMatriculaLabels({ matriculaVerificada: true, oficios: null }),
-    ).toEqual(['Matrícula verificada']);
-    expect(
-      profileMatriculaLabels({ matriculaVerificada: true, oficios: undefined }),
-    ).toEqual(['Matrícula verificada']);
-    expect(
-      profileMatriculaLabels({ matriculaVerificada: true, oficios: ['sin_vincular'] }),
-    ).toEqual(['Matrícula verificada']);
+  it('el booleano viejo no inventa un sello y el legado no entra en feed, búsqueda ni perfil', () => {
+    const cases: Array<{ antecedentes: boolean; oficios: string[] }> = [
+      { antecedentes: true, oficios: ['sin_vincular'] },
+      { antecedentes: true, oficios: ['gas', 'sin_vincular', 'fumigacion'] },
+      { antecedentes: false, oficios: [] },
+      { antecedentes: false, oficios: ['electricidad', 'pendiente'] },
+    ];
+    for (const row of cases) {
+      const feed = feedTrustIcons(row.antecedentes, row.oficios);
+      const search = feedTrustIcons(row.antecedentes, row.oficios);
+      const profileCodes = parseFeedOficioCodes(row.oficios);
+      expect(search).toEqual(feed);
+      expect(feed.filter((icon) => icon !== 'antecedentes')).toEqual(profileCodes);
+      expect(
+        profileMatriculaLabels({ matriculaVerificada: true, oficios: row.oficios }),
+      ).toEqual(profileTrustLegends(false, row.oficios));
+    }
+
+    expect(profileMatriculaLabels({ matriculaVerificada: true, oficios: [] })).toEqual([]);
+    expect(profileMatriculaLabels({ matriculaVerificada: true, oficios: null })).toEqual([]);
+    expect(profileMatriculaLabels({ matriculaVerificada: true, oficios: undefined })).toEqual([]);
+    expect(profileMatriculaLabels({ matriculaVerificada: true, oficios: ['sin_vincular'] })).toEqual(
+      [],
+    );
+    expect(feedTrustIcons(true, ['sin_vincular'])).toEqual(['antecedentes']);
     expect(
       profileMatriculaLabels({ matriculaVerificada: true, oficios: ['gas', 'sin_vincular'] }),
     ).toEqual(['Matrícula de gas verificada']);
-    expect(
-      profileMatriculaLabels({ matriculaVerificada: false, oficios: [] }),
-    ).toEqual([]);
     expect(profileMatriculaLabels({ matriculaVerificada: false, oficios: ['plomeria'] })).toEqual([
       'Matrícula de plomería verificada',
     ]);
+
+    const seals = readFileSync('src/utils/oficioMatriculaSeals.ts', 'utf8');
+    expect(seals).toContain("icon: 'flame'");
+    expect(seals).toContain('#8C6A3D');
+    expect(seals).toContain("icon: 'flash'");
+    expect(seals).toContain('#8E0000');
+    expect(seals).toContain("icon: 'water'");
+    expect(seals).toContain('#1F4E5F');
+    expect(seals).toContain("icon: 'leaf'");
+    expect(seals).toContain('#3F5C45');
+    expect(seals).toContain('Matrícula de gas verificada');
+    const icon = readFileSync('src/components/profile/OficioMatriculaIcon.tsx', 'utf8');
+    expect(icon).toContain('oficioMatriculaSeal(');
+    expect(icon).not.toContain('<Text');
+    const badge = readFileSync('src/components/profile/OficioMatriculaBadge.tsx', 'utf8');
+    expect(badge).toContain('function OficioMatriculaBadge');
+    expect(badge).toContain('oficioMatriculaSeal');
+    expect(badge).toContain('<OficioMatriculaIcon');
+    expect(badge).not.toContain('name="ribbon"');
+    expect(badge).not.toContain('Matrícula verificada');
+
+    const sql = readFileSync('supabase/20261111_card_214_r3_perfil_oficios.sql', 'utf8');
+    expect(sql).toContain('matriculas_verificadas');
+    expect(sql).toContain('_matriculas_oficios_verificados');
+    expect(sql).toContain(
+      'GRANT EXECUTE ON FUNCTION public.get_public_worker_profile(uuid) TO anon, authenticated, service_role',
+    );
+    expect(sql).not.toMatch(/worker_public_trust/);
+    expect(sql).not.toMatch(/GRANT EXECUTE ON FUNCTION public\.(?!get_public_worker_profile)/);
+    expect(sql).not.toMatch(/\bnumero\b/);
+    expect(sql).not.toMatch(/\bentidad\b/);
+    expect(sql).not.toMatch(/storage_path/);
+    expect(sql).not.toMatch(/apellido/);
   });
 });
