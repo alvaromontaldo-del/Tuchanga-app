@@ -35,7 +35,9 @@ describe('sello de matrícula por oficio', () => {
     expect(antecedentes).not.toContain('checkmark-circle');
     expect(feed).toContain('<OficioMatriculaIcon');
     expect(search).toContain('<OficioMatriculaIcon');
-    expect(profile).toContain('code={entry.code}');
+    expect(profile).toContain('parseFeedOficioCodes(worker.matriculasVerificadas)');
+    expect(profile).toContain('<OficioMatriculaBadge');
+    expect(profile).not.toContain('MatriculaVerificadaBadge');
     expect(OFICIO_MATRICULA_SEALS.gas.icon).toBe('flame');
     expect(OFICIO_MATRICULA_SEALS.electricidad.icon).toBe('flash');
     expect(OFICIO_MATRICULA_SEALS.plomeria.icon).toBe('water');
