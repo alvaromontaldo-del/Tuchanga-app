@@ -8,7 +8,7 @@ import {
   validateWorkerProfileTexts,
 } from './contactModeration';
 import { mapContentModerationError } from './contentModerationErrors';
-import { OFFPLATFORM_NOTICE, redactOffplatformContact } from './offplatformContact';
+import { OFFPLATFORM_NOTICE, OFFPLATFORM_PROFILE_NOTICE, redactOffplatformContact } from './offplatformContact';
 
 const POLICY = OFFPLATFORM_NOTICE;
 
@@ -97,13 +97,32 @@ describe('el envío no se rechaza: el dato se reemplaza', () => {
     ).toBeNull();
   });
 
-  it('no marca descripciones de perfil (#85)', () => {
+  it('en el perfil rechaza un teléfono o un contactame, sin tapar con •••', () => {
     const result = validateWorkerProfileTexts('Electricista, cel 1133445566', [
       'Cinta aisladora y cable de 2.5',
     ]);
-    expect(result.hasViolation).toBe(false);
-    expect(result.professional.blocked).toBe(false);
+    expect(result.hasViolation).toBe(true);
+    expect(result.professional.blocked).toBe(true);
+    expect(result.professional.message).toBe(OFFPLATFORM_PROFILE_NOTICE);
+    expect(result.professional.message).not.toContain('•••');
     expect(result.tradeDescriptions.every((r) => !r.blocked)).toBe(true);
+
+    const oficio = validateWorkerProfileTexts('Electricista con experiencia en tableros', [
+      'Contáctame al +5493364312302',
+    ]);
+    expect(oficio.hasViolation).toBe(true);
+    expect(oficio.tradeDescriptions[0].blocked).toBe(true);
+
+    const pedido = validateWorkerProfileTexts('Contactame a este número', [
+      'Revoque fino y grueso, colocación de pisos.',
+    ]);
+    expect(pedido.hasViolation).toBe(true);
+    expect(pedido.professional.blocked).toBe(true);
+
+    const ok = validateWorkerProfileTexts('Soy alto albañil. Contrata con confianza.', [
+      'Revoque fino y grueso, colocación de pisos.',
+    ]);
+    expect(ok.hasViolation).toBe(false);
   });
 
   it('traduce el rechazo del chat y no el de otros formularios', () => {

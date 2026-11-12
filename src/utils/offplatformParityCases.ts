@@ -48,4 +48,7 @@ export const OFFPLATFORM_PARITY_CASES = [
   'llamame al 343.332.112',
   'llamame al 341.3434-once2',
   'te cobro 15.000',
+  'contactame',
+  'Contáctame al +5493364312302',
+  'Contactame a 3364312302',
 ] as const;

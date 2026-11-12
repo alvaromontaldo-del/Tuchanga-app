@@ -120,6 +120,17 @@ describe('antipuenteo: tapa el dato y la palabra, y el mensaje sigue', () => {
     expect(result.changed, text).toBe(true);
     expect(result.notice, text).toBe(OFFPLATFORM_NOTICE);
   });
+
+  it.each([
+    ['contactame', '•••'],
+    ['Contáctame al +5493364312302', '••• al •••'],
+    ['Contactame a 3364312302', '••• a •••'],
+  ])('tapa contactame en «%s»', (text, expected) => {
+    const result = redactOffplatformContact(text);
+    expect(result.text, text).toBe(expected);
+    expect(result.changed, text).toBe(true);
+    expect(result.kinds, text).toContain('canal');
+  });
 });
 
 describe('mensajes que se colaron en el chat', () => {
@@ -338,6 +349,9 @@ describe('paridad con el SQL', () => {
       '••• al •••',
       '••• al •••',
       'te cobro 15.000',
+      '•••',
+      '••• al •••',
+      '••• a •••',
     ]);
   });
 });

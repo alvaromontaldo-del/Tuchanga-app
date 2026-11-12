@@ -1,7 +1,13 @@
-/** Errores de Supabase al guardar texto libre. Ya no traduce rechazos anti-contacto. */
+import { OFFPLATFORM_PROFILE_NOTICE } from './offplatformContact';
+
+/** Errores de Supabase al guardar texto libre. */
 export function mapContentModerationError(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e ?? '');
   const m = raw.toLowerCase();
+
+  if (m.includes('profile_contact_forbidden')) {
+    return OFFPLATFORM_PROFILE_NOTICE;
+  }
 
   if (
     m.includes('message_blocked_contact') ||

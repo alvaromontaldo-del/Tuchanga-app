@@ -27,6 +27,7 @@ import {
 import { isSupabaseConfigured } from '../../config/supabase';
 import { createPostInSupabase } from '../../services/supabasePosts';
 import { mapContentModerationError } from '../../utils/contentModerationErrors';
+import { OFFPLATFORM_PROFILE_NOTICE, redactOffplatformContact } from '../../utils/offplatformContact';
 import { professionalDisplayNameForClient } from '../../utils/professionalDisplayName';
 
 type Props = FeedStackScreenProps<'PublishPost'>;
@@ -72,6 +73,10 @@ export function PublishPostScreen({ navigation }: Props) {
     }
     if (trimmed.length > MAX_DESC) {
       toast.warning(`La descripción no puede superar ${MAX_DESC} caracteres.`, 'Descripción');
+      return;
+    }
+    if (redactOffplatformContact(trimmed).changed) {
+      toast.warning(OFFPLATFORM_PROFILE_NOTICE, 'El contacto va por la app');
       return;
     }
 

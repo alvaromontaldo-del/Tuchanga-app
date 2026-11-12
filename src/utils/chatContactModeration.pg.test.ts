@@ -22,6 +22,10 @@ const ANTIPUENTEO_LLAMAME = readFileSync(
   resolve(process.cwd(), 'supabase/20261026_antipuenteo_llamame.sql'),
   'utf8',
 );
+const ANTIPUENTEO_PERFIL = readFileSync(
+  resolve(process.cwd(), 'supabase/20261112_antipuenteo_perfil_trabajador.sql'),
+  'utf8',
+);
 
 const CLIENT = '11111111-1111-4111-8111-111111111111';
 const WORKER = '22222222-2222-4222-8222-222222222222';
@@ -261,6 +265,23 @@ describe.skipIf(!postgresAvailable())('moderación de chat y bucket privado', ()
     psqlScript(ANTIPUENTEO);
     psqlScript(ANTIPUENTEO_PALABRAS);
     psqlScript(ANTIPUENTEO_LLAMAME);
+    psqlScript(`
+      ALTER TABLE public.profiles
+        ADD COLUMN IF NOT EXISTS professional_description text,
+        ADD COLUMN IF NOT EXISTS professional_description_backup text,
+        ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
+      CREATE TABLE IF NOT EXISTS public.jobs (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        descripcion text
+      );
+
+      CREATE TABLE IF NOT EXISTS public.posts (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        description text
+      );
+    `);
+    psqlScript(ANTIPUENTEO_PERFIL);
     psql(`
       INSERT INTO public.conversations (id, cliente_id, trabajador_id)
       VALUES ('${CONV}', '${CLIENT}', '${WORKER}');

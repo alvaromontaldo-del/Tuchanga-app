@@ -53,6 +53,8 @@ import {
   toggleAtiendeUrgencias,
 } from '../../utils/urgencias';
 import { matriculaCardMode } from '../../utils/matriculaVerificada';
+import { mapContentModerationError } from '../../utils/contentModerationErrors';
+import { OFFPLATFORM_PROFILE_NOTICE, redactOffplatformContact } from '../../utils/offplatformContact';
 import type { AuthUser } from '../../services/auth';
 
 type Props = AccountStackScreenProps<'WorkerABM'>;
@@ -151,7 +153,14 @@ function validateDetailed(
         msg: 'Entre 1 y 50 años (o dejalo vacío).',
       });
     }
-    if (t.description.trim().length < 10) {
+    const tradeText = t.description.trim();
+    if (redactOffplatformContact(tradeText).changed) {
+      issues.push({
+        field: `trade_${i}_description`,
+        scroll: `trade_${i}`,
+        msg: OFFPLATFORM_PROFILE_NOTICE,
+      });
+    } else if (tradeText.length < 10) {
       issues.push({
         field: `trade_${i}_description`,
         scroll: `trade_${i}`,
@@ -177,7 +186,14 @@ function validateDetailed(
     });
   }
 
-  if (professionalDescription.trim().length < 20) {
+  const profText = professionalDescription.trim();
+  if (redactOffplatformContact(profText).changed) {
+    issues.push({
+      field: 'professionalDescription',
+      scroll: 'professional',
+      msg: OFFPLATFORM_PROFILE_NOTICE,
+    });
+  } else if (profText.length < 20) {
     issues.push({
       field: 'professionalDescription',
       scroll: 'professional',
@@ -401,11 +417,14 @@ export function WorkerABMScreen({ navigation }: Props) {
       setFieldErrors(errors);
       setDeleteBanner('');
       const firstMsg = Object.values(errors)[0];
+      const isContact = firstMsg === OFFPLATFORM_PROFILE_NOTICE;
       toast.warning(
         firstMsg
-          ? `Hay campos incompletos o inválidos.\n\n${firstMsg}`
+          ? isContact
+            ? firstMsg
+            : `Hay campos incompletos o inválidos.\n\n${firstMsg}`
           : 'Hay campos incompletos o inválidos. Revisá los marcados en rojo.',
-        'Revisá tu perfil',
+        isContact ? 'El contacto va por la app' : 'Revisá tu perfil',
         { durationMs: 4200 },
       );
       scrollToKey(firstKey);
@@ -520,11 +539,13 @@ export function WorkerABMScreen({ navigation }: Props) {
           }
         } catch (e) {
           profileSyncFailed = true;
+          const mapped = mapContentModerationError(e);
+          const isContact = mapped === OFFPLATFORM_PROFILE_NOTICE;
           toast.warning(
-            `Guardamos en el dispositivo, pero no se pudo sincronizar el perfil profesional en el servidor.\n\n${
-              e instanceof Error ? e.message : 'Error desconocido.'
-            }\n\nRevisá la conexión o ejecutá las migraciones SQL (ubicación/radio y jobs) en Supabase.`,
-            'Sincronización',
+            isContact
+              ? mapped
+              : `Guardamos en el dispositivo, pero no se pudo sincronizar el perfil profesional en el servidor.\n\n${mapped}\n\nRevisá la conexión o ejecutá las migraciones SQL (ubicación/radio y jobs) en Supabase.`,
+            isContact ? 'El contacto va por la app' : 'Sincronización',
             { durationMs: 5200 },
           );
         }
