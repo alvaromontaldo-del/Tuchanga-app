@@ -35,6 +35,7 @@ import { openOrCreateChat } from '../../services/messaging';
 import { deletePostInSupabase, hidePostInSupabase } from '../../services/supabasePosts';
 import { fetchActiveTradeNamesFromSupabase } from '../../services/workerTradesSupabase';
 import { SearchHeaderBar } from '../../components/search/SearchHeaderBar';
+import { NotificationBellButton } from '../../components/notifications/NotificationBellButton';
 
 type Nav = NativeStackNavigationProp<FeedStackParamList>;
 type HomeRoute = RouteProp<FeedStackParamList, 'Home'>;
@@ -220,6 +221,11 @@ export function HomeScreen() {
           showLogo
           selectedLabel={selectedCategories[0] ?? null}
           onClearSelected={() => setSelectedCategories([])}
+          rightAction={
+            user ? (
+              <NotificationBellButton onPress={() => navigation.navigate('AppNotifications')} />
+            ) : null
+          }
         />
       </Animated.View>
 

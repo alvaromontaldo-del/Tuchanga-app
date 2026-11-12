@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Keyboard,
   StyleSheet,
@@ -38,6 +38,8 @@ type Props = {
   onClearSelected?: () => void;
   /** Chip opcional de la búsqueda de profesionales. Home no lo usa. */
   urgenciasFilter?: { active: boolean; onToggle: () => void } | null;
+  /** Acciones a la derecha del logo, p. ej. la campanita del inicio. */
+  rightAction?: ReactNode;
 };
 
 export function SearchHeaderBar({
@@ -55,6 +57,7 @@ export function SearchHeaderBar({
   onPressLauncher,
   onClearSelected,
   urgenciasFilter,
+  rightAction,
 }: Props) {
   const insets = useSafeAreaInsets();
   const inputRef = useRef<TextInput | null>(null);
@@ -83,8 +86,9 @@ export function SearchHeaderBar({
       pointerEvents="box-none"
     >
       {showLogo ? (
-        <View style={styles.logoRow}>
+        <View style={[styles.logoRow, rightAction ? styles.logoRowWithAction : null]}>
           <BrandLogoHorizontal variant="hero" maxWidth={200} />
+          {rightAction}
         </View>
       ) : null}
 
@@ -225,6 +229,12 @@ const styles = StyleSheet.create({
   logoRow: {
     alignItems: 'flex-start',
     marginBottom: spacing.sm,
+  },
+  logoRowWithAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
   },
   searchShell: {
     width: '100%',

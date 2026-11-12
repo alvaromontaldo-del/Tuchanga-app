@@ -15,6 +15,6 @@ export function matriculaRechazoPushBody(input: {
   const eventKey = String(input.eventKey ?? "").trim();
   const foto =
     kind === "foto" || (kind !== "matricula" && FOTO_EVENT.test(eventKey));
-  if (foto) return `Algunas fotos de la verificación de la matrícula fueron rechazadas por el motivo: ${motivo}`;
-  return `Tu matricula fue rechazada por ${motivo}`;
+  if (foto) return `Algunas fotos de la verificación de la matrícula fueron rechazadas por el siguiente motivo: ${motivo}`;
+  return `Tu matricula fue rechazada por el siguiente motivo: ${motivo}`;
 }

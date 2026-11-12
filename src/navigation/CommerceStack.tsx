@@ -10,6 +10,7 @@ import { StoreCloseOrderScreen } from '../screens/store/StoreCloseOrderScreen';
 import { CommerceAccountScreen } from '../screens/store/CommerceAccountScreen';
 import { StoreStatsScreen } from '../screens/store/StoreStatsScreen';
 import { FaqScreen } from '../screens/account/FaqScreen';
+import { AppNotificationsScreen } from '../screens/notifications/AppNotificationsScreen';
 import { storeQuoteScreenTitle } from '../utils/storeQuoteDraft';
 import type { CommerceStackParamList } from './mainTypes';
 import {
@@ -89,6 +90,11 @@ export function CommerceStack() {
         name="Faq"
         component={FaqScreen}
         options={{ title: 'Preguntas frecuentes' }}
+      />
+      <Stack.Screen
+        name="AppNotifications"
+        component={AppNotificationsScreen}
+        options={{ title: 'Notificaciones' }}
       />
     </Stack.Navigator>
   );
