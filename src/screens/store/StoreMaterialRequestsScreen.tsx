@@ -20,6 +20,7 @@ import type { CommerceStackParamList } from '../../navigation/mainTypes';
 import { completarOrdenMaterialConPin, formatMoneyAr } from '../../services/clientQuotesSupabase';
 import { listKey } from '../../utils/safeAsync';
 import { StoreSubscriptionCard } from '../../components/store/StoreSubscriptionCard';
+import { NotificationBellButton } from '../../components/notifications/NotificationBellButton';
 import type { StoreBoardCard, StoreBoardColumn } from '../../types/materials';
 import { normalizeOrderCodeInput, PIN_LENGTH } from '../../utils/orderCode';
 import { summarizeRejectedMaterials } from '../../utils/rejectedMaterialItems';
@@ -80,15 +81,18 @@ export function StoreMaterialRequestsScreen({ navigation, route }: Props) {
     navigation.setOptions({
       title: 'Pedidos',
       headerRight: () => (
-        <Pressable
-          onPress={() => navigation.navigate('CommerceAccount')}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel="Mi comercio"
-          style={{ paddingHorizontal: 8 }}
-        >
-          <Ionicons name="person-circle-outline" size={26} color={colors.text} />
-        </Pressable>
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 4 }}>
+          <NotificationBellButton onPress={() => navigation.navigate('AppNotifications')} />
+          <Pressable
+            onPress={() => navigation.navigate('CommerceAccount')}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Mi comercio"
+            style={{ paddingHorizontal: 4 }}
+          >
+            <Ionicons name="person-circle-outline" size={26} color={colors.text} />
+          </Pressable>
+        </View>
       ),
     });
   }, [navigation]);

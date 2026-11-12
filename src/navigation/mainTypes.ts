@@ -30,6 +30,7 @@ export type SelectMaterialStoresParams = {
 export type FeedStackParamList = {
   /** Al re-tocar el tab Inicio: scroll arriba + refresh */
   Home: { scrollToTopToken?: number } | undefined;
+  AppNotifications: undefined;
   SearchWorker: {
     initialQuery?: string;
     initialCategories?: string[];
@@ -141,6 +142,7 @@ export type CommerceStackParamList = {
   CommerceAccount: undefined;
   StoreStats: undefined;
   Faq: undefined;
+  AppNotifications: undefined;
 };
 
 export type MainTabParamList = {

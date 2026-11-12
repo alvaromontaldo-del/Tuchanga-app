@@ -2,6 +2,7 @@ import * as Notifications from 'expo-notifications';
 import { getSupabaseClient } from '../lib/supabase';
 import { navigationRef } from '../navigation/navigationRef';
 import { professionalDisplayNameForClient } from '../utils/professionalDisplayName';
+import { isOfficialStorePushKind } from '../utils/appNotifications';
 import { fetchPeerFullName } from './profileIdentitySupabase';
 
 function waitForNavigation(maxMs = 8000): Promise<boolean> {
@@ -106,6 +107,25 @@ async function handleNotificationResponse(
 
     if (conversationId) {
       await openChatFromPush(conversationId);
+      return;
+    }
+
+    const officialKind =
+      (typeof data.kind === 'string' && data.kind) ||
+      (typeof data.eventType === 'string' && data.eventType) ||
+      (typeof data.type === 'string' && data.type) ||
+      '';
+    if (isOfficialStorePushKind(officialKind) || officialKind === 'professional_aprobado') {
+      const ready = await waitForNavigation();
+      if (!ready) return;
+      if (isOfficialStorePushKind(officialKind)) {
+        navigationRef.navigate('Commerce', { screen: 'AppNotifications' } as never);
+      } else {
+        navigationRef.navigate('Main', {
+          screen: 'Inicio',
+          params: { screen: 'AppNotifications' },
+        } as never);
+      }
       return;
     }
 

@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useNativeStackScreenOptions } from './useNativeStackScreenOptions';
 import { HomeScreen } from '../screens/home/HomeScreen';
+import { AppNotificationsScreen } from '../screens/notifications/AppNotificationsScreen';
 import { PublishPostScreen } from '../screens/home/PublishPostScreen';
 import { PostDetailScreen } from '../screens/home/PostDetailScreen';
 import { SearchWorkerScreen } from '../screens/search/SearchWorkerScreen';
@@ -25,6 +26,11 @@ export function FeedStack() {
         name="Home"
         component={HomeScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="AppNotifications"
+        component={AppNotificationsScreen}
+        options={{ title: 'Notificaciones' }}
       />
       <Stack.Screen
         name="SearchWorker"

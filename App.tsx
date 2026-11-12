@@ -11,6 +11,7 @@ import { AuthProvider } from './src/context/AuthContext';
 import { CommerceShellProvider } from './src/context/CommerceShellContext';
 import { SocketProvider } from './src/context/SocketContext';
 import { UnreadMessagesProvider } from './src/context/UnreadMessagesContext';
+import { AppNotificationsProvider } from './src/context/AppNotificationsContext';
 import { UserModeProvider } from './src/context/UserModeContext';
 import { WorkerProfileProvider } from './src/context/WorkerProfileContext';
 import { FavoritesProvider } from './src/context/FavoritesContext';
@@ -40,11 +41,13 @@ export default function App() {
                 <FavoritesProvider>
                   <UserModeProvider>
                     <UnreadMessagesProvider>
-                      <NavigationContainer ref={navigationRef}>
-                        <SocketProvider>
-                          <RootNavigator />
-                        </SocketProvider>
-                      </NavigationContainer>
+                      <AppNotificationsProvider>
+                        <NavigationContainer ref={navigationRef}>
+                          <SocketProvider>
+                            <RootNavigator />
+                          </SocketProvider>
+                        </NavigationContainer>
+                      </AppNotificationsProvider>
                     </UnreadMessagesProvider>
                     <StatusBar style="dark" />
                   </UserModeProvider>
