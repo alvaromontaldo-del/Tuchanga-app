@@ -13,7 +13,7 @@ describe('push de rechazo de matrícula (#77)', () => {
         eventKey: `matricula:${USER}:${FOTO}:1760000000`,
       }),
     ).toBe(
-      'Algunas fotos de la verificación de la matrícula fueron rechazadas por el motivo: La foto está cortada',
+      'Algunas fotos de la verificación de la matrícula fueron rechazadas por el siguiente motivo: La foto está cortada',
     );
 
     expect(
@@ -23,7 +23,7 @@ describe('push de rechazo de matrícula (#77)', () => {
         eventKey: `matricula:${USER}:gas:1760000000`,
       }),
     ).toBe(
-      'Algunas fotos de la verificación de la matrícula fueron rechazadas por el motivo: No coincide',
+      'Algunas fotos de la verificación de la matrícula fueron rechazadas por el siguiente motivo: No coincide',
     );
 
     expect(
@@ -31,7 +31,7 @@ describe('push de rechazo de matrícula (#77)', () => {
         motivo: 'Número ilegible',
         eventKey: `matricula:${USER}:gas:1760000000`,
       }),
-    ).toBe('Tu matricula fue rechazada por Número ilegible');
+    ).toBe('Tu matricula fue rechazada por el siguiente motivo: Número ilegible');
 
     expect(
       matriculaRechazoPushBody({
@@ -39,14 +39,14 @@ describe('push de rechazo de matrícula (#77)', () => {
         kind: 'matricula',
         eventKey: `matricula:${USER}:${FOTO}:1760000000`,
       }),
-    ).toBe('Tu matricula fue rechazada por Documento vencido');
+    ).toBe('Tu matricula fue rechazada por el siguiente motivo: Documento vencido');
 
     expect(
       matriculaRechazoPushBody({
         motivo: 'Legajo incompleto',
         eventKey: `matricula:${USER}:1760000000`,
       }),
-    ).toBe('Tu matricula fue rechazada por Legajo incompleto');
+    ).toBe('Tu matricula fue rechazada por el siguiente motivo: Legajo incompleto');
   });
 
   it('la edge manda esa frase y el SQL no da EXECUTE a anon', () => {
@@ -60,20 +60,20 @@ describe('push de rechazo de matrícula (#77)', () => {
 
     const shared = readFileSync('supabase/functions/_shared/matriculaRechazoPush.ts', 'utf8');
     expect(shared).toContain(
-      'Algunas fotos de la verificación de la matrícula fueron rechazadas por el motivo: ',
+      'Algunas fotos de la verificación de la matrícula fueron rechazadas por el siguiente motivo: ',
     );
-    expect(shared).toContain('Tu matricula fue rechazada por ');
+    expect(shared).toContain('Tu matricula fue rechazada por el siguiente motivo: ');
     expect(shared).not.toContain('Una foto fue rechazada por el motivo: ');
 
     const antecedentes = readFileSync(
-      'supabase/20261111_card_77_r4_antecedentes_push_texto.sql',
+      'supabase/20261112_card_77_r5_push_texto.sql',
       'utf8',
     );
     expect(antecedentes).toContain(
-      "v_body := 'La verificación de antecedentes penales fue rechazada por ' || v_motivo",
+      "v_body := 'La verificación de antecedentes penales fue rechazada por el siguiente motivo: ' || v_motivo",
     );
     expect(antecedentes).toContain("v_body := v_body || '.'");
-    expect(antecedentes).toContain('antecedentes_rechazo_push_body(p_asunto)');
+    expect(antecedentes).toContain('notify_antecedentes_rechazo y notify_matricula_rechazo no se recrean');
     expect(antecedentes).toContain(
       'REVOKE ALL ON FUNCTION public.antecedentes_rechazo_push_body(text) FROM PUBLIC',
     );
@@ -86,15 +86,11 @@ describe('push de rechazo de matrícula (#77)', () => {
     expect(antecedentes).toContain(
       'REVOKE ALL ON FUNCTION public.antecedentes_rechazo_push_body(text) FROM service_role',
     );
-    expect(antecedentes).toContain(
-      'REVOKE ALL ON FUNCTION public.notify_antecedentes_rechazo(uuid, text, text) FROM PUBLIC, anon, authenticated',
-    );
-    expect(antecedentes).toContain(
-      'GRANT EXECUTE ON FUNCTION public.notify_antecedentes_rechazo(uuid, text, text) TO service_role',
-    );
     expect(antecedentes).not.toMatch(
       /GRANT EXECUTE ON FUNCTION public\.antecedentes_rechazo_push_body\(text\)/,
     );
+    expect(antecedentes).not.toMatch(/CREATE OR REPLACE FUNCTION public\.notify_antecedentes_rechazo/);
+    expect(antecedentes).not.toMatch(/CREATE OR REPLACE FUNCTION public\.notify_matricula_rechazo/);
 
     const sql = readFileSync('supabase/20261111_card_77_push_rechazo.sql', 'utf8');
     expect(sql).toContain('notify_matricula_rechazo');
