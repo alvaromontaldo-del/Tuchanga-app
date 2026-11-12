@@ -3,7 +3,7 @@
  *
  * El dato de contacto se reemplaza por «•••» y el mensaje se envía igual.
  * Desde el 15/10 también se tapa la palabra que pide ese dato
- * (dirección, teléfono, mail, whatsapp, ig y las de la lista), con el
+ * (dirección, teléfono, mail, whatsapp, ig, contactame y las de la lista), con el
  * mismo aviso. Solo esa palabra: «tela», «hotel», «telón», «digital» y
  * «direccional» siguen. La misma regla vive en el cliente y en
  * public.redact_offplatform_contact (SQL).
@@ -16,6 +16,10 @@ export const OFFPLATFORM_REDACTION = '•••';
 
 export const OFFPLATFORM_NOTICE =
   'La dirección y el contacto se comparten por la app después del pago del costo de servicio. Reemplazamos ese dato por •••.';
+
+/** Aviso del perfil del trabajador: no se guarda y no se tapa con «•••». */
+export const OFFPLATFORM_PROFILE_NOTICE =
+  'La dirección y el contacto se comparten por la app después del pago del costo de servicio. En la descripción no podés incluir un teléfono, un mail, una red ni un pedido de contacto.';
 
 export type OffplatformKind =
   | 'telefono'
@@ -894,6 +898,9 @@ function collectAddresses(raw: string, folded: string, spans: Span[], ignored: S
  * «telefono» escrito con letras separadas. Tiene que coincidir con el SQL.
  */
 const CONTACT_WORDS: { word: string; kind: OffplatformKind }[] = [
+  { word: 'contactarme', kind: 'canal' },
+  { word: 'contactenme', kind: 'canal' },
+  { word: 'contactame', kind: 'canal' },
   { word: 'direccion', kind: 'direccion' },
   { word: 'domicilio', kind: 'direccion' },
   { word: 'ubicacion', kind: 'direccion' },

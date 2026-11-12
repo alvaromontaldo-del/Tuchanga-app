@@ -2,10 +2,14 @@
  * El envío no se rechaza. El dato de contacto se reemplaza en
  * `offplatformContact` (cliente y SQL). Estas funciones quedan para no
  * revivir el bloqueo por palabra de #85 ni el rechazo `message_blocked_contact`.
- * Perfiles y publicaciones siguen sin ese filtro.
+ * En el perfil del trabajador y las publicaciones sí se rechaza el
+ * guardado (validateWorkerProfileTexts), sin tapar con «•••».
  */
 
+import { OFFPLATFORM_PROFILE_NOTICE, redactOffplatformContact } from './offplatformContact';
+
 export { OFFPLATFORM_NOTICE as CONTACT_MODERATION_POLICY_MESSAGE } from './offplatformContact';
+export { OFFPLATFORM_PROFILE_NOTICE } from './offplatformContact';
 
 export type ContactModerationMatch = {
   code: string;
@@ -63,15 +67,26 @@ export type WorkerProfileTextModeration = {
   hasViolation: boolean;
 };
 
-/** Perfiles y oficios: sin filtro anti-contacto (#85). */
+function profileTextResult(textRaw: string): ContactModerationResult {
+  if (!redactOffplatformContact(textRaw).changed) return ALLOWED;
+  return {
+    blocked: true,
+    match: { code: 'profile_contact_forbidden' },
+    message: OFFPLATFORM_PROFILE_NOTICE,
+  };
+}
+
+/** Perfil y oficios: no se guarda si hay un dato o un pedido de contacto. */
 export function validateWorkerProfileTexts(
-  _professionalDescription: string,
+  professionalDescription: string,
   tradeDescriptions: string[],
 ): WorkerProfileTextModeration {
+  const professional = profileTextResult(professionalDescription);
+  const trades = tradeDescriptions.map((d) => profileTextResult(d));
   return {
-    professional: ALLOWED,
-    tradeDescriptions: tradeDescriptions.map(() => ALLOWED),
-    hasViolation: false,
+    professional,
+    tradeDescriptions: trades,
+    hasViolation: professional.blocked || trades.some((r) => r.blocked),
   };
 }
 
